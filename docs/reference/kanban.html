@@ -1,0 +1,2349 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agile Board — AI Agents</title>
+<style>
+:root{
+  --bg:#f4f5f7;--surface:#ebecf0;--surface-2:#fff;--text:#172b4d;--text-muted:#5e6c84;
+  --border:#dfe1e6;--accent:#4c6ef5;--accent-contrast:#fff;--shadow:0 1px 2px rgba(9,30,66,.15);
+  --shadow-lg:0 8px 24px rgba(9,30,66,.25);--danger:#e5484d;--ok:#22a06b;--warn:#f59e0b;
+  --radius:10px;--font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+body.dark{
+  --bg:#0e1116;--surface:#161b22;--surface-2:#1c2330;--text:#e6edf3;--text-muted:#93a1b5;
+  --border:#2d333b;--accent:#6ea8fe;--accent-contrast:#0b1020;--shadow:0 1px 2px rgba(0,0,0,.4);
+  --shadow-lg:0 10px 30px rgba(0,0,0,.6);--danger:#f0616b;--ok:#3fb984;--warn:#f5b542;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;font-family:var(--font);background:var(--bg);color:var(--text);display:flex;flex-direction:column;overflow:hidden}
+
+/* HEADER */
+.app-header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--surface-2);border-bottom:1px solid var(--border);flex-wrap:wrap}
+.app-title{font-size:18px;font-weight:700;margin:0;padding:4px 6px;border-radius:6px;cursor:text;white-space:nowrap}
+.app-title:hover{background:var(--surface)}
+.app-title-input{font-size:18px;font-weight:700;font-family:var(--font);border:1px solid var(--accent);border-radius:6px;padding:3px 6px;background:var(--surface-2);color:var(--text);outline:none}
+.header-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap}
+.search-input,.filter-select{height:34px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:13px;outline:none}
+.search-input:focus,.filter-select:focus{border-color:var(--accent)}
+.search-input{min-width:180px}
+.btn{height:34px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;transition:background .15s,border-color .15s,transform .05s;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--accent);color:var(--accent-contrast);border-color:var(--accent)}
+.btn-primary:hover{filter:brightness(1.05)}
+.btn-danger{background:transparent;color:var(--danger);border-color:transparent}
+.btn-danger:hover{background:color-mix(in srgb,var(--danger) 12%,transparent)}
+.btn-ghost{background:transparent}
+.btn-sm{height:28px;padding:0 10px;font-size:12px}
+.btn-icon{width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);cursor:pointer;font-size:16px}
+.btn-icon:hover{border-color:var(--accent)}
+
+/* METRICAS */
+.metrics-bar{display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:8px 16px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:12px;color:var(--text-muted)}
+.metric{display:flex;align-items:baseline;gap:6px}
+.metric b{color:var(--text);font-size:14px}
+.metric-progress{flex:1;min-width:140px;height:8px;border-radius:999px;background:var(--surface);overflow:hidden;max-width:260px}
+.metric-progress>span{display:block;height:100%;background:var(--ok);width:0;transition:width .3s}
+
+/* BOARD/COLUNAS */
+.work-area{flex:1;display:flex;min-height:0;overflow:hidden}
+.board{flex:1;display:flex;gap:12px;padding:14px 16px;overflow-x:auto;overflow-y:hidden;align-items:flex-start}
+
+/* SIDEBAR DE ÉPICOS */
+.epics-sidebar{flex:0 0 280px;display:flex;flex-direction:column;background:var(--surface-2);border-right:1px solid var(--border);overflow:hidden}
+.epics-header{display:flex;align-items:center;justify-content:space-between;padding:12px 12px 8px;border-bottom:1px solid var(--border)}
+.epics-title{font-weight:800;font-size:14px}
+.epics-list{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:10px}
+.epic-card{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--warn);border-radius:10px;padding:10px;cursor:pointer;transition:border-color .15s,transform .05s,box-shadow .15s}
+.epic-card:hover{border-color:var(--accent);box-shadow:var(--shadow)}
+.epic-card:active{transform:translateY(1px)}
+.epic-card.status-todo{border-left-color:var(--text-muted)}
+.epic-card.status-inprogress{border-left-color:var(--accent)}
+.epic-card.status-done{border-left-color:var(--ok)}
+.epic-top{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.epic-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--text-muted)}
+.epic-status{margin-left:auto;font-size:10px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;padding:2px 8px;border-radius:999px;color:#fff}
+.epic-status.status-todo{background:var(--text-muted)}
+.epic-status.status-inprogress{background:var(--accent)}
+.epic-status.status-done{background:var(--ok)}
+.epic-title{font-weight:700;font-size:13px;line-height:1.3;margin-bottom:8px}
+.epic-progress{height:6px;border-radius:999px;background:var(--surface-2);overflow:hidden;margin-bottom:6px}
+.epic-progress>span{display:block;height:100%;background:var(--ok);width:0;transition:width .3s}
+.epic-meta{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-muted)}
+.epic-empty{color:var(--text-muted);font-size:12px;text-align:center;padding:20px 8px}
+.type-fixed{height:34px;display:inline-flex;align-items:center;gap:6px;padding:0 10px;border:1px dashed var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px;font-weight:600}
+.epic-status-inline{margin-left:6px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:2px 8px;border-radius:999px;color:#fff}
+.epic-status-inline.status-todo{background:var(--text-muted)}
+.epic-status-inline.status-inprogress{background:var(--accent)}
+.epic-status-inline.status-done{background:var(--ok)}
+.column{flex:0 0 300px;max-height:100%;background:var(--surface);border-radius:var(--radius);display:flex;flex-direction:column;box-shadow:var(--shadow)}
+.column.drag-over{outline:2px dashed var(--accent);outline-offset:-2px}
+.column-header{display:flex;align-items:center;gap:6px;padding:10px 10px 6px;position:relative}
+.column-title{font-weight:700;font-size:14px;flex:1;cursor:text;padding:2px 4px;border-radius:4px}
+.column-title:hover{background:var(--surface-2)}
+.column-title-input{flex:1;font-weight:700;font-size:14px;font-family:var(--font);border:1px solid var(--accent);border-radius:4px;padding:2px 4px;background:var(--surface-2);color:var(--text);outline:none}
+.column-count{min-width:22px;height:20px;padding:0 6px;border-radius:999px;background:var(--surface-2);color:var(--text-muted);font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.column-count.over-limit{background:var(--danger);color:#fff}
+.column-wip{font-size:11px;color:var(--text-muted)}
+.column-points{font-size:11px;color:var(--text-muted);margin-left:2px}
+.column-menu-btn{border:none;background:transparent;color:var(--text-muted);cursor:pointer;font-size:16px;width:26px;height:26px;border-radius:6px}
+.column-menu-btn:hover{background:var(--surface-2)}
+.column-menu{position:absolute;top:34px;right:8px;z-index:20;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow-lg);min-width:180px;padding:4px}
+.column-menu button{display:block;width:100%;text-align:left;border:none;background:transparent;color:var(--text);padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px}
+.column-menu button:hover{background:var(--surface)}
+.column-menu button.danger{color:var(--danger)}
+.card-list{padding:4px 8px 8px;overflow-y:auto;flex:1;min-height:20px;display:flex;flex-direction:column;gap:8px}
+.add-card-btn{border:none;background:transparent;color:var(--text-muted);text-align:left;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;margin:4px 8px 8px}
+.add-card-btn:hover{background:var(--surface-2);color:var(--text)}
+.add-card-input{background:var(--surface-2);color:var(--text);border:1px solid var(--accent);font-family:var(--font);resize:vertical;cursor:text;margin:4px 8px;padding:8px 10px;border-radius:8px}
+.add-column{flex:0 0 300px;background:color-mix(in srgb,var(--surface) 60%,transparent);border:2px dashed var(--border);border-radius:var(--radius);color:var(--text-muted);font-weight:600;font-size:13px;padding:14px;cursor:pointer;text-align:center}
+.add-column:hover{border-color:var(--accent);color:var(--text)}
+
+/* CARD */
+.card{background:var(--surface-2);border-radius:8px;padding:8px 10px;box-shadow:var(--shadow);cursor:pointer;border-left:4px solid transparent;transition:box-shadow .12s,transform .05s}
+.card:hover{box-shadow:var(--shadow-lg)}
+.card.dragging{opacity:.4}
+.card.type-epic{border-left-color:var(--warn)}
+.card.type-story{border-left-color:var(--accent)}
+.card.type-task{border-left-color:var(--text-muted)}
+.card.blocked{outline:1px solid var(--danger)}
+.card-top{display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap}
+.type-badge{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border-radius:4px}
+.type-badge.epic{background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}
+.type-badge.story{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)}
+.type-badge.task{background:var(--surface);color:var(--text-muted)}
+.card-key{font-size:11px;font-weight:700;color:var(--text-muted)}
+.points-badge{margin-left:auto;min-width:22px;height:20px;padding:0 6px;border-radius:6px;background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent);font-size:12px;font-weight:800;display:inline-flex;align-items:center;justify-content:center}
+.blocked-flag{color:var(--danger);font-size:12px;font-weight:700}
+.card-labels{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px}
+.label-chip{font-size:10px;font-weight:700;color:#fff;padding:2px 8px;border-radius:999px;line-height:1.4;white-space:nowrap}
+.card-title{font-size:13px;line-height:1.35;color:var(--text);white-space:pre-wrap}
+.card-parent{font-size:11px;color:var(--text-muted);margin-top:2px}
+.card-meta{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.card-badge{font-size:11px;color:var(--text-muted);display:inline-flex;align-items:center;gap:2px}
+.card-progress{flex-basis:100%;height:5px;border-radius:999px;background:var(--surface);overflow:hidden}
+.card-progress>span{display:block;height:100%;background:var(--ok)}
+.card-assignees{display:flex;margin-left:auto}
+.avatar{width:24px;height:24px;border-radius:50%;color:#fff;font-size:10px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;border:2px solid var(--surface-2);margin-left:-6px;position:relative}
+.avatar:first-child{margin-left:0}
+.avatar .bot-badge{position:absolute;bottom:-3px;right:-3px;font-size:9px;background:var(--surface-2);border-radius:50%;line-height:1}
+
+/* MODAL */
+/* ===== camada de modais empilhados lado a lado (épico | história | task) ===== */
+#modalLayer{position:fixed;inset:0;z-index:100;background:rgba(9,30,66,.54);animation:fade .15s ease;
+  display:flex;align-items:center;justify-content:center;gap:16px;padding:24px 16px;overflow:hidden}
+#modalLayer.hidden{display:none}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+/* cada painel é uma coluna que rola por dentro (sem scroll no backdrop) */
+.modal-panel{display:none;flex-direction:column;min-height:0}
+.modal-panel.open{display:flex}
+.modal{background:var(--surface-2);width:100%;max-width:640px;border-radius:12px;box-shadow:var(--shadow-lg);
+  animation:pop .15s ease;display:flex;flex-direction:column;max-height:calc(100vh - 48px);overflow:hidden}
+.modal-panel.lvl-task .modal{max-width:560px}
+.modal-panel.lvl-epic .modal{max-width:720px}
+/* quando 3 abertos, encolher um pouco para caber */
+#modalLayer.depth-3 .modal{max-width:min(560px,32vw)}
+@keyframes pop{from{transform:scale(.97);opacity:.6}to{transform:scale(1);opacity:1}}
+@media (max-width:1100px){
+  #modalLayer{gap:8px;padding:16px 8px}
+  #modalLayer.depth-2 .modal,#modalLayer.depth-3 .modal{max-width:48vw}
+}
+/* overlay simples e independente (modal de agentes) */
+.modal-overlay{position:fixed;inset:0;background:rgba(9,30,66,.54);display:flex;align-items:center;justify-content:center;padding:24px 16px;z-index:110;overflow-y:auto;animation:fade .15s ease}
+.modal-overlay.hidden{display:none}
+.modal-header{display:flex;flex-direction:column;padding:16px 16px 8px;flex:0 0 auto}
+.modal-key-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.modal-title-row{display:flex;align-items:flex-start;gap:10px}
+.card-title-input{flex:1;font-size:18px;font-weight:700;font-family:var(--font);border:1px solid transparent;border-radius:6px;padding:6px 8px;background:transparent;color:var(--text);outline:none}
+.card-title-input:hover{background:var(--surface)}
+.card-title-input:focus{background:var(--surface);border-color:var(--accent)}
+.modal-close{border:none;background:transparent;color:var(--text-muted);font-size:18px;cursor:pointer;width:32px;height:32px;border-radius:6px;flex:0 0 auto}
+.modal-close:hover{background:var(--surface)}
+.modal-body{padding:8px 16px 16px;overflow-y:auto;overflow-x:hidden;flex:1 1 auto;min-height:0}
+/* scrollbar bonita dentro do corpo do modal (não fica sobre outros modais) */
+.modal-body{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--text-muted) 45%,transparent) transparent}
+.modal-body::-webkit-scrollbar{width:8px}
+.modal-body::-webkit-scrollbar-track{background:transparent;margin:4px 0}
+.modal-body::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--text-muted) 40%,transparent);border-radius:999px;border:2px solid transparent;background-clip:padding-box}
+.modal-body::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--text-muted) 65%,transparent);background-clip:padding-box;border:2px solid transparent}
+.modal-section{margin-bottom:18px}
+.modal-section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.field-row{display:flex;gap:12px;flex-wrap:wrap}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:11px;color:var(--text-muted);font-weight:700}
+.select-inline,.card-desc-input,.criteria-input{border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-family:var(--font);font-size:13px;padding:8px 10px;outline:none}
+.select-inline:focus,.card-desc-input:focus,.criteria-input:focus{border-color:var(--accent)}
+.card-desc-input{width:100%;resize:vertical}
+.label-editor,.assignee-editor{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.label-option,.assignee-option{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px;font-weight:600;cursor:pointer;position:relative}
+.label-option .swatch{width:10px;height:10px;border-radius:50%}
+.label-option.selected,.assignee-option.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.label-option .del,.assignee-option .del{border:none;background:transparent;color:var(--text-muted);cursor:pointer;font-size:12px;padding:0 2px;border-radius:4px}
+.label-option .del:hover,.assignee-option .del:hover{color:var(--danger);background:color-mix(in srgb,var(--danger) 14%,transparent)}
+.assignee-option .mini-avatar{width:18px;height:18px;border-radius:50%;color:#fff;font-size:9px;font-weight:800;display:inline-flex;align-items:center;justify-content:center}
+.checklist{display:flex;flex-direction:column;gap:6px}
+.check-item{display:flex;align-items:center;gap:8px}
+.check-item input[type=checkbox]{width:16px;height:16px;accent-color:var(--ok);flex:0 0 auto}
+.check-item .txt{flex:1;font-size:13px}
+.check-item .txt.done{text-decoration:line-through;color:var(--text-muted)}
+.check-item .del-check{border:none;background:transparent;color:var(--text-muted);cursor:pointer;border-radius:4px}
+.check-item .del-check:hover{color:var(--danger)}
+.add-check-row{display:flex;gap:6px;margin-top:4px}
+.add-check-row input{flex:1}
+.children-list{display:flex;flex-direction:column;gap:4px}
+.child-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;background:var(--surface);font-size:13px;cursor:pointer}
+.child-row:hover{background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
+.child-row .child-type{font-size:10px;font-weight:800;text-transform:uppercase;color:var(--text-muted)}
+.child-row .child-status{margin-left:auto;font-size:11px;color:var(--text-muted)}
+/* mini-kanban de tasks dentro do modal da história */
+.task-board{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px}
+.task-col{flex:0 0 190px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:6px}
+.task-col-head{display:flex;align-items:center;gap:6px}
+.task-col-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.4px}
+.task-col-count{font-size:11px;color:var(--text-muted);background:var(--bg);border-radius:10px;padding:0 6px}
+.task-col-acts{margin-left:auto;display:flex;gap:2px}
+.tcol-btn{border:none;background:transparent;color:var(--text-muted);cursor:pointer;font-size:13px;line-height:1;padding:2px 4px;border-radius:6px}
+.tcol-btn:hover{background:var(--bg);color:var(--text)}
+.tcol-btn.danger:hover{background:#ef444422;color:#ef4444}
+.task-list{display:flex;flex-direction:column;gap:6px;min-height:24px;border-radius:8px;transition:background .12s}
+.task-list.drag-over{background:color-mix(in srgb,var(--accent) 14%,transparent);outline:2px dashed var(--accent)}
+.task-card{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:7px 8px;cursor:grab;font-size:12px}
+.task-card:hover{border-color:var(--accent)}
+.task-card.dragging{opacity:.5}
+.task-card.blocked{border-color:#ef4444}
+.task-card-top{display:flex;align-items:center;gap:5px}
+.task-card-top .card-key{font-size:10px}
+.task-card-title{margin-top:3px}
+.task-add{border:1px dashed var(--border);background:transparent;color:var(--text-muted);border-radius:8px;padding:5px;cursor:pointer;font-size:12px}
+.task-add:hover{color:var(--text);border-color:var(--accent)}
+.task-add-input{width:100%;resize:vertical;border:1px solid var(--accent);border-radius:8px;padding:6px;font-size:12px;font-family:inherit;background:var(--bg);color:var(--text)}
+.task-col-add{flex:0 0 auto;align-self:flex-start;border:1px dashed var(--border);background:transparent;color:var(--text-muted);border-radius:10px;padding:8px 12px;cursor:pointer;font-size:12px;height:fit-content}
+.task-col-add:hover{color:var(--text);border-color:var(--accent)}
+.comment-list,.activity-list{display:flex;flex-direction:column;gap:8px}
+.comment{display:flex;gap:8px}
+.comment .mini-avatar{width:26px;height:26px;border-radius:50%;color:#fff;font-size:10px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+.comment-body{background:var(--surface);border-radius:8px;padding:6px 10px;flex:1}
+.comment-author{font-weight:700;font-size:12px}
+.comment-time,.activity-time{font-size:11px;color:var(--text-muted);margin-left:6px}
+.comment-text{font-size:13px;white-space:pre-wrap;margin-top:2px}
+.comment-form{display:flex;gap:8px;margin-top:8px}
+.comment-input{flex:1;border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface-2);color:var(--text);font-family:var(--font);outline:none}
+.comment-input:focus{border-color:var(--accent)}
+.activity-item{font-size:12px;color:var(--text-muted)}
+.activity-item b{color:var(--text);font-weight:600}
+.modal-footer{display:flex;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--border);flex:0 0 auto}
+.modal-footer .spacer{flex:1}
+.hidden{display:none!important}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:200}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--text-muted) 40%,transparent);border-radius:999px}
+::-webkit-scrollbar-track{background:transparent}
+@media (max-width:768px){.column,.add-column{flex-basis:260px}.search-input{min-width:120px}}
+@media (max-width:480px){.app-title{font-size:16px}.modal-overlay{padding:16px 8px}}
+
+/* ---- AI execution / diário ---- */
+.ai-exec-row{display:flex;gap:10px;align-items:flex-end;margin-bottom:8px}
+.exec-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;padding:4px 9px;border-radius:999px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
+.exec-badge.st-idle{background:color-mix(in srgb,var(--text-muted) 22%,transparent);color:var(--text-muted)}
+.exec-badge.st-analyzing{background:color-mix(in srgb,#f59f00 25%,transparent);color:#b07500}
+.exec-badge.st-implementing{background:color-mix(in srgb,var(--accent) 25%,transparent);color:var(--accent)}
+.exec-badge.st-validating{background:color-mix(in srgb,#7048e8 28%,transparent);color:#7048e8}
+.exec-badge.st-blocked{background:color-mix(in srgb,#e03131 26%,transparent);color:#e03131}
+.exec-badge.st-done{background:color-mix(in srgb,#2f9e44 28%,transparent);color:#2f9e44}
+.ai-exec-controls{display:flex;gap:8px;margin:8px 0}
+.ai-derived,.ai-deps{font-size:12px;background:var(--surface);border-radius:8px;padding:6px 10px;margin-bottom:6px;color:var(--text-muted)}
+.ai-derived a,.ai-deps a{color:var(--accent);cursor:pointer;font-weight:700;text-decoration:none}
+.ai-derived a:hover,.ai-deps a:hover{text-decoration:underline}
+.diary{display:flex;flex-direction:column;gap:0;margin-top:6px;border-left:2px solid var(--border);padding-left:0}
+.diary-empty{font-size:12px;color:var(--text-muted);padding:6px 0 6px 12px}
+.iter{position:relative;padding:8px 8px 10px 20px;margin-left:0}
+.iter::before{content:'';position:absolute;left:-5px;top:12px;width:8px;height:8px;border-radius:50%;background:var(--accent);border:2px solid var(--surface-2)}
+.iter-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.iter-phase{font-size:11px;font-weight:800;padding:2px 7px;border-radius:6px;background:var(--surface);text-transform:uppercase;letter-spacing:.3px}
+.iter-idx{font-size:11px;color:var(--text-muted);font-weight:700}
+.iter-agent{font-size:11px;color:var(--text-muted)}
+.iter-summary{font-size:13px;font-weight:600;margin-top:4px}
+.iter-detail{font-size:12px;color:var(--text-muted);white-space:pre-wrap;margin-top:2px}
+.iter-next{font-size:12px;margin-top:5px;padding:5px 8px;background:color-mix(in srgb,var(--accent) 10%,transparent);border-radius:6px}
+.iter-next b{color:var(--accent)}
+.iter-dods{font-size:11px;color:#2f9e44;margin-top:4px;font-weight:600}
+.flows-list{display:flex;flex-direction:column;gap:6px}
+.flow-item{background:var(--surface);border-radius:8px;padding:8px 10px}
+.flow-top{display:flex;align-items:center;gap:6px}
+.flow-name{flex:1;font-size:13px;font-weight:700;border:none;background:transparent;color:var(--text);outline:none;font-family:var(--font)}
+.flow-files{width:100%;margin-top:5px;font-size:12px;border:1px solid var(--border);border-radius:6px;padding:4px 7px;background:var(--surface-2);color:var(--text-muted);font-family:var(--font);outline:none}
+.flow-files:focus{border-color:var(--accent)}
+.flow-del{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px}
+.flow-del:hover{color:#e03131}
+</style>
+</head>
+<body>
+<header class="app-header">
+  <h1 class="app-title" id="boardTitle" title="Duplo clique para renomear">Sprint Board</h1>
+  <div class="header-actions">
+    <input class="search-input" id="searchInput" type="search" placeholder="Buscar cards…" aria-label="Buscar cards">
+    <select class="filter-select" id="filterType" aria-label="Filtrar por tipo">
+      <option value="">Histórias e Tasks</option>
+      <option value="story">Só Histórias</option>
+      <option value="task">Só Tasks</option>
+    </select>
+    <select class="filter-select" id="filterLabel" aria-label="Filtrar por label"><option value="">Todas as labels</option></select>
+    <select class="filter-select" id="filterAssignee" aria-label="Filtrar por agente"><option value="">Todos os agentes</option></select>
+    <button class="btn btn-ghost" id="manageAgentsBtn" title="Gerenciar agentes responsáveis">🤖 Agentes</button>
+    <button class="btn btn-ghost" id="manageLoopsBtn" title="Gerenciar perfis de loop das AIs">🔁 Loops</button>
+    <button class="btn btn-ghost" id="addColumnBtn">+ Coluna</button>
+    <button class="btn btn-ghost" id="exportBtn" title="Exportar JSON">⤓ Export</button>
+    <button class="btn btn-ghost" id="importBtn" title="Importar JSON">⤒ Import</button>
+    <input type="file" id="importFile" accept="application/json" class="hidden">
+    <button class="btn btn-ghost" id="resetBtn" title="Restaurar exemplo">↺ Reset</button>
+    <button class="btn-icon theme-toggle" id="themeToggle" title="Alternar tema" aria-label="Alternar tema">🌙</button>
+  </div>
+</header>
+
+<div class="metrics-bar" id="metricsBar">
+  <div class="metric"><span>Épicos</span><b id="mEpics">0</b></div>
+  <div class="metric"><span>Histórias</span><b id="mStories">0</b></div>
+  <div class="metric"><span>Tasks</span><b id="mTasks">0</b></div>
+  <div class="metric"><span>Pontos concluídos</span><b id="mDonePts">0</b><span>/</span><b id="mTotalPts">0</b></div>
+  <div class="metric-progress" title="Progresso da sprint (story points)"><span id="mProgressBar"></span></div>
+  <div class="metric"><span>Bloqueados</span><b id="mBlocked">0</b></div>
+</div>
+
+<div class="work-area">
+  <aside class="epics-sidebar" id="epicsSidebar">
+    <div class="epics-header">
+      <span class="epics-title">🎯 Épicos</span>
+      <button class="btn btn-primary btn-sm" id="addEpicBtn" title="Criar novo épico">+ Épico</button>
+    </div>
+    <div class="epics-list" id="epicsList"><!-- épicos via JS --></div>
+  </aside>
+  <main class="board" id="board"><!-- colunas via JS --></main>
+</div>
+
+<!-- MODAL DO CARD -->
+<div id="modalLayer" class="hidden">
+<div class="modal-panel lvl-epic" id="cardModal" role="dialog" aria-modal="true" aria-label="Detalhe do épico">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-key-row">
+        <span class="type-badge" id="mTypeBadge">TASK</span>
+        <span class="card-key" id="mKey">—</span>
+        <span class="blocked-flag hidden" id="mBlockedFlag">⛔ BLOQUEADO</span>
+      </div>
+      <div class="modal-title-row">
+        <input class="card-title-input" id="mTitle" placeholder="Título do card">
+        <button class="modal-close" id="mClose" aria-label="Fechar">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <!-- Meta: tipo, pontos, pai, bloqueio -->
+      <div class="modal-section">
+        <div class="field-row">
+          <div class="field">
+            <label>Tipo</label>
+            <div class="type-fixed" id="mTypeFixed">—</div>
+          </div>
+          <div class="field" id="mPointsField">
+            <label for="mPoints">Story Points</label>
+            <select class="select-inline" id="mPoints">
+              <option value="">—</option>
+              <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+              <option value="5">5</option><option value="8">8</option><option value="13">13</option>
+            </select>
+          </div>
+          <div class="field" id="mParentField">
+            <label for="mParent">Pai (Épico/História)</label>
+            <select class="select-inline" id="mParent"><option value="">— nenhum —</option></select>
+          </div>
+          <div class="field">
+            <label for="mBlocked">Bloqueado?</label>
+            <select class="select-inline" id="mBlocked">
+              <option value="false">Não</option>
+              <option value="true">Sim</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Descrição</div>
+        <textarea class="card-desc-input" id="mDesc" rows="3" placeholder="Como um <usuário>, quero <objetivo>, para <benefício>…"></textarea>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Labels</div>
+        <div class="label-editor" id="mLabels"></div>
+        <button class="btn btn-ghost btn-sm" id="mAddLabelBtn" style="margin-top:6px">+ Nova label</button>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">🤖 Agentes responsáveis</div>
+        <div class="assignee-editor" id="mAssignees"></div>
+        <button class="btn btn-ghost btn-sm" id="mAddAgentBtn" style="margin-top:6px">+ Novo agente</button>
+      </div>
+
+      <!-- Subitens (hierarquia) -->
+      <div class="modal-section" id="mChildrenSection">
+        <div class="modal-section-title"><span id="mChildrenLabel">Subitens</span> <span class="check-progress-label" id="mChildrenProgress"></span></div>
+        <div class="children-list" id="mChildren"></div>
+        <div class="add-check-row">
+          <input class="criteria-input" id="mChildInput" placeholder="Título do subitem…">
+          <button class="btn btn-ghost btn-sm" id="mAddChildBtn">+ Adicionar</button>
+        </div>
+      </div>
+
+      <!-- Critérios de aceite -->
+      <div class="modal-section">
+        <div class="modal-section-title">Critérios de Aceite <span class="check-progress-label" id="mAcProgress"></span></div>
+        <div class="checklist" id="mAcceptance"></div>
+        <div class="add-check-row">
+          <input class="criteria-input" id="mAcInput" placeholder="Given/When/Then…">
+          <button class="btn btn-ghost btn-sm" id="mAddAcBtn">+ Adicionar</button>
+        </div>
+      </div>
+
+      <!-- DOD -->
+      <div class="modal-section">
+        <div class="modal-section-title">Definition of Done (DOD) <span class="check-progress-label" id="mDodProgress"></span></div>
+        <div class="checklist" id="mDod"></div>
+        <div class="add-check-row">
+          <input class="criteria-input" id="mDodInput" placeholder="Critério de concluído…">
+          <button class="btn btn-ghost btn-sm" id="mAddDodBtn">+ Adicionar</button>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Comentários</div>
+        <div class="comment-list" id="mComments"></div>
+        <form class="comment-form" id="mCommentForm">
+          <input class="comment-input" id="mCommentInput" placeholder="Escreva um comentário…" autocomplete="off">
+          <button class="btn btn-primary btn-sm" type="submit">Enviar</button>
+        </form>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Atividade</div>
+        <div class="activity-list" id="mActivity"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="mDelete">Excluir card</button>
+      <span class="spacer"></span>
+      <button class="btn btn-primary" id="mDone">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DA TASK (abre AO LADO) -->
+<div class="modal-panel lvl-task" id="taskModal" role="dialog" aria-modal="false" aria-label="Detalhe da task">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-key-row">
+        <span class="type-badge" id="tTypeBadge">TASK</span>
+        <span class="card-key" id="tKey">—</span>
+        <span class="blocked-flag hidden" id="tBlockedFlag">⛔ BLOQUEADO</span>
+      </div>
+      <div class="modal-title-row">
+        <input class="card-title-input" id="tTitle" placeholder="Título da task">
+        <button class="modal-close" id="tClose" aria-label="Fechar task">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-section">
+        <div class="field-row">
+          <div class="field">
+            <label>Tipo</label>
+            <div class="type-fixed" id="tTypeFixed">—</div>
+          </div>
+          <div class="field" id="tPointsField">
+            <label for="tPoints">Story Points</label>
+            <select class="select-inline" id="tPoints">
+              <option value="">—</option>
+              <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+              <option value="5">5</option><option value="8">8</option><option value="13">13</option>
+            </select>
+          </div>
+          <div class="field" id="tParentField">
+            <label for="tParent">História pai</label>
+            <select class="select-inline" id="tParent"><option value="">— nenhum —</option></select>
+          </div>
+          <div class="field">
+            <label for="tBlocked">Bloqueado?</label>
+            <select class="select-inline" id="tBlocked">
+              <option value="false">Não</option>
+              <option value="true">Sim</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Descrição</div>
+        <textarea class="card-desc-input" id="tDesc" rows="3" placeholder="Descrição da task…"></textarea>
+      </div>
+
+      <div class="modal-section" id="tAiSection">
+        <div class="modal-section-title">🤖 Execução autônoma</div>
+        <div class="ai-exec-row">
+          <span class="exec-badge" id="tExecBadge">—</span>
+          <div class="field" style="flex:1">
+            <label for="tLoopType">Tipo de loop</label>
+            <select class="select-inline" id="tLoopType"></select>
+          </div>
+        </div>
+        <div class="ai-derived" id="tDerivedFrom" style="display:none"></div>
+        <div class="ai-deps" id="tDeps" style="display:none"></div>
+        <div class="ai-exec-controls">
+          <button class="btn btn-ghost btn-sm" id="tStepBtn">▶ Rodar 1 iteração</button>
+          <button class="btn btn-primary btn-sm" id="tAutoBtn">⏩ Auto-play</button>
+        </div>
+        <div class="diary" id="tDiary"></div>
+      </div>
+
+
+      <div class="modal-section">
+        <div class="modal-section-title">Labels</div>
+        <div class="label-editor" id="tLabels"></div>
+        <button class="btn btn-ghost btn-sm" id="tAddLabelBtn" style="margin-top:6px">+ Nova label</button>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">🤖 Agentes responsáveis</div>
+        <div class="assignee-editor" id="tAssignees"></div>
+        <button class="btn btn-ghost btn-sm" id="tAddAgentBtn" style="margin-top:6px">+ Novo agente</button>
+      </div>
+
+      <div class="modal-section" id="tChildrenSection" style="display:none">
+        <div class="modal-section-title"><span id="tChildrenLabel"></span> <span class="check-progress-label" id="tChildrenProgress"></span></div>
+        <div class="children-list" id="tChildren"></div>
+        <div class="add-check-row">
+          <input class="criteria-input" id="tChildInput">
+          <button class="btn btn-ghost btn-sm" id="tAddChildBtn">+ Adicionar</button>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Critérios de Aceite <span class="check-progress-label" id="tAcProgress"></span></div>
+        <div class="checklist" id="tAcceptance"></div>
+        <div class="add-check-row">
+          <input class="criteria-input" id="tAcInput" placeholder="Given/When/Then…">
+          <button class="btn btn-ghost btn-sm" id="tAddAcBtn">+ Adicionar</button>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Definition of Done (DOD) <span class="check-progress-label" id="tDodProgress"></span></div>
+        <div class="checklist" id="tDod"></div>
+        <div class="add-check-row">
+          <input class="criteria-input" id="tDodInput" placeholder="Critério de concluído…">
+          <button class="btn btn-ghost btn-sm" id="tAddDodBtn">+ Adicionar</button>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Comentários</div>
+        <div class="comment-list" id="tComments"></div>
+        <form class="comment-form" id="tCommentForm">
+          <input class="comment-input" id="tCommentInput" placeholder="Escreva um comentário…" autocomplete="off">
+          <button class="btn btn-primary btn-sm" type="submit">Enviar</button>
+        </form>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Atividade</div>
+        <div class="activity-list" id="tActivity"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="tDelete">Excluir task</button>
+      <span class="spacer"></span>
+      <button class="btn btn-primary" id="tDone">Fechar task</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DA HISTÓRIA (abre AO LADO do épico; contém sub-kanban de tasks) -->
+<div class="modal-panel lvl-story" id="storyModal" role="dialog" aria-modal="false" aria-label="Detalhe da história">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-key-row">
+        <span class="type-badge" id="sTypeBadge">STORY</span>
+        <span class="card-key" id="sKey">—</span>
+        <span class="blocked-flag hidden" id="sBlockedFlag">⛔ BLOQUEADO</span>
+      </div>
+      <div class="modal-title-row">
+        <input class="card-title-input" id="sTitle" placeholder="Título da história">
+        <button class="modal-close" id="sClose" aria-label="Fechar história">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-section">
+        <div class="field-row">
+          <div class="field">
+            <label>Tipo</label>
+            <div class="type-fixed" id="sTypeFixed">—</div>
+          </div>
+          <div class="field" id="sPointsField">
+            <label for="sPoints">Story Points</label>
+            <select class="select-inline" id="sPoints">
+              <option value="">—</option>
+              <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+              <option value="5">5</option><option value="8">8</option><option value="13">13</option>
+            </select>
+          </div>
+          <div class="field" id="sParentField">
+            <label for="sParent">Épico pai</label>
+            <select class="select-inline" id="sParent"><option value="">— nenhum —</option></select>
+          </div>
+          <div class="field">
+            <label for="sBlocked">Bloqueado?</label>
+            <select class="select-inline" id="sBlocked">
+              <option value="false">Não</option>
+              <option value="true">Sim</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Descrição</div>
+        <textarea class="card-desc-input" id="sDesc" rows="3" placeholder="Como um <usuário>, quero <objetivo>, para <benefício>…"></textarea>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Labels</div>
+        <div class="label-editor" id="sLabels"></div>
+        <button class="btn btn-ghost btn-sm" id="sAddLabelBtn" style="margin-top:6px">+ Nova label</button>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">🤖 Agentes responsáveis</div>
+        <div class="assignee-editor" id="sAssignees"></div>
+        <button class="btn btn-ghost btn-sm" id="sAddAgentBtn" style="margin-top:6px">+ Novo agente</button>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">🧠 Contexto da AI</div>
+        <div class="field" style="margin-bottom:8px">
+          <label for="sAiSummary">Resumo (o que a história entrega)</label>
+          <textarea class="card-desc-input" id="sAiSummary" rows="2" placeholder="Resumo objetivo para orientar o agente…"></textarea>
+        </div>
+        <div class="field" style="margin-bottom:8px">
+          <label for="sAiProject">Projeto / repositório alvo</label>
+          <input class="criteria-input" id="sAiProject" placeholder="ex.: uh-openxchange-provisioner-api">
+        </div>
+        <div class="field">
+          <label for="sAiNotes">Notas / cuidados</label>
+          <textarea class="card-desc-input" id="sAiNotes" rows="2" placeholder="Efeitos colaterais, cuidados, restrições…"></textarea>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">🌊 Fluxos afetados <span class="check-progress-label" id="sFlowsCount"></span></div>
+        <div class="flows-list" id="sFlows"></div>
+        <div class="add-check-row">
+          <input class="criteria-input" id="sFlowInput" placeholder="Nome do fluxo (ex.: Cadastro de caixa)…">
+          <button class="btn btn-ghost btn-sm" id="sAddFlowBtn">+ Adicionar fluxo</button>
+        </div>
+      </div>
+
+      <div class="modal-section" id="sChildrenSection">
+        <div class="modal-section-title"><span id="sChildrenLabel">Tasks</span> <span class="check-progress-label" id="sChildrenProgress"></span></div>
+        <div class="children-list" id="sChildren"></div>
+        <div class="add-check-row">
+          <input class="criteria-input" id="sChildInput">
+          <button class="btn btn-ghost btn-sm" id="sAddChildBtn">+ Adicionar</button>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Critérios de Aceite <span class="check-progress-label" id="sAcProgress"></span></div>
+        <div class="checklist" id="sAcceptance"></div>
+        <div class="add-check-row">
+          <input class="criteria-input" id="sAcInput" placeholder="Given/When/Then…">
+          <button class="btn btn-ghost btn-sm" id="sAddAcBtn">+ Adicionar</button>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Definition of Done (DOD) <span class="check-progress-label" id="sDodProgress"></span></div>
+        <div class="checklist" id="sDod"></div>
+        <div class="add-check-row">
+          <input class="criteria-input" id="sDodInput" placeholder="Critério de concluído…">
+          <button class="btn btn-ghost btn-sm" id="sAddDodBtn">+ Adicionar</button>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Comentários</div>
+        <div class="comment-list" id="sComments"></div>
+        <form class="comment-form" id="sCommentForm">
+          <input class="comment-input" id="sCommentInput" placeholder="Escreva um comentário…" autocomplete="off">
+          <button class="btn btn-primary btn-sm" type="submit">Enviar</button>
+        </form>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Atividade</div>
+        <div class="activity-list" id="sActivity"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="sDelete">Excluir história</button>
+      <span class="spacer"></span>
+      <button class="btn btn-primary" id="sDone">Fechar história</button>
+    </div>
+  </div>
+</div>
+</div><!-- /#modalLayer -->
+
+<!-- MODAL GERENCIAR AGENTES -->
+<div class="modal-overlay hidden" id="agentsModal" role="dialog" aria-modal="true" aria-label="Gerenciar agentes">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <div class="modal-title-row">
+        <h2 class="card-title-input" style="pointer-events:none">🤖 Agentes autônomos</h2>
+        <button class="modal-close" id="agentsClose" aria-label="Fechar">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-section">
+        <div class="modal-section-title">Agentes cadastrados</div>
+        <div class="assignee-editor" id="agentsList" style="flex-direction:column;align-items:stretch;gap:8px"></div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-title">Adicionar agente</div>
+        <div class="add-check-row">
+          <input class="criteria-input" id="newAgentName" placeholder="Nome do agente (ex: Claude-Dev)">
+          <button class="btn btn-primary btn-sm" id="newAgentBtn">Adicionar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL GERENCIAR LOOPS -->
+<div class="modal-overlay hidden" id="loopsModal" role="dialog" aria-modal="true" aria-label="Gerenciar perfis de loop">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <div class="modal-title-row">
+        <h2 class="card-title-input" style="pointer-events:none">🔁 Perfis de loop</h2>
+        <button class="modal-close" id="loopsClose" aria-label="Fechar">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-section">
+        <div class="modal-section-title">Perfis</div>
+        <div id="loopsList" style="display:flex;flex-direction:column;gap:10px"></div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-title">Novo perfil</div>
+        <div class="add-check-row">
+          <input class="criteria-input" id="newLoopName" placeholder="Nome (ex.: Hotfix, Spike, Docs)">
+          <button class="btn btn-primary btn-sm" id="newLoopBtn">Criar</button>
+        </div>
+        <div class="diary-empty" style="padding-left:0">Fases separadas por vírgula: reproduce, analysis, implementation, validation. A última é sempre a validação (teste de mesa dos fluxos).</div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-title">Labels → perfil de loop</div>
+        <div id="loopsLabelMap" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+(function(){
+  'use strict';
+  const STORAGE_KEY = 'agile.board.v2';
+  const CREATE_ALLOWED = ['backlog','to do','todo','a fazer']; // colunas onde é permitido criar card
+  const TYPE_META = {
+    epic:  { label:'Épico',   badge:'EPIC',  emoji:'🎯' },
+    story: { label:'História', badge:'STORY', emoji:'📗' },
+    task:  { label:'Task',    badge:'TASK',  emoji:'✔️' }
+  };
+  const LABEL_PALETTE = ['#e5484d','#3b82f6','#8b5cf6','#0ea5e9','#f59e0b','#22a06b','#ec4899','#14b8a6'];
+  const AGENT_PALETTE = ['#4c6ef5','#22a06b','#e5484d','#f59e0b','#8b5cf6','#0ea5e9','#ec4899'];
+
+  // ----- perfis de loop embutidos (feature/bug/refactor) + default genérico -----
+  // cada fase é um passo do loop; a fase "validation" é a iteração FINAL (teste de mesa dos fluxos)
+  const BUILTIN_LOOP_PROFILES = {
+    feature: {
+      id:'feature', name:'Feature', builtin:true,
+      description:'Análise → implementação → validação de fluxos novos + regressão.',
+      phases:['analysis','implementation','validation'],
+      validation:'flows+regression',
+      firstStep:'Entender o quê, onde mexer e efeitos colaterais.'
+    },
+    bug: {
+      id:'bug', name:'Bug', builtin:true,
+      description:'Reproduzir a causa raiz → corrigir → validar que o bug sumiu + regressão.',
+      phases:['reproduce','analysis','implementation','validation'],
+      validation:'bug-gone+regression',
+      firstStep:'Reproduzir o bug e isolar a causa raiz antes de corrigir.'
+    },
+    refactor: {
+      id:'refactor', name:'Refactor', builtin:true,
+      description:'Análise → execução → validação apenas de regressão (comportamento não muda).',
+      phases:['analysis','implementation','validation'],
+      validation:'regression-only',
+      firstStep:'Mapear o que será refatorado sem alterar comportamento observável.'
+    },
+    __default: {
+      id:'__default', name:'Genérico', builtin:true,
+      description:'Loop padrão para labels sem perfil próprio.',
+      phases:['analysis','implementation','validation'],
+      validation:'flows+regression',
+      firstStep:'Entender a tarefa, onde mexer e os efeitos colaterais.'
+    }
+  };
+  const PHASE_META = {
+    reproduce:      { label:'Reproduzir',   emoji:'🔁' },
+    analysis:       { label:'Análise',      emoji:'🔎' },
+    implementation: { label:'Implementação',emoji:'🛠️' },
+    validation:     { label:'Validação',    emoji:'🧪' }
+  };
+  const EXEC_STATE_META = {
+    idle:          { label:'Ocioso',              cls:'idle' },
+    analyzing:     { label:'Analisando',          cls:'analyzing' },
+    implementing:  { label:'Implementando',       cls:'implementing' },
+    validating:    { label:'Validando',           cls:'validating' },
+    'blocked-dep': { label:'Bloqueada (derivada)',cls:'blocked' },
+    done:          { label:'Concluída',           cls:'done' }
+  };
+
+  const $ = (s, r=document) => r.querySelector(s);
+  const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+  const id = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(36).slice(2,8));
+
+  let state = null;
+  let openCardId = null;
+  let seq = 0; // para chaves tipo EPP-12
+
+  // ------------------------------------------------------------- helpers
+  function save(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){ showToast('Falha ao salvar'); } }
+  function nextKey(type){
+    seq = (state.seq || 0) + 1; state.seq = seq;
+    const prefix = type==='epic' ? 'EP' : type==='story' ? 'US' : 'TK';
+    return prefix + '-' + seq;
+  }
+  function relativeTime(ts){
+    const d = Date.now()-ts, s=Math.floor(d/1000);
+    if(s<60) return 'agora'; const m=Math.floor(s/60); if(m<60) return `há ${m} min`;
+    const h=Math.floor(m/60); if(h<24) return `há ${h} h`; const dd=Math.floor(h/24);
+    if(dd<7) return `há ${dd} d`; return new Date(ts).toLocaleDateString('pt-BR');
+  }
+  function initials(name){ return name.split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase(); }
+  function isBot(a){ return a && a.type==='bot'; }
+  function getColumn(cid){ return state.columns.find(c=>c.id===cid); }
+  function getCard(cid){ return state.cards[cid]; }
+  function columnOf(cardId){ return state.columns.find(c=>c.cardIds.includes(cardId)); }
+  function creationAllowed(col){ return CREATE_ALLOWED.includes((col.title||'').trim().toLowerCase()); }
+  function isDoneColumn(col){ return (col.title||'').trim().toLowerCase()==='done' || (col.title||'').trim().toLowerCase()==='concluído'; }
+  // fluxo simples e imutável das histórias: To Do -> In Progress -> Review -> Done
+  const STORY_FLOW = ['to do','todo','a fazer','in progress','em progresso','fazendo','review','revisão','em revisão','done','concluído'];
+  const INPROGRESS_OR_BEYOND = ['in progress','em progresso','fazendo','review','revisão','em revisão','done','concluído'];
+  const PROTECTED_TASK_COLS = ['to do','todo','a fazer','in progress','em progresso','review','revisão','done','concluído'];
+  // ------ helpers do fluxo de tasks (mini-kanban dentro da story) ------
+  function taskCol(tcid){ return (state.taskColumns||[]).find(t=>t.id===tcid); }
+  function isTaskDoneCol(tc){ return tc && ((tc.title||'').trim().toLowerCase()==='done' || (tc.title||'').trim().toLowerCase()==='concluído'); }
+  function tasksOf(storyId){ return Object.values(state.cards).filter(c=>c.type==='task' && c.parentId===storyId); }
+  function taskDoneColId(){ const tc=(state.taskColumns||[]).find(t=>isTaskDoneCol(t)); return tc? tc.id : (state.taskColumns[state.taskColumns.length-1]||{}).id; }
+  function firstTaskColId(){ return (state.taskColumns[0]||{}).id; }
+  // todas as tasks da story estão em Done? (story sem task => true, não trava)
+  function allTasksDone(storyId){ const ts=tasksOf(storyId); if(!ts.length) return true; const dc=taskDoneColId(); return ts.every(t=>t.taskColId===dc); }
+  function colName(col){ return (col&&col.title||'').trim().toLowerCase(); }
+  // a história "passou por" In Progress se está em In Progress, Review ou Done
+  function reachedInProgress(col){ return INPROGRESS_OR_BEYOND.includes(colName(col)); }
+  // status derivado do épico a partir das histórias filhas (regra do usuário):
+  //  - Done: quando TODAS as histórias estão em Done
+  //  - In Progress: quando ao menos 1 história já passou por / está em In Progress
+  //  - To Do: caso contrário
+  function deriveEpicStatus(epic){
+    const stories = childrenOf(epic.id).filter(c=>c.type==='story');
+    if(!stories.length) return { key:'todo', label:'To Do', done:0, total:0 };
+    const total = stories.length;
+    const doneN = stories.filter(s=>isDoneColumn(columnOf(s.id))).length;
+    if(doneN===total) return { key:'done', label:'Done', done:doneN, total };
+    const anyInProgress = stories.some(s=> s.everInProgress || reachedInProgress(columnOf(s.id)) );
+    if(anyInProgress) return { key:'inprogress', label:'In Progress', done:doneN, total };
+    return { key:'todo', label:'To Do', done:doneN, total };
+  }
+  function log(card, text){ card.activity.unshift({ id:id(), text, ts:Date.now() }); }
+
+  // ============================================================= MOTOR DE AI (mock)
+  // Camada de eventos WS-ready: hoje re-renderiza local; amanhã vira push via WebSocket.
+  const engineListeners = [];
+  function onEngineEvent(fn){ engineListeners.push(fn); }
+  function emit(type, payload){
+    const evt = { type, payload, ts:Date.now() };
+    engineListeners.forEach(fn=>{ try{ fn(evt); }catch(e){} });
+  }
+  // reação padrão do mock aos eventos: persistir + re-render (no real, o WS empurra p/ UI)
+  onEngineEvent(()=>{ save(); render(); renderModal(); });
+
+  // ---- helpers de dependência / ordem topológica (serial) ----
+  function taskDeps(task){ return (task.dependsOn||[]).map(getCard).filter(Boolean); }
+  function taskDepsPending(task){ return taskDeps(task).filter(d=>d.execState!=='done'); }
+  function taskReady(task){ return task.type==='task' && task.execState!=='done' && taskDepsPending(task).length===0; }
+  // próxima task a rodar numa história: 1ª "pronta" (deps done) em ordem estável de criação
+  function pickNextTask(storyId){
+    const tasks = tasksOf(storyId).slice().sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+    return tasks.find(t=>t.execState!=='done' && taskReady(t)) || null;
+  }
+  // há alguma task ainda não concluída na história?
+  function storyHasPendingTasks(storyId){ return tasksOf(storyId).some(t=>t.execState!=='done'); }
+
+  // ---- perfil de loop efetivo de uma task (via label principal) ----
+  function loopProfileOf(task){
+    // override explícito
+    if(task.loopType && task.loopType!=='auto' && state.loopProfiles[task.loopType]) return state.loopProfiles[task.loopType];
+    // deriva da 1ª label que tenha loopProfileId
+    for(const lid of (task.labelIds||[])){
+      const lab = state.labels.find(l=>l.id===lid);
+      if(lab && lab.loopProfileId && state.loopProfiles[lab.loopProfileId]) return state.loopProfiles[lab.loopProfileId];
+    }
+    return state.loopProfiles.__default;
+  }
+  function dodAllDone(task){ return (task.dod||[]).length>0 && task.dod.every(d=>d.done); }
+  function botForTask(task){
+    const aid = (task.assigneeIds||[]).find(a=>{ const ag=state.assignees.find(x=>x.id===a); return ag && isBot(ag); });
+    return aid || (state.assignees.find(a=>isBot(a))||{}).id || null;
+  }
+
+  // ---- mutações centrais (todas emitem evento WS-ready) ----
+  function setExecState(task, st){ if(task.execState===st) return; task.execState=st; emit('task.state.changed',{taskId:task.id,state:st}); }
+  function checkDod(task, dodId){ const d=(task.dod||[]).find(x=>x.id===dodId); if(d && !d.done){ d.done=true; emit('dod.checked',{taskId:task.id,dodId}); } }
+  function appendIteration(task, it){ task.iterations.push(it); log(task, `iteração #${it.index} (${PHASE_META[it.phase]?.label||it.phase})`); emit('iteration.appended',{taskId:task.id,iteration:it}); }
+
+  // cria task-bug derivada e liga a origem por dependência REVERSA (origem só fecha quando a derivada fechar)
+  function createDerivedTask(origin, problem){
+    const story = getCard(origin.parentId);
+    const cid = id();
+    const firstTC = firstTaskColId();
+    state.cards[cid] = {
+      id:cid, key:nextKey('task'), type:'task', title:('Corrigir: '+problem.title),
+      description: problem.detail || 'Problema encontrado na validação da task '+origin.key,
+      points:null, parentId:origin.parentId, taskColId:firstTC, blocked:false, everInProgress:false,
+      labelIds:(state.labels.filter(l=>l.name.toLowerCase()==='bug').map(l=>l.id)),
+      assigneeIds: origin.assigneeIds.slice(),
+      acceptance:[],
+      dod:[{id:id(),text:'Problema reproduzido',done:false},{id:id(),text:'Correção aplicada',done:false},{id:id(),text:'Validação passou',done:false}],
+      comments:[], activity:[{id:id(),text:`derivada da validação de ${origin.key}`,ts:Date.now()}],
+      createdAt: Date.now(),
+      loopType:'bug', execState:'idle', iterations:[], derivedFrom:origin.id, dependsOn:[]
+    };
+    // dependência reversa: a ORIGEM passa a depender da derivada
+    origin.dependsOn = origin.dependsOn||[]; origin.dependsOn.push(cid);
+    setExecState(origin,'blocked-dep');
+    log(origin, `bug encontrado na validação → criada ${state.cards[cid].key}; aguardando correção`);
+    emit('task.created',{taskId:cid,derivedFrom:origin.id});
+    return state.cards[cid];
+  }
+
+  // ---- textos mock por fase (simulam o "raciocínio" da AI) ----
+  function mockIterationContent(task, phase, profile){
+    const story = getCard(task.parentId);
+    const flows = story && story.affectedFlows ? story.affectedFlows : [];
+    const proj = story && story.aiContext ? story.aiContext.project : '(projeto não definido)';
+    const files = flows.flatMap(f=>f.files).slice(0,4);
+    switch(phase){
+      case 'reproduce': return {
+        detail:`Reproduzindo o problema em ${proj}. Passos executados para disparar o cenário e confirmar a causa raiz. Arquivos suspeitos: ${files.join(', ')||'—'}.`,
+        summary:'Reproduzi o problema e isolei a causa raiz.',
+        next:{ state:'analyzing', step:'Analisar a causa raiz e planejar a correção.', files } };
+      case 'analysis': return {
+        detail:`Entendi o objetivo da task "${task.title}". Vou mexer em ${proj} nos arquivos ${files.join(', ')||'—'}. Efeitos colaterais a cuidar: ${(story&&story.aiContext&&story.aiContext.notes)||'validar regressões nos fluxos relacionados'}.`,
+        summary:'Analisei escopo, arquivos e efeitos colaterais.',
+        next:{ state:'implementing', step:'Implementar a mudança conforme a análise.', files } };
+      case 'implementation': return {
+        detail:`Implementação em andamento. Alterei ${files[0]||'os arquivos-alvo'} para atender ao próximo DOD. Cobertura de teste local ajustada. Próxima iteração continua até fechar os DODs restantes.`,
+        summary:'Implementei parte da mudança e marquei DOD.',
+        next:{ state:'implementing', step:'Continuar implementação até fechar todos os DODs.', files } };
+      case 'validation': return {
+        detail:`Validação final (teste de mesa) dos fluxos afetados: ${flows.map(f=>f.name).join(', ')||'—'}. Verifiquei cada fluxo empiricamente nos arquivos vinculados.`,
+        summary:'Validei todos os fluxos afetados.',
+        next:{ state:'done', step:'', files } };
+    }
+    return { detail:'', summary:'', next:{state:'done',step:'',files:[]} };
+  }
+
+  // decide a fase da próxima iteração a partir do estado + perfil
+  function nextPhaseFor(task, profile){
+    const its = task.iterations;
+    if(!its.length){ return profile.phases[0]; } // 1ª iteração = 1ª fase do perfil (reproduce p/ bug)
+    // se já passou por reproduce/analysis, segue implementando até DOD completo
+    if(!dodAllDone(task)){
+      // se ainda não analisou (perfil bug começa em reproduce), respeita a ordem inicial
+      const hasAnalysis = its.some(i=>i.phase==='analysis');
+      const hasReproduce = its.some(i=>i.phase==='reproduce');
+      if(profile.phases[0]==='reproduce' && !hasReproduce) return 'reproduce';
+      if(!hasAnalysis) return 'analysis';
+      return 'implementation';
+    }
+    return 'validation'; // todos os DODs marcados → iteração FINAL
+  }
+
+  // roda UMA iteração da task (núcleo do loop). Retorna a iteração criada (ou null).
+  function runIteration(taskId){
+    const task = getCard(taskId);
+    if(!task || task.type!=='task' || task.execState==='done') return null;
+    // respeita dependências (serial / ordem topológica)
+    if(taskDepsPending(task).length){ setExecState(task,'blocked-dep'); return null; }
+    const profile = loopProfileOf(task);
+    const phase = nextPhaseFor(task, profile);
+    const agentId = botForTask(task);
+
+    if(phase==='validation'){
+      // iteração FINAL: teste de mesa de TODOS os fluxos afetados
+      const story = getCard(task.parentId);
+      const content = mockIterationContent(task,'validation',profile);
+      // heurística mock de "encontrar problema": 1ª validação de uma task feature acha 1 bug,
+      // re-validações (após derivada resolvida) passam.
+      const revalidation = task.iterations.some(i=>i.phase==='validation');
+      const willFindProblem = !revalidation && profile.validation!=='regression-only' && (task.__forceFindBug!==false) && (task.__forceFindBug===true || Math.random()<0.5);
+      const it = {
+        id:id(), index:task.iterations.length+1, ts:Date.now(), agentId, phase:'validation',
+        detail: content.detail + (willFindProblem ? ' ❌ Encontrei um problema em um dos fluxos.' : ' ✅ Todos os fluxos validados com sucesso.'),
+        summary: willFindProblem ? 'Validação encontrou um problema.' : content.summary,
+        dodTouched:[],
+        handoff:{ state: willFindProblem?'blocked':'done', nextStep: willFindProblem?'Corrigir o problema encontrado (ver task derivada).':'', targets:{files:content.next.files,dodIds:[]} }
+      };
+      setExecState(task,'validating');
+      appendIteration(task, it);
+      if(willFindProblem){
+        const flow = (story&&story.affectedFlows&&story.affectedFlows[0]) || {name:'fluxo afetado'};
+        createDerivedTask(task, { title:`falha em ${flow.name}`, detail:`A validação de ${task.key} detectou comportamento incorreto no fluxo "${flow.name}". Investigar e corrigir.` });
+        // origem fica blocked-dep (setado dentro de createDerivedTask)
+      } else {
+        setExecState(task,'done');
+        log(task,'validação final concluída — task Done');
+        emit('task.state.changed',{taskId:task.id,state:'done'});
+        // libera dependentes na mesma história
+        onTaskDone(task);
+      }
+      return it;
+    }
+
+    // iteração normal (reproduce / analysis / implementation)
+    const content = mockIterationContent(task, phase, profile);
+    // marca 1 DOD ainda pendente por iteração de implementação
+    let touched = [];
+    if(phase==='implementation'){
+      const pend = (task.dod||[]).find(d=>!d.done);
+      if(pend){ checkDod(task, pend.id); touched=[pend.id]; }
+    }
+    const it = {
+      id:id(), index:task.iterations.length+1, ts:Date.now(), agentId, phase,
+      detail:content.detail, summary:content.summary, dodTouched:touched,
+      handoff:{ state:content.next.state, nextStep:content.next.step, targets:{files:content.next.files,dodIds:[]} }
+    };
+    setExecState(task, content.next.state==='implementing'?'implementing':(phase==='analysis'?'analyzing':'implementing'));
+    if(phase==='reproduce') setExecState(task,'analyzing');
+    appendIteration(task, it);
+    return it;
+  }
+
+  // quando uma task fecha: se era derivada, re-dispara validação da origem; senão libera a próxima
+  function onTaskDone(task){
+    // se esta task é derivada de outra, a ORIGEM deve RE-VALIDAR (não fechar direto)
+    const origins = Object.values(state.cards).filter(o=>o.type==='task' && (o.dependsOn||[]).includes(task.id));
+    origins.forEach(o=>{
+      // remove a dependência resolvida
+      o.dependsOn = (o.dependsOn||[]).filter(x=>x!==task.id);
+      if(taskDepsPending(o).length===0 && o.execState==='blocked-dep'){
+        // re-roda validação final
+        log(o, `dependência ${task.key} resolvida → re-validando`);
+        setExecState(o,'validating');
+        emit('task.state.changed',{taskId:o.id,state:'validating'});
+      }
+    });
+  }
+
+  // avança 1 passo da HISTÓRIA: escolhe a próxima task pronta e roda 1 iteração dela (serial)
+  function stepStory(storyId){
+    const story = getCard(storyId); if(!story || story.type!=='story') return false;
+    // 1) alguma task em re-validação pendente? (origem que voltou de blocked-dep)
+    const revalidating = tasksOf(storyId).find(t=>t.execState==='validating' && t.execState!=='done' && taskDepsPending(t).length===0 && dodAllDone(t) && t.iterations.some(i=>i.phase==='validation'));
+    if(revalidating){ runIteration(revalidating.id); return true; }
+    // 2) próxima task pronta (deps done), serial
+    const next = pickNextTask(storyId);
+    if(next){ runIteration(next.id); return true; }
+    return false; // nada a fazer (ou aguardando derivadas)
+  }
+
+  // auto-play por história
+  const autoTimers = {};
+  function startAuto(storyId, intervalMs){
+    stopAuto(storyId);
+    autoTimers[storyId] = setInterval(()=>{
+      const did = stepStory(storyId);
+      if(!did && !storyHasPendingTasks(storyId)){ stopAuto(storyId); showToast('Todas as tasks concluídas 🎉'); }
+    }, intervalMs||900);
+    emit('auto.started',{storyId});
+  }
+  function stopAuto(storyId){ if(autoTimers[storyId]){ clearInterval(autoTimers[storyId]); delete autoTimers[storyId]; emit('auto.stopped',{storyId}); } }
+  function isAutoRunning(storyId){ return !!autoTimers[storyId]; }
+
+  // dispara o motor ao mover história para In Progress
+  function onStoryEnterInProgress(storyId){
+    const story=getCard(storyId); if(!story) return;
+    // marca tasks idle como prontas para começar (execState continua idle até 1ª iteração)
+    log(story,'história em In Progress — motor de AI acordado');
+    emit('story.awake',{storyId});
+    // dá o primeiro passo automaticamente
+    stepStory(storyId);
+  }
+  // ============================================================= /MOTOR DE AI
+
+  // ------------------------------------------------------------- seed
+  function seed(){
+    const labels = [
+      {id:id(),name:'Bug',color:'#e5484d'},{id:id(),name:'Feature',color:'#3b82f6'},
+      {id:id(),name:'Chore',color:'#8b5cf6'},{id:id(),name:'Docs',color:'#0ea5e9'},
+      {id:id(),name:'Urgent',color:'#f59e0b'}
+    ];
+    const agents = [
+      {id:id(),name:'Claude-Dev',color:'#4c6ef5',type:'bot'},
+      {id:id(),name:'GPT-Reviewer',color:'#22a06b',type:'bot'},
+      {id:id(),name:'Copilot-QA',color:'#8b5cf6',type:'bot'}
+    ];
+    const columns = [
+      {id:id(),title:'Backlog',wipLimit:null,cardIds:[]},
+      {id:id(),title:'To Do',wipLimit:5,cardIds:[]},
+      {id:id(),title:'In Progress',wipLimit:3,cardIds:[]},
+      {id:id(),title:'Review',wipLimit:3,cardIds:[]},
+      {id:id(),title:'Done',wipLimit:null,cardIds:[]}
+    ];
+    // colunas do fluxo de TASKS (dentro do modal da história) — as 4 originais são protegidas
+    const taskColumns = [
+      {id:id(),title:'To Do',protected:true},
+      {id:id(),title:'In Progress',protected:true},
+      {id:id(),title:'Review',protected:true},
+      {id:id(),title:'Done',protected:true}
+    ];
+    const TODO_TC = taskColumns[0].id, DONE_TC = taskColumns[3].id, REVIEW_TC = taskColumns[2].id;
+    const cards = {};
+    state = { boardTitle:'Sprint Board', columns, taskColumns, cards, labels, assignees:agents, theme:'light', seq:0,
+      loopProfiles: JSON.parse(JSON.stringify(BUILTIN_LOOP_PROFILES)) };
+    // vincula labels de fábrica a perfis de loop (Bug->bug, Feature->feature)
+    const byName = n => labels.find(l=>l.name.toLowerCase()===n);
+    if(byName('bug')) byName('bug').loopProfileId='bug';
+    if(byName('feature')) byName('feature').loopProfileId='feature';
+
+    const mk = (type, title, opts={}) => {
+      const cid = id(); const key = nextKey(type);
+      cards[cid] = {
+        id:cid, key, type, title,
+        description: opts.description||'',
+        points: opts.points ?? (type==='task'?null:null),
+        parentId: opts.parentId||null,
+        taskColId: type==='task' ? (opts.taskColId||TODO_TC) : null,
+        blocked: !!opts.blocked,
+        everInProgress: !!opts.everInProgress,
+        labelIds: opts.labelIds||[], assigneeIds: opts.assigneeIds||[],
+        acceptance: opts.acceptance||[], dod: opts.dod||[],
+        comments: opts.comments||[], activity:[{id:id(),text:'card criado',ts:Date.now()-3600000}],
+        createdAt: Date.now(),
+        // ---- campos de AI ----
+        ...(type==='story' ? { aiContext:{summary:'',project:'',notes:''}, affectedFlows:[] } : {}),
+        ...(type==='task'  ? { loopType:'auto', execState:'idle', iterations:[], derivedFrom:null, dependsOn:[] } : {})
+      };
+      return { cid, key };
+    };
+    const chk = (arr)=>arr.map(t=>({id:id(),text:t.text,done:!!t.done}));
+
+    const ep1 = mk('epic','Onboarding de novos clientes',{
+      description:'Épico que cobre todo o fluxo de entrada de um novo cliente no produto.',
+      labelIds:[labels[1].id],
+      dod:chk([{text:'Todas as histórias em Done'},{text:'Métrica de sucesso atingida'}])});
+    const us1 = mk('story','Cadastro com e-mail e senha',{
+      description:'Como visitante, quero me cadastrar com e-mail e senha, para acessar o produto.',
+      points:5, parentId:ep1.cid, labelIds:[labels[1].id], assigneeIds:[agents[0].id],
+      acceptance:chk([{text:'Given e-mail válido, When submeto, Then conta é criada'},{text:'Senha < 8 chars é rejeitada'}]),
+      dod:chk([{text:'Código revisado'},{text:'Testes automatizados'},{text:'Deploy em staging'}])});
+    const t1 = mk('task','Criar endpoint POST /signup',{parentId:us1.cid,assigneeIds:[agents[0].id],labelIds:[labels[1].id],taskColId:taskColumns[1].id});
+    const t2 = mk('task','Validação de senha forte',{parentId:us1.cid,assigneeIds:[agents[2].id],taskColId:taskColumns[1].id});
+    const us2 = mk('story','Recuperação de senha',{
+      description:'Como usuário, quero recuperar minha senha por e-mail.',points:3,parentId:ep1.cid,
+      labelIds:[labels[0].id], assigneeIds:[agents[1].id], blocked:true});
+    const us3 = mk('story','Dashboard inicial',{description:'Tela inicial pós-login.',points:8,parentId:ep1.cid,labelIds:[labels[1].id],assigneeIds:[agents[0].id]});
+    const t3 = mk('task','Escrever docs de API',{parentId:us1.cid,labelIds:[labels[3].id],assigneeIds:[agents[1].id],taskColId:DONE_TC});
+    const us4 = mk('story','Auditoria de acesso',{description:'Registrar logins.',points:5,parentId:ep1.cid,labelIds:[labels[2].id]});
+
+    // ---- dados de AI de exemplo (para o motor mock ter o que mostrar) ----
+    // contexto + mapa de fluxos afetados na história us1
+    cards[us1.cid].aiContext = {
+      summary:'Implementar cadastro por e-mail/senha, criando a conta e disparando verificação.',
+      project:'uh-openxchange-provisioner-api',
+      notes:'Cuidado com colisão de e-mail já existente e com o hash de senha (bcrypt).'
+    };
+    cards[us1.cid].affectedFlows = [
+      { id:id(), name:'Cadastro de usuário', files:['src/routes/signup.js','src/services/userService.js'], note:'Fluxo principal criado por esta história.' },
+      { id:id(), name:'Envio de e-mail de verificação', files:['src/services/mailService.js'], note:'Disparado após criar a conta.' },
+      { id:id(), name:'Login', files:['src/routes/login.js'], note:'Regressão: garantir que login continua ok com o novo hash.' }
+    ];
+    // DODs nas tasks (o motor vai marcando ao longo das iterações)
+    cards[t1.cid].dod = chk([{text:'Endpoint responde 201 com payload válido'},{text:'E-mail duplicado retorna 409'},{text:'Testes de integração passando'}]);
+    cards[t2.cid].dod = chk([{text:'Regra de senha forte aplicada'},{text:'Mensagem de erro clara'}]);
+    cards[t1.cid].loopType = 'feature';
+    cards[t2.cid].loopType = 'feature';
+    // t2 depende de t1 (ordem topológica: t1 primeiro)
+    cards[t2.cid].dependsOn = [t1.cid];
+    // uma iteração de exemplo já registrada em t1
+    cards[t1.cid].execState = 'implementing';
+    cards[t1.cid].iterations = [{
+      id:id(), index:1, ts:Date.now()-2400000, agentId:agents[0].id, phase:'analysis',
+      detail:'Mapeado o endpoint POST /signup em src/routes/signup.js. Precisa validar corpo (e-mail/senha), checar duplicidade em userService e persistir com hash bcrypt. Efeito colateral: dispara mailService (verificação). Cuidado com condição de corrida em e-mails simultâneos.',
+      summary:'Analisei o endpoint e mapeei arquivos e efeitos colaterais.',
+      dodTouched:[],
+      handoff:{ state:'implementing', nextStep:'Implementar o handler do POST /signup com validação e criação da conta.', targets:{ files:['src/routes/signup.js','src/services/userService.js'], dodIds:[cards[t1.cid].dod[0].id] } }
+    }];
+
+    // BOARD PRINCIPAL: apenas HISTÓRIAS (épicos vivem na sidebar; tasks vivem no mini-kanban da story)
+    columns[0].cardIds = [us4.cid];                     // Backlog
+    columns[1].cardIds = [us2.cid];                      // To Do
+    columns[2].cardIds = [us1.cid];                      // In Progress
+    columns[3].cardIds = [us3.cid];                      // Review
+    columns[4].cardIds = [];                             // Done
+    // us1 está em In Progress -> já passou por In Progress
+    cards[us1.cid].everInProgress = true;
+    // comentário exemplo
+    cards[us1.cid].comments.push({id:id(),author:'Claude-Dev',text:'Iniciando implementação do endpoint.',ts:Date.now()-1800000});
+    save();
+  }
+
+  function load(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(raw){ state = JSON.parse(raw); seq = state.seq||0; migrate(); return; }
+    }catch(e){}
+    seed();
+  }
+  // garante campos novos em states antigos
+  function migrate(){
+    state.assignees ||= []; state.labels ||= []; state.columns ||= []; state.cards ||= {};
+    // garante perfis de loop embutidos (sem sobrescrever customizações do usuário)
+    state.loopProfiles ||= {};
+    Object.keys(BUILTIN_LOOP_PROFILES).forEach(k=>{ if(!state.loopProfiles[k]) state.loopProfiles[k] = JSON.parse(JSON.stringify(BUILTIN_LOOP_PROFILES[k])); });
+    // garante colunas do fluxo de tasks
+    if(!Array.isArray(state.taskColumns) || !state.taskColumns.length){
+      state.taskColumns = [
+        {id:id(),title:'To Do',protected:true},
+        {id:id(),title:'In Progress',protected:true},
+        {id:id(),title:'Review',protected:true},
+        {id:id(),title:'Done',protected:true}
+      ];
+    }
+    // garante que as 4 originais estejam protegidas
+    state.taskColumns.forEach(tc=>{ if(PROTECTED_TASK_COLS.includes((tc.title||'').trim().toLowerCase())) tc.protected=true; });
+    const firstTC = state.taskColumns[0].id;
+    const doneTC = (state.taskColumns.find(tc=>(tc.title||'').trim().toLowerCase()==='done')||state.taskColumns[state.taskColumns.length-1]).id;
+    Object.values(state.cards).forEach(c=>{
+      c.type ||= 'task'; c.key ||= nextKey(c.type); c.points ??= null; c.parentId ??= null;
+      c.blocked ??= false; c.everInProgress ??= false;
+      c.acceptance ||= []; c.dod ||= [];
+      c.labelIds ||= []; c.assigneeIds ||= []; c.comments ||= []; c.activity ||= [];
+      // ---- campos de AI ----
+      if(c.type==='story'){
+        c.aiContext ||= { summary:'', project:'', notes:'' };
+        c.affectedFlows ||= [];
+        c.affectedFlows.forEach(f=>{ f.id ||= id(); f.files ||= []; f.note ||= ''; });
+      }
+      if(c.type==='task'){
+        c.loopType ||= 'auto';
+        c.execState ||= 'idle';
+        c.iterations ||= [];
+        if(!('derivedFrom' in c)) c.derivedFrom = null;
+        c.dependsOn ||= [];
+        c.iterations.forEach(it=>{ it.id ||= id(); it.dodTouched ||= []; it.handoff ||= {state:'analyzing',nextStep:'',targets:{files:[],dodIds:[]}}; it.handoff.targets ||= {files:[],dodIds:[]}; });
+      }
+      if(c.type==='task'){
+        // deriva taskColId a partir da coluna do board onde a task estava (compat) ou default To Do
+        if(!c.taskColId || !state.taskColumns.some(tc=>tc.id===c.taskColId)){
+          const boardCol = columnOf(c.id);
+          c.taskColId = boardCol && isDoneColumn(boardCol) ? doneTC : firstTC;
+        }
+      } else { c.taskColId = null; }
+    });
+    state.assignees.forEach(a=>{ a.type ||= 'bot'; });
+    // BOARD PRINCIPAL só tem histórias — remove épicos E tasks de qualquer coluna do board
+    state.columns.forEach(col=>{ col.cardIds = col.cardIds.filter(cid=>{ const c=state.cards[cid]; return c && c.type==='story'; }); });
+    // stories atualmente numa coluna In Progress+ marcam everInProgress
+    Object.values(state.cards).forEach(c=>{ if(c.type==='story' && reachedInProgress(columnOf(c.id))) c.everInProgress = true; });
+  }
+
+  // ------------------------------------------------------------- filtros
+  function activeFilters(){
+    return {
+      q: ($('#searchInput').value||'').trim().toLowerCase(),
+      type: $('#filterType').value,
+      label: $('#filterLabel').value,
+      assignee: $('#filterAssignee').value
+    };
+  }
+  function cardMatches(card, f){
+    if(f.type && card.type!==f.type) return false;
+    if(f.label && !card.labelIds.includes(f.label)) return false;
+    if(f.assignee && !card.assigneeIds.includes(f.assignee)) return false;
+    if(f.q){
+      const hay = (card.title+' '+card.description+' '+card.key).toLowerCase();
+      if(!hay.includes(f.q)) return false;
+    }
+    return true;
+  }
+
+  // ------------------------------------------------------------- render board
+  const board = $('#board');
+  function render(){
+    renderColumns();
+    renderEpicsSidebar();
+    renderMetrics();
+    populateFilters();
+    document.body.classList.toggle('dark', state.theme==='dark');
+    $('#themeToggle').textContent = state.theme==='dark' ? '☀️' : '🌙';
+    $('#boardTitle').textContent = state.boardTitle;
+  }
+
+  function renderEpicsSidebar(){
+    const box=$('#epicsList'); if(!box) return; box.innerHTML='';
+    const epics=Object.values(state.cards).filter(c=>c.type==='epic')
+      .sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+    if(!epics.length){ const p=document.createElement('div'); p.className='epic-empty';
+      p.textContent='Nenhum épico ainda. Crie um para agrupar histórias.'; box.append(p); return; }
+    epics.forEach(ep=>{
+      const st=deriveEpicStatus(ep);
+      const el=document.createElement('div'); el.className='epic-card status-'+st.key; el.dataset.id=ep.id;
+      const top=document.createElement('div'); top.className='epic-top';
+      const k=document.createElement('span'); k.className='epic-key'; k.textContent=ep.key;
+      if(ep.blocked){ const b=document.createElement('span'); b.textContent='⛔'; top.append(k,b); }
+      else top.append(k);
+      const badge=document.createElement('span'); badge.className='epic-status status-'+st.key; badge.textContent=st.label; top.append(badge);
+      const title=document.createElement('div'); title.className='epic-title'; title.textContent=ep.title;
+      const prog=document.createElement('div'); prog.className='epic-progress';
+      const sp=document.createElement('span'); sp.style.width=(st.total?Math.round(st.done/st.total*100):0)+'%'; prog.append(sp);
+      const meta=document.createElement('div'); meta.className='epic-meta';
+      const cnt=document.createElement('span'); cnt.textContent=`🧩 ${st.done}/${st.total} histórias`;
+      const pts=childrenOf(ep.id).filter(c=>c.type==='story').reduce((s,c)=>s+(c.points||0),0);
+      meta.append(cnt); if(pts){ const p=document.createElement('span'); p.textContent=`· ${pts} pts`; meta.append(p); }
+      if(ep.labelIds.length){ ep.labelIds.forEach(lid=>{ const l=state.labels.find(x=>x.id===lid); if(!l) return;
+        const chip=document.createElement('span'); chip.className='label-chip'; chip.style.background=l.color; chip.textContent=l.name; meta.append(chip); }); }
+      el.append(top,title,prog,meta);
+      el.addEventListener('click',()=>openCard(ep.id));
+      box.append(el);
+    });
+  }
+
+  function renderColumns(){
+    board.innerHTML='';
+    const f = activeFilters();
+    state.columns.forEach(col=>{
+      const colEl = document.createElement('div');
+      colEl.className='column'; colEl.dataset.id=col.id;
+
+      // header
+      const head = document.createElement('div'); head.className='column-header';
+      const title = document.createElement('div'); title.className='column-title'; title.textContent=col.title;
+      title.title='Duplo clique para renomear';
+      title.addEventListener('dblclick',()=>startRenameColumn(colEl,col));
+      const count = document.createElement('span'); count.className='column-count';
+      count.textContent = col.cardIds.length;
+      if(col.wipLimit && col.cardIds.length>col.wipLimit) count.classList.add('over-limit');
+      const pts = document.createElement('span'); pts.className='column-points';
+      const colPts = col.cardIds.reduce((s,cid)=>s+(getCard(cid)?.points||0),0);
+      pts.textContent = colPts? colPts+' pts' : '';
+      const menuBtn = document.createElement('button'); menuBtn.className='column-menu-btn'; menuBtn.textContent='⋯';
+      menuBtn.setAttribute('aria-label','Menu da coluna');
+      menuBtn.addEventListener('click',(e)=>{e.stopPropagation(); toggleColumnMenu(colEl,col);});
+      head.append(title,count,pts,menuBtn);
+      if(col.wipLimit){ const wip=document.createElement('span'); wip.className='column-wip'; wip.textContent=`${col.cardIds.length}/${col.wipLimit}`; head.append(wip); }
+      colEl.append(head);
+
+      // card list
+      const list = document.createElement('div'); list.className='card-list'; list.dataset.columnId=col.id;
+      col.cardIds.forEach(cid=>{
+        const card = getCard(cid); if(!card) return;
+        if(card.type!=='story') return; // BOARD PRINCIPAL só exibe histórias
+        if(!cardMatches(card,f)) return;
+        list.append(renderCard(card));
+      });
+      setupDropzone(list, col);
+      colEl.append(list);
+
+      // add card SOMENTE em Backlog / To Do
+      if(creationAllowed(col)){
+        const addBtn = document.createElement('button'); addBtn.className='add-card-btn'; addBtn.textContent='+ Adicionar card';
+        addBtn.addEventListener('click',()=>startAddCard(list,col));
+        colEl.append(addBtn);
+      }
+      board.append(colEl);
+    });
+
+    // add column tile
+    const addCol = document.createElement('div'); addCol.className='add-column'; addCol.textContent='+ Adicionar coluna';
+    addCol.addEventListener('click',startAddColumn);
+    board.append(addCol);
+  }
+
+  function renderCard(card){
+    const el = document.createElement('div');
+    el.className = `card type-${card.type}` + (card.blocked?' blocked':'');
+    el.draggable = true; el.dataset.id = card.id;
+
+    const top = document.createElement('div'); top.className='card-top';
+    const badge = document.createElement('span'); badge.className=`type-badge ${card.type}`; badge.textContent=TYPE_META[card.type].badge;
+    const key = document.createElement('span'); key.className='card-key'; key.textContent=card.key;
+    top.append(badge,key);
+    if(card.blocked){ const b=document.createElement('span'); b.className='blocked-flag'; b.textContent='⛔'; top.append(b); }
+    if(card.points!=null){ const p=document.createElement('span'); p.className='points-badge'; p.textContent=card.points; top.append(p); }
+    el.append(top);
+
+    if(card.labelIds.length){
+      const labs=document.createElement('div'); labs.className='card-labels';
+      card.labelIds.forEach(lid=>{ const l=state.labels.find(x=>x.id===lid); if(!l) return;
+        const chip=document.createElement('span'); chip.className='label-chip'; chip.style.background=l.color; chip.textContent=l.name; labs.append(chip); });
+      el.append(labs);
+    }
+
+    const t=document.createElement('div'); t.className='card-title'; t.textContent=card.title; el.append(t);
+
+    // pai
+    if(card.parentId){ const par=getCard(card.parentId);
+      if(par){ const pr=document.createElement('div'); pr.className='card-parent'; pr.textContent=`↳ ${par.key} ${par.title}`; el.append(pr); } }
+
+    // meta
+    const meta=document.createElement('div'); meta.className='card-meta';
+    const children = childrenOf(card.id);
+    const doneChildren = tasksDoneCount(children);
+    if(children.length){
+      const cb=document.createElement('span'); cb.className='card-badge'; cb.textContent=`🧩 ${doneChildren}/${children.length}`; meta.append(cb); }
+    const acAll=[...card.acceptance,...card.dod];
+    if(acAll.length){ const done=acAll.filter(i=>i.done).length; const cb=document.createElement('span'); cb.className='card-badge'; cb.textContent=`☑️ ${done}/${acAll.length}`; meta.append(cb); }
+    if(card.comments.length){ const cb=document.createElement('span'); cb.className='card-badge'; cb.textContent=`💬 ${card.comments.length}`; meta.append(cb); }
+    if(card.description){ const cb=document.createElement('span'); cb.className='card-badge'; cb.textContent='📝'; meta.append(cb); }
+    if(card.assigneeIds.length){
+      const av=document.createElement('div'); av.className='card-assignees';
+      card.assigneeIds.forEach(aid=>{ const a=state.assignees.find(x=>x.id===aid); if(!a) return;
+        const s=document.createElement('span'); s.className='avatar'; s.style.background=a.color; s.textContent=initials(a.name); s.title=a.name;
+        if(isBot(a)){ const bb=document.createElement('span'); bb.className='bot-badge'; bb.textContent='🤖'; s.append(bb); }
+        av.append(s); });
+      meta.append(av);
+    }
+    if(meta.childNodes.length) el.append(meta);
+
+    // progresso por tasks (se houver)
+    if(children.length){
+      const pr=document.createElement('div'); pr.className='card-progress'; const sp=document.createElement('span');
+      sp.style.width=(children.length?Math.round(doneChildren/children.length*100):0)+'%'; pr.append(sp); el.append(pr); }
+
+    el.addEventListener('click',()=>openCard(card.id));
+    setupCardDrag(el, card);
+    return el;
+  }
+
+  function childrenOf(cardId){ return Object.values(state.cards).filter(c=>c.parentId===cardId); }
+  // conta quantas tasks (filhas de story) estão na coluna Done do fluxo de tasks
+  function tasksDoneCount(children){ const dc=taskDoneColId(); return children.filter(c=>c.type==='task' ? c.taskColId===dc : isDoneColumn(columnOf(c.id)||{})).length; }
+
+  function renderMetrics(){
+    const cards = Object.values(state.cards);
+    const epics = cards.filter(c=>c.type==='epic').length;
+    const stories = cards.filter(c=>c.type==='story').length;
+    const tasks = cards.filter(c=>c.type==='task').length;
+    const blocked = cards.filter(c=>c.blocked).length;
+    let total=0, done=0;
+    cards.forEach(c=>{ if(c.points){ total+=c.points; const col=columnOf(c.id); if(col&&isDoneColumn(col)) done+=c.points; } });
+    $('#mEpics').textContent=epics; $('#mStories').textContent=stories; $('#mTasks').textContent=tasks;
+    $('#mBlocked').textContent=blocked; $('#mDonePts').textContent=done; $('#mTotalPts').textContent=total;
+    $('#mProgressBar').style.width = total? Math.round(done/total*100)+'%' : '0%';
+  }
+
+  function populateFilters(){
+    const fl=$('#filterLabel'), fa=$('#filterAssignee');
+    const lv=fl.value, av=fa.value;
+    fl.innerHTML='<option value="">Todas as labels</option>';
+    state.labels.forEach(l=>{ const o=document.createElement('option'); o.value=l.id; o.textContent=l.name; fl.append(o); });
+    fl.value = state.labels.some(l=>l.id===lv)? lv : '';
+    fa.innerHTML='<option value="">Todos os agentes</option>';
+    state.assignees.forEach(a=>{ const o=document.createElement('option'); o.value=a.id; o.textContent=a.name; fa.append(o); });
+    fa.value = state.assignees.some(a=>a.id===av)? av : '';
+  }
+  // ------------------------------------------------------------- colunas
+  function startRenameColumn(colEl, col){
+    const head = colEl.querySelector('.column-header');
+    const title = head.querySelector('.column-title'); if(!title) return;
+    const input = document.createElement('input'); input.className='column-title-input'; input.value=col.title;
+    title.replaceWith(input); input.focus(); input.select();
+    let doneOnce=false;
+    const commit=()=>{ if(doneOnce) return; doneOnce=true; const v=input.value.trim(); if(v) col.title=v; save(); render(); };
+    input.addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault(); commit();} else if(e.key==='Escape'){doneOnce=true; render();} });
+    input.addEventListener('blur',commit);
+  }
+  function toggleColumnMenu(colEl, col){
+    closeAllMenus();
+    const menu=document.createElement('div'); menu.className='column-menu';
+    const mk=(txt,fn,danger)=>{ const b=document.createElement('button'); b.textContent=txt; if(danger) b.className='danger'; b.addEventListener('click',(e)=>{e.stopPropagation(); closeAllMenus(); fn();}); return b; };
+    menu.append(mk('✏️ Renomear',()=>startRenameColumn(colEl,col)));
+    menu.append(mk('🎯 Definir WIP limit',()=>{ const v=prompt('WIP limit (vazio = sem limite):', col.wipLimit??''); if(v===null) return; col.wipLimit = v.trim()===''?null:Math.max(1,parseInt(v,10)||0)||null; save(); render(); }));
+    menu.append(mk('🗑️ Excluir coluna',()=>{ if(!confirm(`Excluir a coluna "${col.title}" e seus ${col.cardIds.length} card(s)?`)) return; col.cardIds.forEach(cid=>delete state.cards[cid]); state.columns=state.columns.filter(c=>c.id!==col.id); save(); render(); showToast('Coluna excluída'); }, true));
+    colEl.querySelector('.column-header').append(menu);
+  }
+  function closeAllMenus(){ $$('.column-menu').forEach(m=>m.remove()); }
+  document.addEventListener('click',closeAllMenus);
+
+  function startAddColumn(){
+    const t = prompt('Nome da nova coluna:'); if(!t||!t.trim()) return;
+    state.columns.push({id:id(),title:t.trim(),wipLimit:null,cardIds:[]}); save(); render();
+  }
+
+  // ------------------------------------------------------------- épicos (sidebar)
+  function createEpic(title){
+    const cid=id();
+    state.cards[cid]={ id:cid, key:nextKey('epic'), type:'epic', title, description:'',
+      points:null, parentId:null, blocked:false, everInProgress:false,
+      labelIds:[], assigneeIds:[], acceptance:[], dod:[], comments:[],
+      activity:[{id:id(),text:'épico criado',ts:Date.now()}], createdAt:Date.now() };
+    save(); return cid;
+  }
+  $('#addEpicBtn').addEventListener('click',()=>{
+    const t=prompt('Título do novo épico:'); if(!t||!t.trim()) return;
+    const cid=createEpic(t.trim()); render(); openCard(cid);
+  });
+
+  // ------------------------------------------------------------- cards (add)
+  function startAddCard(list, col){
+    if(!creationAllowed(col)){ showToast('Só é possível criar cards em Backlog ou To Do'); return; }
+    if(list.querySelector('.add-card-input')) return;
+    const input=document.createElement('textarea'); input.className='add-card-input';
+    input.placeholder='Título do card…'; input.rows=2; list.append(input); input.focus();
+    let committed=false;
+    const commit=(keepOpen)=>{
+      if(committed) return; committed=true;
+      const val=input.value.trim();
+      if(val){ const newId=createCard(col,val);
+        if(keepOpen){ render(); const fresh=board.querySelector(`.card-list[data-column-id="${col.id}"]`); if(fresh) startAddCard(fresh, getColumn(col.id)); return; } }
+      render();
+    };
+    input.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault(); commit(true);} else if(e.key==='Escape'){committed=true; render();} });
+    input.addEventListener('blur',()=>commit(false));
+  }
+  function createCard(col, title){
+    const cid=id();
+    // no board principal só existem histórias
+    state.cards[cid]={ id:cid, key:nextKey('story'), type:'story', title, description:'',
+      points:null, parentId:null, taskColId:null, blocked:false, everInProgress:false, labelIds:[], assigneeIds:[],
+      acceptance:[], dod:[], comments:[],
+      activity:[{id:id(),text:`criado em "${col.title}"`,ts:Date.now()}], createdAt:Date.now() };
+    col.cardIds.push(cid); save(); return cid;
+  }
+
+  // ------------------------------------------------------------- drag & drop
+  let dragId=null;
+  function setupCardDrag(el, card){
+    el.addEventListener('dragstart',e=>{ dragId=card.id; el.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; try{e.dataTransfer.setData('text/plain',card.id);}catch(_){} });
+    el.addEventListener('dragend',()=>{ dragId=null; el.classList.remove('dragging'); $$('.drag-over').forEach(x=>x.classList.remove('drag-over')); });
+  }
+  function setupDropzone(list, col){
+    const colEl=()=>list.closest('.column');
+    list.addEventListener('dragover',e=>{ e.preventDefault(); e.dataTransfer.dropEffect='move'; colEl().classList.add('drag-over'); });
+    list.addEventListener('dragleave',e=>{ if(!list.contains(e.relatedTarget)) colEl().classList.remove('drag-over'); });
+    list.addEventListener('drop',e=>{
+      e.preventDefault(); colEl().classList.remove('drag-over');
+      if(!dragId) return; const card=getCard(dragId); if(!card) return;
+      // GATE: história só pode ir para Review/Done quando TODAS as tasks estão em Done
+      if(card.type==='story'){
+        const target=colName(col);
+        const gated = ['review','revisão','em revisão','done','concluído'].includes(target);
+        if(gated && !allTasksDone(card.id)){
+          const ts=tasksOf(card.id); const dc=taskDoneColId();
+          const pend=ts.filter(t=>t.taskColId!==dc).length;
+          showToast(`"${card.title}" não pode ir para ${col.title}: ${pend} task(s) ainda não estão em Done.`);
+          return; // bloqueia o drop
+        }
+      }
+      const fromCol=columnOf(dragId); const afterId=cardAfterPoint(list, e.clientY);
+      // remove da origem
+      if(fromCol) fromCol.cardIds=fromCol.cardIds.filter(x=>x!==dragId);
+      // insere na nova posição
+      let idx = afterId ? col.cardIds.indexOf(afterId) : col.cardIds.length;
+      if(idx<0) idx=col.cardIds.length; col.cardIds.splice(idx,0,dragId);
+      if(fromCol && fromCol.id!==col.id) log(card, `movido de "${fromCol.title}" para "${col.title}"`);
+      // história que entra em In Progress+ registra que "passou por" In Progress (irreversível p/ o épico)
+      if(card.type==='story' && reachedInProgress(col) && !card.everInProgress){ card.everInProgress=true; }
+      // dispara o motor de AI ao ENTRAR na coluna In Progress
+      save(); render();
+      if(card.type==='story' && ['in progress','em progresso','fazendo'].includes(colName(col)) && fromCol && fromCol.id!==col.id){ onStoryEnterInProgress(card.id); }
+    });
+  }
+  function cardAfterPoint(list, y){
+    const cards=[...list.querySelectorAll('.card:not(.dragging)')];
+    for(const c of cards){ const r=c.getBoundingClientRect(); if(y < r.top + r.height/2) return c.dataset.id; }
+    return null;
+  }
+  // ------------------------------------------------------------- modal card
+  const modalLayer=$('#modalLayer');
+  const epicModal=$('#cardModal');   // prefixo 'm'
+  const storyModal=$('#storyModal'); // prefixo 's'
+  const taskModal=$('#taskModal');   // prefixo 't'
+  const modal=epicModal; // compat legado
+  // um contexto por nível: {el, prefix, id, level}
+  const epicCtx ={ el:epicModal,  prefix:'m', id:null, level:0 };
+  const storyCtx={ el:storyModal, prefix:'s', id:null, level:1 };
+  const taskCtx ={ el:taskModal,  prefix:'t', id:null, level:2 };
+  const CTX_BY_TYPE={ epic:epicCtx, story:storyCtx, task:taskCtx };
+  const LEVEL_BY_TYPE={ epic:0, story:1, task:2 };
+  // pilha de modais abertos (ordem de cascata: épico → história → task)
+  let modalStack=[];
+
+  function ctxForType(type){ return CTX_BY_TYPE[type]||storyCtx; }
+  function activeCtx(){ return modalStack.length ? modalStack[modalStack.length-1] : storyCtx; }
+  function ctxById(cid){ const c=getCard(cid); return c ? ctxForType(c.type) : storyCtx; }
+  function $c(ctx, suffix){ return ctx.el.querySelector('#'+ctx.prefix+suffix); }
+  function cardOf(ctx){ return getCard(ctx.id); }
+  function currentCard(){ return cardOf(activeCtx()); }
+  function isOpen(ctx){ return modalStack.includes(ctx); }
+
+  // aplica a pilha ao DOM: exibe/oculta painéis, define ordem e profundidade
+  function layoutStack(){
+    [epicCtx,storyCtx,taskCtx].forEach(ctx=>{
+      const on=isOpen(ctx);
+      ctx.el.classList.toggle('open', on);
+    });
+    // ordena painéis pela posição na pilha (order = índice)
+    modalStack.forEach((ctx,i)=>{ ctx.el.style.order=i; });
+    modalLayer.classList.toggle('hidden', modalStack.length===0);
+    modalLayer.classList.remove('depth-1','depth-2','depth-3');
+    if(modalStack.length) modalLayer.classList.add('depth-'+Math.min(3,modalStack.length));
+    openCardId = modalStack.length ? modalStack[modalStack.length-1].id : null;
+  }
+
+  // abre um card; mantém ancestrais abertos, fecha níveis iguais/mais profundos
+  function openCard(cid){
+    const c=getCard(cid); if(!c) return;
+    const lvl=LEVEL_BY_TYPE[c.type];
+    const ctx=ctxForType(c.type);
+    // remove da pilha tudo que esteja neste nível ou mais profundo
+    modalStack.filter(x=>x.level>=lvl).forEach(x=>{ x.id=null; });
+    modalStack=modalStack.filter(x=>x.level<lvl);
+    ctx.id=cid;
+    modalStack.push(ctx);
+    renderCtx(ctx);
+    layoutStack();
+    // rola o corpo do novo modal para o topo
+    const body=ctx.el.querySelector('.modal-body'); if(body) body.scrollTop=0;
+  }
+  // compat: abrir "ao lado" é o mesmo openCard agora
+  function openTaskSide(cid){ openCard(cid); }
+
+  // fecha o modal do topo da pilha (1 nível)
+  function closeTop(){
+    if(!modalStack.length) return;
+    const ctx=modalStack.pop(); ctx.id=null;
+    layoutStack(); render();
+  }
+  function closeTaskSide(){ if(activeCtx()===taskCtx && isOpen(taskCtx)) closeTop(); }
+  // fecha um contexto específico e tudo mais profundo que ele
+  function closeFrom(ctx){
+    if(!isOpen(ctx)) return;
+    const idx=modalStack.indexOf(ctx);
+    modalStack.slice(idx).forEach(x=>x.id=null);
+    modalStack=modalStack.slice(0,idx);
+    layoutStack(); render();
+  }
+  // fecha TUDO
+  function closeModal(){
+    modalStack.forEach(x=>x.id=null);
+    modalStack=[];
+    layoutStack(); render();
+  }
+
+  // renderiza um contexto (épico / história / task) usando os IDs prefixados
+  function renderCtx(ctx){
+    const c=cardOf(ctx); if(!c) return;
+    $c(ctx,'TypeBadge').textContent=TYPE_META[c.type].badge;
+    $c(ctx,'TypeBadge').className='type-badge '+c.type;
+    $c(ctx,'Key').textContent=c.key;
+    $c(ctx,'BlockedFlag').classList.toggle('hidden', !c.blocked);
+    $c(ctx,'Title').value=c.title;
+    const tf=$c(ctx,'TypeFixed');
+    tf.innerHTML='';
+    tf.append(document.createTextNode(TYPE_META[c.type].emoji+' '+TYPE_META[c.type].label));
+    if(c.type==='epic'){
+      const st=deriveEpicStatus(c);
+      const b=document.createElement('span'); b.className='epic-status-inline status-'+st.key;
+      b.textContent=st.label+' · '+st.done+'/'+st.total; tf.append(b);
+    }
+    $c(ctx,'Points').value=c.points??'';
+    $c(ctx,'Blocked').value=String(!!c.blocked);
+    $c(ctx,'Desc').value=c.description;
+    $c(ctx,'PointsField').style.display = c.type==='epic' ? 'none':'flex';
+    renderParentSelect(ctx,c);
+    renderLabels(ctx,c);
+    renderAssignees(ctx,c);
+    renderChildren(ctx,c);
+    renderChecklist(ctx,'acceptance','Acceptance','AcProgress',c);
+    renderChecklist(ctx,'dod','Dod','DodProgress',c);
+    if(c.type==='story') renderStoryAI(ctx,c);
+    if(c.type==='task') renderTaskAI(ctx,c);
+    renderComments(ctx,c);
+    renderActivity(ctx,c);
+  }
+  // re-render de todos os modais abertos
+  function renderModal(){
+    modalStack.forEach(ctx=>{ if(ctx.id) renderCtx(ctx); });
+  }
+
+  function renderParentSelect(ctx,c){
+    const sel=$c(ctx,'Parent'); sel.innerHTML='<option value="">— nenhum —</option>';
+    // hierarquia estrita: história → épico ; task → história
+    const candidates=Object.values(state.cards).filter(p=>{
+      if(p.id===c.id) return false;
+      if(c.type==='task') return p.type==='story';
+      if(c.type==='story') return p.type==='epic';
+      return false; // épico não tem pai
+    });
+    $c(ctx,'ParentField').style.display = c.type==='epic' ? 'none':'flex';
+    sel.previousElementSibling && (sel.previousElementSibling.textContent = c.type==='task' ? 'História pai' : 'Épico pai');
+    candidates.forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=`${p.key} · ${p.title}`; sel.append(o); });
+    sel.value=c.parentId||'';
+  }
+
+  function renderLabels(ctx,c){
+    const box=$c(ctx,'Labels'); box.innerHTML='';
+    state.labels.forEach(l=>{
+      const opt=document.createElement('span'); opt.className='label-option'+(c.labelIds.includes(l.id)?' selected':'');
+      const sw=document.createElement('span'); sw.className='swatch'; sw.style.background=l.color;
+      const nm=document.createElement('span'); nm.textContent=l.name;
+      opt.append(sw,nm);
+      opt.addEventListener('click',(e)=>{ if(e.target.classList.contains('del')) return;
+        if(c.labelIds.includes(l.id)){ c.labelIds=c.labelIds.filter(x=>x!==l.id); } else { c.labelIds.push(l.id); log(c,`label "${l.name}" adicionada`); }
+        save(); renderLabels(ctx,c); });
+      // excluir label do board inteiro
+      const del=document.createElement('button'); del.className='del'; del.textContent='🗑'; del.title='Excluir label do board';
+      del.addEventListener('click',(e)=>{ e.stopPropagation();
+        if(!confirm(`Excluir a label "${l.name}" de TODO o board?`)) return;
+        state.labels=state.labels.filter(x=>x.id!==l.id);
+        Object.values(state.cards).forEach(cc=>cc.labelIds=cc.labelIds.filter(x=>x!==l.id));
+        save(); renderModal(); showToast('Label excluída'); });
+      opt.append(del);
+      box.append(opt);
+    });
+  }
+  function addLabelFlow(ctx){
+    const name=prompt('Nome da nova label:'); if(!name||!name.trim()) return;
+    const color=LABEL_PALETTE[state.labels.length%LABEL_PALETTE.length];
+    const l={id:id(),name:name.trim(),color}; state.labels.push(l);
+    const c=cardOf(ctx); if(c) c.labelIds.push(l.id); save(); renderModal();
+  }
+  $('#mAddLabelBtn').addEventListener('click',()=>addLabelFlow(storyCtx));
+  $('#tAddLabelBtn').addEventListener('click',()=>addLabelFlow(taskCtx));
+
+  function renderAssignees(ctx,c){
+    const box=$c(ctx,'Assignees'); box.innerHTML='';
+    state.assignees.forEach(a=>{
+      const opt=document.createElement('span'); opt.className='assignee-option'+(c.assigneeIds.includes(a.id)?' selected':'');
+      const av=document.createElement('span'); av.className='mini-avatar'; av.style.background=a.color; av.textContent=initials(a.name);
+      const nm=document.createElement('span'); nm.textContent=(isBot(a)?'🤖 ':'')+a.name;
+      opt.append(av,nm);
+      opt.addEventListener('click',(e)=>{ if(e.target.classList.contains('del')) return;
+        if(c.assigneeIds.includes(a.id)){ c.assigneeIds=c.assigneeIds.filter(x=>x!==a.id); log(c,`${a.name} removido dos responsáveis`); }
+        else { c.assigneeIds.push(a.id); log(c,`${a.name} atribuído`); }
+        save(); renderAssignees(ctx,c); });
+      const del=document.createElement('button'); del.className='del'; del.textContent='🗑'; del.title='Excluir agente do board';
+      del.addEventListener('click',(e)=>{ e.stopPropagation();
+        if(!confirm(`Excluir o agente "${a.name}" de TODO o board?`)) return;
+        state.assignees=state.assignees.filter(x=>x.id!==a.id);
+        Object.values(state.cards).forEach(cc=>cc.assigneeIds=cc.assigneeIds.filter(x=>x!==a.id));
+        save(); renderModal(); showToast('Agente excluído'); });
+      opt.append(del);
+      box.append(opt);
+    });
+  }
+  $('#mAddAgentBtn').addEventListener('click',()=>{ addAgentFlow(()=>renderModal()); });
+  $('#tAddAgentBtn').addEventListener('click',()=>{ addAgentFlow(()=>renderModal()); });
+  function addAgentFlow(cb){
+    const name=prompt('Nome do novo agente autônomo:'); if(!name||!name.trim()) return;
+    const color=AGENT_PALETTE[state.assignees.length%AGENT_PALETTE.length];
+    state.assignees.push({id:id(),name:name.trim(),color,type:'bot'}); save(); if(cb) cb();
+  }
+
+  // ============================================================= UI DA AI
+  // ----- história: contexto da AI + fluxos afetados -----
+  function renderStoryAI(ctx,c){
+    if(!c.aiContext) c.aiContext={summary:'',project:'',notes:''};
+    $c(ctx,'AiSummary').value=c.aiContext.summary||'';
+    $c(ctx,'AiProject').value=c.aiContext.project||'';
+    $c(ctx,'AiNotes').value=c.aiContext.notes||'';
+    renderFlows(ctx,c);
+  }
+  function renderFlows(ctx,c){
+    if(!Array.isArray(c.affectedFlows)) c.affectedFlows=[];
+    const box=$c(ctx,'Flows'); box.innerHTML='';
+    $c(ctx,'FlowsCount').textContent=c.affectedFlows.length?`(${c.affectedFlows.length})`:'';
+    if(!c.affectedFlows.length){ const e=document.createElement('div'); e.className='diary-empty'; e.textContent='Nenhum fluxo mapeado. A validação final usa esta lista.'; box.append(e); }
+    c.affectedFlows.forEach(f=>{
+      const item=document.createElement('div'); item.className='flow-item';
+      const top=document.createElement('div'); top.className='flow-top';
+      const nm=document.createElement('input'); nm.className='flow-name'; nm.value=f.name||''; nm.placeholder='Nome do fluxo';
+      nm.addEventListener('change',()=>{ f.name=nm.value.trim(); save(); render(); });
+      const del=document.createElement('button'); del.className='flow-del'; del.textContent='🗑'; del.title='Remover fluxo';
+      del.addEventListener('click',()=>{ c.affectedFlows=c.affectedFlows.filter(x=>x.id!==f.id); save(); renderFlows(ctx,c); });
+      top.append(nm,del);
+      const files=document.createElement('input'); files.className='flow-files';
+      files.value=(f.files||[]).join(', '); files.placeholder='arquivos/módulos afetados (separados por vírgula)';
+      files.addEventListener('change',()=>{ f.files=files.value.split(',').map(s=>s.trim()).filter(Boolean); save(); });
+      item.append(top,files);
+      box.append(item);
+    });
+  }
+
+  // ----- task: badge de estado + tipo de loop + diário + controles -----
+  function renderTaskAI(ctx,c){
+    if(!Array.isArray(c.iterations)) c.iterations=[];
+    if(!c.execState) c.execState='idle';
+    // badge
+    const meta=EXEC_STATE_META[c.execState]||EXEC_STATE_META.idle;
+    const badge=$c(ctx,'ExecBadge');
+    badge.className='exec-badge st-'+meta.cls;
+    badge.textContent=meta.label;
+    // seletor de tipo de loop
+    const sel=$c(ctx,'LoopType'); sel.innerHTML='';
+    const optAuto=document.createElement('option'); optAuto.value='auto';
+    const prof=loopProfileOf(c);
+    optAuto.textContent=`Automático (por label → ${prof.name})`; sel.append(optAuto);
+    Object.values(state.loopProfiles||{}).filter(p=>p.id!=='__default').forEach(p=>{
+      const o=document.createElement('option'); o.value=p.id; o.textContent=p.name; sel.append(o);
+    });
+    const oDef=document.createElement('option'); oDef.value='__default'; oDef.textContent='Genérico'; sel.append(oDef);
+    sel.value=c.loopType||'auto';
+    sel.onchange=()=>{ c.loopType=sel.value; save(); renderTaskAI(ctx,c); };
+    // derivada de / dependências
+    const dv=$c(ctx,'DerivedFrom');
+    if(c.derivedFrom){ const o=getCard(c.derivedFrom);
+      dv.style.display='block'; dv.innerHTML='';
+      dv.append(document.createTextNode('🔗 Derivada de '));
+      const a=document.createElement('a'); a.textContent=o?`${o.key} · ${o.title}`:c.derivedFrom;
+      a.addEventListener('click',()=>{ if(o) openCard(o.id); }); dv.append(a);
+    } else dv.style.display='none';
+    const dep=$c(ctx,'Deps');
+    const deps=(c.dependsOn||[]).map(getCard).filter(Boolean);
+    if(deps.length){ dep.style.display='block'; dep.innerHTML='';
+      dep.append(document.createTextNode('⏳ Aguarda: '));
+      deps.forEach((d,i)=>{ const a=document.createElement('a'); a.textContent=`${d.key}${d.execState==='done'?' ✓':''}`;
+        a.addEventListener('click',()=>openCard(d.id)); dep.append(a); if(i<deps.length-1) dep.append(document.createTextNode(', ')); });
+    } else dep.style.display='none';
+    // controles
+    const story=getCard(c.parentId);
+    const running=story?isAutoRunning(story.id):false;
+    const stepBtn=$c(ctx,'StepBtn'), autoBtn=$c(ctx,'AutoBtn');
+    stepBtn.disabled=!story||c.execState==='done';
+    stepBtn.onclick=()=>{ if(story){ stepStory(story.id); } };
+    autoBtn.textContent=running?'⏸ Parar auto-play':'⏩ Auto-play';
+    autoBtn.onclick=()=>{ if(!story) return; if(isAutoRunning(story.id)) stopAuto(story.id); else startAuto(story.id); renderTaskAI(ctx,c); };
+    renderDiary(ctx,c);
+  }
+  function renderDiary(ctx,c){
+    const box=$c(ctx,'Diary'); box.innerHTML='';
+    if(!c.iterations||!c.iterations.length){ const e=document.createElement('div'); e.className='diary-empty'; e.textContent='Sem iterações ainda. Rode 1 iteração ou mova a história para In Progress.'; box.append(e); return; }
+    c.iterations.forEach(it=>{
+      const pm=PHASE_META[it.phase]||{label:it.phase,emoji:'•'};
+      const row=document.createElement('div'); row.className='iter';
+      const head=document.createElement('div'); head.className='iter-head';
+      const ph=document.createElement('span'); ph.className='iter-phase'; ph.textContent=pm.emoji+' '+pm.label;
+      const idx=document.createElement('span'); idx.className='iter-idx'; idx.textContent='#'+it.index;
+      const ag=getCard? null : null; const agentA=state.assignees.find(a=>a.id===it.agentId);
+      const agn=document.createElement('span'); agn.className='iter-agent'; agn.textContent=(agentA?('🤖 '+agentA.name):'')+' · '+new Date(it.ts).toLocaleString('pt-BR');
+      head.append(ph,idx,agn); row.append(head);
+      if(it.summary){ const s=document.createElement('div'); s.className='iter-summary'; s.textContent=it.summary; row.append(s); }
+      if(it.detail){ const d=document.createElement('div'); d.className='iter-detail'; d.textContent=it.detail; row.append(d); }
+      if(it.dodTouched&&it.dodTouched.length){ const dd=document.createElement('div'); dd.className='iter-dods';
+        const names=it.dodTouched.map(id=>{ const x=(c.dod||[]).find(d=>d.id===id); return x?x.text:id; });
+        dd.textContent='✓ DOD: '+names.join('; '); row.append(dd); }
+      if(it.handoff&&it.handoff.nextStep){ const n=document.createElement('div'); n.className='iter-next';
+        const b=document.createElement('b'); b.textContent='Próximo: '; n.append(b, document.createTextNode(it.handoff.nextStep));
+        if(it.handoff.targets&&it.handoff.targets.files&&it.handoff.targets.files.length){ n.append(document.createTextNode(' — '+it.handoff.targets.files.join(', '))); }
+        row.append(n); }
+      box.append(row);
+    });
+  }
+  // ============================================================= /UI DA AI
+
+  function renderChildren(ctx,c){
+    const sec=$c(ctx,'ChildrenSection'); const box=$c(ctx,'Children');
+    box.innerHTML='';
+    if(c.type==='task'){ sec.style.display='none'; return; } sec.style.display='block';
+    const addRow=$c(ctx,'ChildInput').closest('.add-check-row');
+    if(addRow) addRow.style.display='none'; // criação é por-coluna no mini board
+    if(c.type==='epic'){
+      // ------- épico: mini-kanban FUNCIONAL de histórias (colunas do board) -------
+      $c(ctx,'ChildrenLabel').textContent='Histórias';
+      const kids=childrenOf(c.id).filter(k=>k.type==='story');
+      const doneN=kids.filter(k=>isDoneColumn(columnOf(k.id)||{})).length;
+      $c(ctx,'ChildrenProgress').textContent = kids.length? `${doneN}/${kids.length}` : '';
+      box.className='task-board';
+      renderStoryBoard(box, c);
+      return;
+    }
+    // ------- história: mini-kanban FUNCIONAL de tasks -------
+    $c(ctx,'ChildrenLabel').textContent='Tasks';
+    const tasks=tasksOf(c.id); const dc=taskDoneColId();
+    $c(ctx,'ChildrenProgress').textContent = tasks.length? `${tasks.filter(t=>t.taskColId===dc).length}/${tasks.length}` : '';
+    box.className='task-board';
+    renderTaskBoard(box, c);
+  }
+
+  // mini-kanban de HISTÓRIAS dentro do modal do épico (colunas = state.columns)
+  let storyDragId=null;
+  function renderStoryBoard(box, epic){
+    box.innerHTML='';
+    state.columns.forEach(col=>{
+      const colEl=document.createElement('div'); colEl.className='task-col'; colEl.dataset.colid=col.id;
+      const head=document.createElement('div'); head.className='task-col-head';
+      const ttl=document.createElement('span'); ttl.className='task-col-title'; ttl.textContent=col.title;
+      const list0=col.cardIds.map(getCard).filter(k=>k&&k.type==='story'&&k.parentId===epic.id);
+      const cnt=document.createElement('span'); cnt.className='task-col-count'; cnt.textContent=list0.length; head.append(ttl,cnt);
+      colEl.append(head);
+      const list=document.createElement('div'); list.className='task-list'; list.dataset.colid=col.id;
+      list0.forEach(sk=> list.append(renderStoryMiniCard(sk)) );
+      setupStoryDropzone(list, col, epic);
+      colEl.append(list);
+      if(creationAllowed(col)){
+        const add=document.createElement('button'); add.className='task-add'; add.textContent='+ História';
+        add.addEventListener('click',()=>addStoryInline(list, col, epic));
+        colEl.append(add);
+      }
+      box.append(colEl);
+    });
+  }
+  function renderStoryMiniCard(sk){
+    const el=document.createElement('div'); el.className='task-card'; el.dataset.id=sk.id; el.draggable=true;
+    if(sk.blocked) el.classList.add('blocked');
+    const top=document.createElement('div'); top.className='task-card-top';
+    const key=document.createElement('span'); key.className='card-key'; key.textContent=sk.key; top.append(key);
+    if(sk.points!=null){ const p=document.createElement('span'); p.className='points-badge'; p.textContent=sk.points; top.append(p); }
+    if(sk.blocked){ const b=document.createElement('span'); b.textContent='⛔'; top.append(b); }
+    const t=document.createElement('div'); t.className='task-card-title'; t.textContent=sk.title;
+    el.append(top,t);
+    const tasks=tasksOf(sk.id);
+    if(tasks.length){ const dc=taskDoneColId(); const m=document.createElement('div'); m.className='card-meta';
+      const cb=document.createElement('span'); cb.className='card-badge'; cb.textContent=`🧩 ${tasks.filter(x=>x.taskColId===dc).length}/${tasks.length}`; m.append(cb); el.append(m); }
+    if(sk.assigneeIds.length){ const av=document.createElement('div'); av.className='card-assignees';
+      sk.assigneeIds.forEach(aid=>{ const a=state.assignees.find(x=>x.id===aid); if(!a) return;
+        const s=document.createElement('span'); s.className='avatar'; s.style.background=a.color; s.textContent=initials(a.name); s.title=a.name;
+        if(isBot(a)){ const bb=document.createElement('span'); bb.className='bot-badge'; bb.textContent='🤖'; s.append(bb); } av.append(s); });
+      el.append(av); }
+    el.addEventListener('click',e=>{ if(el.classList.contains('dragging')) return; openCard(sk.id); });
+    el.addEventListener('dragstart',e=>{ storyDragId=sk.id; el.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; e.stopPropagation(); try{e.dataTransfer.setData('text/plain',sk.id);}catch(_){} });
+    el.addEventListener('dragend',()=>{ storyDragId=null; el.classList.remove('dragging'); $$('.task-list.drag-over').forEach(x=>x.classList.remove('drag-over')); });
+    return el;
+  }
+  function setupStoryDropzone(list, col, epic){
+    list.addEventListener('dragover',e=>{ if(!storyDragId) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect='move'; list.classList.add('drag-over'); });
+    list.addEventListener('dragleave',e=>{ if(!list.contains(e.relatedTarget)) list.classList.remove('drag-over'); });
+    list.addEventListener('drop',e=>{
+      if(!storyDragId) return; e.preventDefault(); e.stopPropagation(); list.classList.remove('drag-over');
+      const sk=getCard(storyDragId); if(!sk||sk.type!=='story') return;
+      const fromCol=columnOf(sk.id);
+      // gate: só pode ir para Review/Done se todas as tasks estão Done
+      const gated = isDoneColumn(col) || colName(col)==='review' || colName(col)==='revisão';
+      if(gated && !allTasksDone(sk.id)){ showToast('Conclua todas as tasks antes de mover a história para '+col.title); return; }
+      if(fromCol && fromCol.id===col.id) return;
+      if(fromCol) fromCol.cardIds=fromCol.cardIds.filter(x=>x!==sk.id);
+      col.cardIds.push(sk.id);
+      if(reachedInProgress(col)) sk.everInProgress=true;
+      log(sk, `movida para "${col.title}"`);
+      save(); renderModal(); render();
+      if(['in progress','em progresso','fazendo'].includes(colName(col))){ onStoryEnterInProgress(sk.id); }
+    });
+  }
+  function addStoryInline(list, col, epic){
+    if(list.querySelector('.task-add-input')) return;
+    const input=document.createElement('textarea'); input.className='task-add-input'; input.rows=2; input.placeholder='Título da história…';
+    list.append(input); input.focus();
+    let done=false;
+    const commit=(keep)=>{ if(done) return; done=true; const val=input.value.trim();
+      if(val){ const cid=id();
+        state.cards[cid]={ id:cid, key:nextKey('story'), type:'story', title:val, description:'',
+          points:null, parentId:epic.id, taskColId:null, blocked:false, everInProgress:false, labelIds:[], assigneeIds:[],
+          acceptance:[], dod:[], comments:[], activity:[{id:id(),text:`criada em "${col.title}"`,ts:Date.now()}], createdAt:Date.now() };
+        col.cardIds.push(cid);
+        log(epic, `história "${val}" adicionada`); save();
+        renderModal(); render();
+        if(keep){ const fresh=list.parentElement && list.parentElement.parentElement && document.querySelector('#mChildren .task-list[data-colid="'+col.id+'"]'); if(fresh) addStoryInline(fresh, col, epic); }
+        return;
+      }
+      renderModal();
+    };
+    input.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault(); commit(true);} else if(e.key==='Escape'){done=true; renderModal();} });
+    input.addEventListener('blur',()=>commit(false));
+  }
+
+  function renderTaskBoard(box, story){
+    box.innerHTML='';
+    (state.taskColumns||[]).forEach(tc=>{
+      const colEl=document.createElement('div'); colEl.className='task-col'; colEl.dataset.tcid=tc.id;
+      const head=document.createElement('div'); head.className='task-col-head';
+      const ttl=document.createElement('span'); ttl.className='task-col-title'; ttl.textContent=tc.title;
+      const list0=Object.values(state.cards).filter(k=>k.type==='task'&&k.parentId===story.id&&k.taskColId===tc.id);
+      const cnt=document.createElement('span'); cnt.className='task-col-count'; cnt.textContent=list0.length; head.append(ttl,cnt);
+      // ações de coluna
+      const acts=document.createElement('span'); acts.className='task-col-acts';
+      const left=document.createElement('button'); left.className='tcol-btn'; left.textContent='‹'; left.title='Mover coluna p/ esquerda';
+      left.addEventListener('click',ev=>{ev.stopPropagation(); moveTaskCol(tc.id,-1);});
+      const right=document.createElement('button'); right.className='tcol-btn'; right.textContent='›'; right.title='Mover coluna p/ direita';
+      right.addEventListener('click',ev=>{ev.stopPropagation(); moveTaskCol(tc.id,1);});
+      acts.append(left,right);
+      if(!tc.protected){ const del=document.createElement('button'); del.className='tcol-btn danger'; del.textContent='✕'; del.title='Remover coluna';
+        del.addEventListener('click',ev=>{ev.stopPropagation(); removeTaskCol(tc.id);}); acts.append(del); }
+      head.append(acts);
+      colEl.append(head);
+
+      const list=document.createElement('div'); list.className='task-list'; list.dataset.tcid=tc.id;
+      list0.forEach(tk=> list.append(renderTaskCard(tk)) );
+      setupTaskDropzone(list, tc, story);
+      colEl.append(list);
+
+      // adicionar task (só faz sentido na 1ª coluna, mas permitimos em qualquer)
+      const add=document.createElement('button'); add.className='task-add'; add.textContent='+ Task';
+      add.addEventListener('click',()=>addTaskInline(list, tc, story));
+      colEl.append(add);
+      box.append(colEl);
+    });
+    // botão nova coluna
+    const addCol=document.createElement('button'); addCol.className='task-col-add'; addCol.textContent='+ Coluna';
+    addCol.addEventListener('click',()=>{ const name=prompt('Nome da nova coluna de tasks:'); if(!name) return;
+      const nm=name.trim(); if(!nm) return;
+      state.taskColumns.push({id:id(),title:nm,protected:false}); save(); renderTaskBoard(box, story); });
+    box.append(addCol);
+  }
+
+  function renderTaskCard(tk){
+    const el=document.createElement('div'); el.className='task-card'; el.dataset.id=tk.id; el.draggable=true;
+    if(tk.blocked) el.classList.add('blocked');
+    const top=document.createElement('div'); top.className='task-card-top';
+    const key=document.createElement('span'); key.className='card-key'; key.textContent=tk.key; top.append(key);
+    if(tk.blocked){ const b=document.createElement('span'); b.textContent='⛔'; top.append(b); }
+    const t=document.createElement('div'); t.className='task-card-title'; t.textContent=tk.title;
+    el.append(top,t);
+    if(tk.assigneeIds.length){ const av=document.createElement('div'); av.className='card-assignees';
+      tk.assigneeIds.forEach(aid=>{ const a=state.assignees.find(x=>x.id===aid); if(!a) return;
+        const s=document.createElement('span'); s.className='avatar'; s.style.background=a.color; s.textContent=initials(a.name); s.title=a.name;
+        if(isBot(a)){ const bb=document.createElement('span'); bb.className='bot-badge'; bb.textContent='🤖'; s.append(bb); } av.append(s); });
+      el.append(av); }
+    el.addEventListener('click',e=>{ if(el.classList.contains('dragging')) return; openCard(tk.id); });
+    el.addEventListener('dragstart',e=>{ taskDragId=tk.id; el.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; e.stopPropagation(); try{e.dataTransfer.setData('text/plain',tk.id);}catch(_){} });
+    el.addEventListener('dragend',()=>{ taskDragId=null; el.classList.remove('dragging'); $$('.task-list.drag-over').forEach(x=>x.classList.remove('drag-over')); });
+    return el;
+  }
+
+  let taskDragId=null;
+  function setupTaskDropzone(list, tc, story){
+    list.addEventListener('dragover',e=>{ if(!taskDragId) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect='move'; list.classList.add('drag-over'); });
+    list.addEventListener('dragleave',e=>{ if(!list.contains(e.relatedTarget)) list.classList.remove('drag-over'); });
+    list.addEventListener('drop',e=>{
+      if(!taskDragId) return; e.preventDefault(); e.stopPropagation(); list.classList.remove('drag-over');
+      const tk=getCard(taskDragId); if(!tk||tk.type!=='task') return;
+      const from=taskCol(tk.taskColId);
+      tk.taskColId=tc.id;
+      if(from && from.id!==tc.id) log(tk, `task movida de "${from.title}" para "${tc.title}"`);
+      save();
+      const box=$('#sChildren'); renderTaskBoard(box, story);
+      // atualiza progresso do label
+      const tasks=tasksOf(story.id); const dc=taskDoneColId();
+      $('#sChildrenProgress').textContent = tasks.length? `${tasks.filter(t=>t.taskColId===dc).length}/${tasks.length}` : '';
+      render();
+    });
+  }
+
+  function addTaskInline(list, tc, story){
+    if(list.querySelector('.task-add-input')) return;
+    const input=document.createElement('textarea'); input.className='task-add-input'; input.rows=2; input.placeholder='Título da task…';
+    list.append(input); input.focus();
+    let done=false;
+    const commit=(keep)=>{ if(done) return; done=true; const val=input.value.trim();
+      if(val){ const cid=id();
+        state.cards[cid]={ id:cid, key:nextKey('task'), type:'task', title:val, description:'',
+          points:null, parentId:story.id, taskColId:tc.id, blocked:false, everInProgress:false, labelIds:[], assigneeIds:[],
+          acceptance:[], dod:[], comments:[], activity:[{id:id(),text:`criada em "${tc.title}"`,ts:Date.now()}], createdAt:Date.now() };
+        log(story, `task "${val}" adicionada`); save();
+        const box=$('#sChildren');
+        renderTaskBoard(box, story); render();
+        if(keep){ const fresh=box.querySelector(`.task-list[data-tcid="${tc.id}"]`); if(fresh) addTaskInline(fresh, tc, story); }
+        return;
+      }
+      renderTaskBoard($('#sChildren'), story);
+    };
+    input.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault(); commit(true);} else if(e.key==='Escape'){done=true; renderTaskBoard($('#sChildren'), story);} });
+    input.addEventListener('blur',()=>commit(false));
+  }
+
+  function moveTaskCol(tcid, dir){
+    const arr=state.taskColumns; const i=arr.findIndex(t=>t.id===tcid); if(i<0) return;
+    const j=i+dir; if(j<0||j>=arr.length) return;
+    const tmp=arr[i]; arr[i]=arr[j]; arr[j]=tmp; save();
+    const c=cardOf(storyCtx); if(c) renderTaskBoard($('#sChildren'), c);
+  }
+  function removeTaskCol(tcid){
+    const tc=taskCol(tcid); if(!tc||tc.protected) return;
+    const affected=Object.values(state.cards).filter(k=>k.type==='task'&&k.taskColId===tcid);
+    if(affected.length && !confirm(`Remover "${tc.title}"? ${affected.length} task(s) voltarão para a primeira coluna.`)) return;
+    const firstId=firstTaskColId();
+    affected.forEach(k=>{ k.taskColId = (firstId===tcid ? taskDoneColId() : firstId); });
+    state.taskColumns=state.taskColumns.filter(t=>t.id!==tcid); save();
+    const c=cardOf(storyCtx); if(c) renderTaskBoard($('#sChildren'), c);
+  }
+
+  // botões de "adicionar filho" via input legado (ocultos; criação é inline no mini-board)
+  $('#mAddChildBtn').addEventListener('click',addChild);
+  $('#mChildInput').addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault(); addChild();} });
+  function addChild(){
+    const c=cardOf(epicCtx); if(!c||c.type!=='epic') return; // só épico usa este input (histórias usam o mini board)
+    const inp=$('#mChildInput'); const val=inp.value.trim(); if(!val) return;
+    const cid=id();
+    state.cards[cid]={ id:cid, key:nextKey('story'), type:'story', title:val, description:'',
+      points:null, parentId:c.id, taskColId:null, blocked:false, everInProgress:false, labelIds:[], assigneeIds:[],
+      acceptance:[], dod:[], comments:[], activity:[{id:id(),text:`criada como filha de ${c.key}`,ts:Date.now()}], createdAt:Date.now() };
+    const backlog = state.columns.find(col=>creationAllowed(col)) || state.columns[0];
+    backlog.cardIds.push(cid);
+    log(c,`história "${val}" adicionada`);
+    inp.value=''; save(); renderModal(); showToast('História criada no Backlog');
+  }
+
+  // checklists genéricos (acceptance / dod) — por contexto
+  function renderChecklist(ctx, kind, boxSfx, progSfx, c){
+    const box=$c(ctx,boxSfx); box.innerHTML=''; const arr=c[kind];
+    const done=arr.filter(i=>i.done).length;
+    $c(ctx,progSfx).textContent = arr.length? `${done}/${arr.length}` : '';
+    arr.forEach(item=>{
+      const row=document.createElement('div'); row.className='check-item';
+      const cb=document.createElement('input'); cb.type='checkbox'; cb.checked=!!item.done;
+      cb.addEventListener('change',()=>{ item.done=cb.checked; save(); renderChecklist(ctx,kind,boxSfx,progSfx,c); });
+      const tx=document.createElement('span'); tx.className='txt'+(item.done?' done':''); tx.textContent=item.text;
+      const del=document.createElement('button'); del.className='del-check'; del.textContent='🗑';
+      del.addEventListener('click',()=>{ c[kind]=arr.filter(x=>x.id!==item.id); save(); renderChecklist(ctx,kind,boxSfx,progSfx,c); });
+      row.append(cb,tx,del); box.append(row);
+    });
+  }
+  function bindAddCheck(ctx, inputSfx, btnSfx, kind, boxSfx, progSfx){
+    const add=()=>{ const c=cardOf(ctx); if(!c) return; const inp=$c(ctx,inputSfx); const v=inp.value.trim(); if(!v) return;
+      c[kind].push({id:id(),text:v,done:false}); inp.value=''; save(); renderChecklist(ctx,kind,boxSfx,progSfx,c); };
+    $c(ctx,btnSfx).addEventListener('click',add);
+    $c(ctx,inputSfx).addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault(); add();} });
+  }
+  [epicCtx,storyCtx,taskCtx].forEach(ctx=>{
+    bindAddCheck(ctx,'AcInput','AddAcBtn','acceptance','Acceptance','AcProgress');
+    bindAddCheck(ctx,'DodInput','AddDodBtn','dod','Dod','DodProgress');
+  });
+
+  function renderComments(ctx,c){
+    const box=$c(ctx,'Comments'); box.innerHTML='';
+    c.comments.slice().sort((a,b)=>b.ts-a.ts).forEach(cm=>{
+      const row=document.createElement('div'); row.className='comment';
+      const a=state.assignees.find(x=>x.name===cm.author);
+      const av=document.createElement('span'); av.className='mini-avatar'; av.style.background=a?a.color:'#888'; av.textContent=initials(cm.author);
+      const body=document.createElement('div'); body.className='comment-body';
+      const h=document.createElement('div'); const au=document.createElement('span'); au.className='comment-author'; au.textContent=cm.author;
+      const tm=document.createElement('span'); tm.className='comment-time'; tm.textContent=relativeTime(cm.ts);
+      h.append(au,tm); const txt=document.createElement('div'); txt.className='comment-text'; txt.textContent=cm.text;
+      body.append(h,txt); row.append(av,body); box.append(row);
+    });
+  }
+  function bindCommentForm(ctx){
+    $c(ctx,'CommentForm').addEventListener('submit',e=>{
+      e.preventDefault(); const c=cardOf(ctx); if(!c) return; const inp=$c(ctx,'CommentInput'); const v=inp.value.trim(); if(!v) return;
+      c.comments.push({id:id(),author:'Você',text:v,ts:Date.now()}); log(c,'comentou'); inp.value=''; save(); renderComments(ctx,c); renderActivity(ctx,c);
+    });
+  }
+  [epicCtx,storyCtx,taskCtx].forEach(bindCommentForm);
+
+  function renderActivity(ctx,c){
+    const box=$c(ctx,'Activity'); box.innerHTML='';
+    c.activity.slice(0,30).forEach(a=>{ const it=document.createElement('div'); it.className='activity-item';
+      const b=document.createElement('b'); b.textContent=a.text; const t=document.createElement('span'); t.className='activity-time'; t.textContent=relativeTime(a.ts);
+      it.append(b,t); box.append(it); });
+  }
+
+  // inputs do modal -> state (por contexto)
+  function bindModalInputs(ctx){
+    $c(ctx,'Title').addEventListener('input',()=>{ const c=cardOf(ctx); if(c){ c.title=$c(ctx,'Title').value; save(); render(); } });
+    $c(ctx,'Desc').addEventListener('input',()=>{ const c=cardOf(ctx); if(c){ c.description=$c(ctx,'Desc').value; save(); } });
+    $c(ctx,'Points').addEventListener('change',()=>{ const c=cardOf(ctx); if(c){ c.points=$c(ctx,'Points').value===''?null:parseInt($c(ctx,'Points').value,10); save(); render(); } });
+    $c(ctx,'Parent').addEventListener('change',()=>{ const c=cardOf(ctx); if(c){ c.parentId=$c(ctx,'Parent').value||null; save(); render(); } });
+    $c(ctx,'Blocked').addEventListener('change',()=>{ const c=cardOf(ctx); if(c){ c.blocked=$c(ctx,'Blocked').value==='true'; log(c, c.blocked?'marcado como BLOQUEADO':'desbloqueado'); save(); renderCtx(ctx); render(); } });
+    // ---- campos de AI (história) ----
+    if(ctx.prefix==='s'){
+      const bindAi=(sfx,key)=>{ const el=$c(ctx,sfx); if(el) el.addEventListener('input',()=>{ const c=cardOf(ctx); if(c&&c.type==='story'){ if(!c.aiContext) c.aiContext={summary:'',project:'',notes:''}; c.aiContext[key]=el.value; save(); } }); };
+      bindAi('AiSummary','summary'); bindAi('AiProject','project'); bindAi('AiNotes','notes');
+      const addFlow=()=>{ const c=cardOf(ctx); if(!c||c.type!=='story') return; const inp=$c(ctx,'FlowInput'); const v=inp.value.trim(); if(!v) return;
+        if(!Array.isArray(c.affectedFlows)) c.affectedFlows=[]; c.affectedFlows.push({id:id(),name:v,files:[],note:''}); inp.value=''; save(); renderFlows(ctx,c); };
+      $c(ctx,'AddFlowBtn').addEventListener('click',addFlow);
+      $c(ctx,'FlowInput').addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault(); addFlow();} });
+    }
+    $c(ctx,'Delete').addEventListener('click',()=>{ const c=cardOf(ctx); if(!c) return;
+      const kids=childrenOf(c.id); if(kids.length && !confirm(`Este item tem ${kids.length} subitem(ns). Eles ficarão órfãos. Excluir mesmo assim?`)) return;
+      if(!kids.length && !confirm('Excluir este card?')) return;
+      kids.forEach(k=>k.parentId=null);
+      const col=columnOf(c.id); if(col) col.cardIds=col.cardIds.filter(x=>x!==c.id);
+      delete state.cards[c.id]; save();
+      closeFrom(ctx); // fecha este modal e os mais profundos
+      showToast('Card excluído');
+    });
+  }
+  [epicCtx,storyCtx,taskCtx].forEach(bindModalInputs);
+
+  // botões Fechar (X / rodapé) fecham este modal e os mais profundos
+  $('#mClose').addEventListener('click',()=>closeFrom(epicCtx));
+  $('#mDone').addEventListener('click',()=>closeFrom(epicCtx));
+  $('#sClose').addEventListener('click',()=>closeFrom(storyCtx));
+  $('#sDone').addEventListener('click',()=>closeFrom(storyCtx));
+  $('#tClose').addEventListener('click',()=>closeFrom(taskCtx));
+  $('#tDone').addEventListener('click',()=>closeFrom(taskCtx));
+  // clique no backdrop (fora de qualquer .modal) fecha TUDO
+  modalLayer.addEventListener('click',e=>{ if(e.target===modalLayer) closeModal(); });
+  // ------------------------------------------------------------- modal agentes
+  const agentsModal=$('#agentsModal');
+  $('#manageAgentsBtn').addEventListener('click',()=>{ renderAgentsModal(); agentsModal.classList.remove('hidden'); });
+  $('#agentsClose').addEventListener('click',()=>agentsModal.classList.add('hidden'));
+  agentsModal.addEventListener('click',e=>{ if(e.target===agentsModal) agentsModal.classList.add('hidden'); });
+  function renderAgentsModal(){
+    const box=$('#agentsList'); box.innerHTML='';
+    if(!state.assignees.length){ const p=document.createElement('div'); p.style.color='var(--text-muted)'; p.textContent='Nenhum agente ainda.'; box.append(p); }
+    state.assignees.forEach(a=>{
+      const row=document.createElement('div'); row.className='assignee-option'; row.style.justifyContent='space-between';
+      const left=document.createElement('span'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px';
+      const av=document.createElement('span'); av.className='mini-avatar'; av.style.background=a.color; av.textContent=initials(a.name);
+      const nm=document.createElement('span'); nm.textContent='🤖 '+a.name; left.append(av,nm);
+      const actions=document.createElement('span'); actions.style.display='flex'; actions.style.gap='4px';
+      const ren=document.createElement('button'); ren.className='btn btn-ghost btn-sm'; ren.textContent='Renomear';
+      ren.addEventListener('click',()=>{ const n=prompt('Novo nome do agente:',a.name); if(n&&n.trim()){ a.name=n.trim(); save(); renderAgentsModal(); render(); } });
+      const del=document.createElement('button'); del.className='btn btn-danger btn-sm'; del.textContent='Excluir';
+      del.addEventListener('click',()=>{ if(!confirm(`Excluir "${a.name}"?`)) return;
+        state.assignees=state.assignees.filter(x=>x.id!==a.id);
+        Object.values(state.cards).forEach(c=>c.assigneeIds=c.assigneeIds.filter(x=>x!==a.id));
+        save(); renderAgentsModal(); render(); });
+      actions.append(ren,del); row.append(left,actions); box.append(row);
+    });
+  }
+  $('#newAgentBtn').addEventListener('click',createAgentFromModal);
+  $('#newAgentName').addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault(); createAgentFromModal();} });
+  function createAgentFromModal(){
+    const inp=$('#newAgentName'); const v=inp.value.trim(); if(!v) return;
+    const color=AGENT_PALETTE[state.assignees.length%AGENT_PALETTE.length];
+    state.assignees.push({id:id(),name:v,color,type:'bot'}); inp.value=''; save(); renderAgentsModal(); render();
+  }
+
+  // ------------------------------------------------------------- loops modal
+  const loopsModal=$('#loopsModal');
+  $('#manageLoopsBtn').addEventListener('click',()=>{ renderLoopsModal(); loopsModal.classList.remove('hidden'); });
+  $('#loopsClose').addEventListener('click',()=>loopsModal.classList.add('hidden'));
+  loopsModal.addEventListener('click',e=>{ if(e.target===loopsModal) loopsModal.classList.add('hidden'); });
+  const PHASE_OPTIONS=['reproduce','analysis','implementation','validation'];
+  function renderLoopsModal(){
+    const box=$('#loopsList'); box.innerHTML='';
+    Object.values(state.loopProfiles||{}).forEach(p=>{
+      const card=document.createElement('div'); card.className='flow-item';
+      const top=document.createElement('div'); top.className='flow-top';
+      const nm=document.createElement('input'); nm.className='flow-name'; nm.value=p.name; nm.disabled=!!p.builtin;
+      nm.addEventListener('change',()=>{ p.name=nm.value.trim()||p.name; save(); render(); });
+      top.append(nm);
+      const tag=document.createElement('span'); tag.style.fontSize='11px'; tag.style.color='var(--text-muted)'; tag.textContent=p.builtin?'(embutido)':'(custom)'; top.append(tag);
+      if(!p.builtin){ const del=document.createElement('button'); del.className='flow-del'; del.textContent='🗑';
+        del.addEventListener('click',()=>{ if(!confirm(`Excluir perfil "${p.name}"?`)) return;
+          delete state.loopProfiles[p.id];
+          state.labels.forEach(l=>{ if(l.loopProfileId===p.id) delete l.loopProfileId; });
+          Object.values(state.cards).forEach(c=>{ if(c.loopType===p.id) c.loopType='auto'; });
+          save(); renderLoopsModal(); }); top.append(del); }
+      card.append(top);
+      const desc=document.createElement('input'); desc.className='flow-files'; desc.value=p.description||''; desc.placeholder='descrição';
+      desc.addEventListener('change',()=>{ p.description=desc.value; save(); }); card.append(desc);
+      const ph=document.createElement('input'); ph.className='flow-files'; ph.value=(p.phases||[]).join(', '); ph.placeholder='fases: analysis, implementation, validation';
+      ph.addEventListener('change',()=>{ const arr=ph.value.split(',').map(s=>s.trim()).filter(s=>PHASE_OPTIONS.includes(s)); if(arr.length){ if(arr[arr.length-1]!=='validation') arr.push('validation'); p.phases=arr; save(); renderLoopsModal(); } });
+      card.append(ph);
+      box.append(card);
+    });
+    // mapa label -> perfil
+    const map=$('#loopsLabelMap'); map.innerHTML='';
+    state.labels.forEach(l=>{
+      const row=document.createElement('div'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px';
+      const sw=document.createElement('span'); sw.className='swatch'; sw.style.background=l.color; sw.style.width='14px'; sw.style.height='14px'; sw.style.borderRadius='4px';
+      const nm=document.createElement('span'); nm.style.flex='1'; nm.style.fontSize='13px'; nm.textContent=l.name;
+      const sel=document.createElement('select'); sel.className='select-inline';
+      const none=document.createElement('option'); none.value=''; none.textContent='— genérico —'; sel.append(none);
+      Object.values(state.loopProfiles||{}).filter(p=>p.id!=='__default').forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=p.name; sel.append(o); });
+      sel.value=l.loopProfileId||'';
+      sel.addEventListener('change',()=>{ if(sel.value) l.loopProfileId=sel.value; else delete l.loopProfileId; save(); renderModal(); });
+      row.append(sw,nm,sel); map.append(row);
+    });
+  }
+  $('#newLoopBtn').addEventListener('click',createLoopFromModal);
+  $('#newLoopName').addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault(); createLoopFromModal();} });
+  function createLoopFromModal(){
+    const inp=$('#newLoopName'); const v=inp.value.trim(); if(!v) return;
+    const pid='lp_'+id();
+    state.loopProfiles[pid]={ id:pid, name:v, builtin:false, description:'Perfil personalizado.', phases:['analysis','implementation','validation'], validation:'flows+regression', firstStep:'Entender a tarefa.' };
+    inp.value=''; save(); renderLoopsModal();
+  }
+
+  // ------------------------------------------------------------- header controls
+  $('#themeToggle').addEventListener('click',()=>{ state.theme = state.theme==='dark'?'light':'dark'; save(); render(); });
+  $('#searchInput').addEventListener('input',renderColumns);
+  $('#filterType').addEventListener('change',renderColumns);
+  $('#filterLabel').addEventListener('change',renderColumns);
+  $('#filterAssignee').addEventListener('change',renderColumns);
+  $('#addColumnBtn').addEventListener('click',startAddColumn);
+
+  $('#boardTitle').addEventListener('dblclick',()=>{
+    const el=$('#boardTitle'); const input=document.createElement('input'); input.className='app-title-input'; input.value=state.boardTitle;
+    el.replaceWith(input); input.focus(); input.select(); let once=false;
+    const commit=()=>{ if(once) return; once=true; const v=input.value.trim(); if(v) state.boardTitle=v; save(); render(); };
+    input.addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault(); commit();} else if(e.key==='Escape'){once=true; render();} });
+    input.addEventListener('blur',commit);
+  });
+
+  // export / import / reset
+  $('#exportBtn').addEventListener('click',()=>{
+    const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download=`agile-board-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href);
+    showToast('Board exportado');
+  });
+  $('#importBtn').addEventListener('click',()=>$('#importFile').click());
+  $('#importFile').addEventListener('change',e=>{
+    const file=e.target.files[0]; if(!file) return; const reader=new FileReader();
+    reader.onload=()=>{ try{ const data=JSON.parse(reader.result);
+      if(!data.columns||!data.cards) throw new Error('estrutura inválida');
+      state=data; seq=state.seq||0; migrate(); save(); render(); showToast('Board importado');
+    }catch(err){ showToast('JSON inválido: '+err.message); } finally{ e.target.value=''; } };
+    reader.readAsText(file);
+  });
+  $('#resetBtn').addEventListener('click',()=>{ if(!confirm('Restaurar o board de exemplo? Isso apaga o estado atual.')) return; localStorage.removeItem(STORAGE_KEY); seed(); render(); showToast('Board restaurado'); });
+
+  // toast
+  let toastTimer=null;
+  function showToast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),2500); }
+
+  // teclado
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'){
+    if(!agentsModal.classList.contains('hidden')){ agentsModal.classList.add('hidden'); return; }
+    if(!loopsModal.classList.contains('hidden')){ loopsModal.classList.add('hidden'); return; }
+    // cada Esc fecha o modal do topo da pilha (task -> história -> épico)
+    if(modalStack.length){ closeTop(); return; }
+  } });
+
+  // ------------------------------------------------------------- init
+  load();
+  render();
+  window.__agileBoard = { get state(){return state;}, save, render, seed,
+    // hooks p/ automação/testes por AIs
+    getCard, columnOf, tasksOf, childrenOf, openCard, closeModal, get stack(){return modalStack;},
+    stepStory, runIteration, startAuto, stopAuto, isAutoRunning, onStoryEnterInProgress,
+    pickNextTask, loopProfileOf, dodAllDone, onEngineEvent }; // hook p/ automação por AIs
+})();
+</script>
+</body>
+</html>
