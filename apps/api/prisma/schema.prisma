@@ -1,0 +1,311 @@
+// Prisma schema — Kanban-AI
+// Fonte da verdade do domínio: docs/reference/kanban.html
+// NOTA v1: DOR e `acceptance` foram REMOVIDOS. O único checklist é o DOD.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────
+
+enum CardType {
+  epic
+  story
+  task
+}
+
+enum ExecState {
+  idle
+  analyzing
+  implementing
+  validating
+  blocked_dep // "blocked-dep" no domínio
+  done
+}
+
+enum IterationPhase {
+  reproduce
+  analysis
+  implementation
+  validation
+}
+
+enum ValidationStrategy {
+  flows_regression   // flows+regression
+  bug_gone_regression // bug-gone+regression
+  regression_only    // regression-only
+}
+
+// ─────────────────────────────────────────────────────────────
+// Board & colunas
+// ─────────────────────────────────────────────────────────────
+
+model Board {
+  id        String   @id @default(uuid())
+  title     String
+  seq       Int      @default(0) // contador para chaves EP-/US-/TK-
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  columns      Column[]
+  cards        Card[]
+  labels       Label[]
+  assignees    Assignee[]
+  loopProfiles LoopProfile[]
+}
+
+// Colunas do board principal (stories) e do mini-kanban (tasks).
+// `isTaskColumn` distingue os dois fluxos.
+model Column {
+  id           String  @id @default(uuid())
+  boardId      String
+  board        Board   @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  title        String
+  wipLimit     Int?
+  protected    Boolean @default(false)
+  isTaskColumn Boolean @default(false)
+  position     Int     @default(0)
+
+  // Cards posicionados nesta coluna (stories/epics via boardColumn; tasks via taskColumn)
+  boardCards Card[] @relation("BoardColumn")
+  taskCards  Card[] @relation("TaskColumn")
+
+  @@index([boardId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Card polimórfico (epic | story | task)
+// ─────────────────────────────────────────────────────────────
+
+model Card {
+  id          String   @id @default(uuid())
+  boardId     String
+  board       Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  key         String // EP-1, US-2, TK-3
+  type        CardType
+  title       String
+  description String   @default("")
+
+  points         Int? // 1,2,3,5,8,13 (só epic/story)
+  blocked        Boolean @default(false)
+  everInProgress Boolean @default(false)
+
+  // Hierarquia: task -> story -> epic
+  parentId String?
+  parent   Card?   @relation("Hierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children Card[]  @relation("Hierarchy")
+
+  // Posição no board principal (para epic/story)
+  boardColumnId String?
+  boardColumn   Column? @relation("BoardColumn", fields: [boardColumnId], references: [id], onDelete: SetNull)
+
+  // Posição no mini-kanban de tasks (para task)
+  taskColumnId String?
+  taskColumn   Column? @relation("TaskColumn", fields: [taskColumnId], references: [id], onDelete: SetNull)
+
+  position Int @default(0)
+
+  // ── Campos específicos de STORY ──
+  aiSummary String? // aiContext.summary
+  aiProject String? // aiContext.project (repo-alvo)
+  aiNotes   String? // aiContext.notes
+
+  // ── Campos específicos de TASK ──
+  loopType  String?    // id do loop profile (feature|bug|refactor|__default) ou custom
+  execState ExecState? @default(idle)
+
+  // Task derivada de uma falha de validação
+  derivedFromId String?
+  derivedFrom   Card?   @relation("Derivation", fields: [derivedFromId], references: [id], onDelete: SetNull)
+  derived       Card[]  @relation("Derivation")
+
+  // Dependências entre tasks (grafo)
+  dependsOn   TaskDependency[] @relation("Dependent")
+  dependents  TaskDependency[] @relation("Dependency")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relações filhas
+  dodItems      DodItem[]
+  comments      Comment[]
+  activities    Activity[]
+  affectedFlows AffectedFlow[]
+  iterations    Iteration[]
+  labels        CardLabel[]
+  assignees     CardAssignee[]
+
+  @@unique([boardId, key])
+  @@index([boardId])
+  @@index([parentId])
+  @@index([type])
+}
+
+// Aresta do grafo de dependências entre tasks.
+model TaskDependency {
+  id          String @id @default(uuid())
+  dependentId String // a task que depende
+  dependent   Card   @relation("Dependent", fields: [dependentId], references: [id], onDelete: Cascade)
+  dependsOnId String // a task que precisa terminar antes
+  dependsOn   Card   @relation("Dependency", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@unique([dependentId, dependsOnId])
+  @@index([dependentId])
+  @@index([dependsOnId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Checklists / notas do card
+// ─────────────────────────────────────────────────────────────
+
+// Definition of Done — ÚNICO checklist do v1.
+model DodItem {
+  id       String  @id @default(uuid())
+  cardId   String
+  card     Card    @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  text     String
+  done     Boolean @default(false)
+  position Int     @default(0)
+
+  @@index([cardId])
+}
+
+model Comment {
+  id       String   @id @default(uuid())
+  cardId   String
+  card     Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  authorId String? // assignee (agent) ou null
+  text     String
+  ts       DateTime @default(now())
+
+  @@index([cardId])
+}
+
+model Activity {
+  id     String   @id @default(uuid())
+  cardId String
+  card   Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  text   String
+  ts     DateTime @default(now())
+
+  @@index([cardId])
+}
+
+// Fluxo/área do código afetada por uma story (usado na validação final).
+model AffectedFlow {
+  id     String   @id @default(uuid())
+  cardId String
+  card   Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  name   String
+  files  String[] // paths
+  note   String   @default("")
+
+  @@index([cardId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Loop engine: diário de iterações
+// ─────────────────────────────────────────────────────────────
+
+model Iteration {
+  id      String         @id @default(uuid())
+  cardId  String // sempre uma task
+  card    Card           @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  index   Int
+  ts      DateTime       @default(now())
+  agentId String? // assignee (agent)
+  phase   IterationPhase
+
+  detail  String @default("") // registro minucioso (lido pela próxima iteração)
+  summary String @default("") // resumo curto
+
+  // handoff
+  handoffState    String   @default("") // ExecState | 'blocked' | 'done'
+  handoffNextStep String   @default("")
+  handoffFiles    String[]
+  handoffDodIds   String[]
+
+  // ids de DOD marcados nesta iteração
+  dodTouched String[]
+
+  @@unique([cardId, index])
+  @@index([cardId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Labels & Assignees (agents)
+// ─────────────────────────────────────────────────────────────
+
+model Label {
+  id            String  @id @default(uuid())
+  boardId       String
+  board         Board   @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  name          String
+  color         String  @default("#6b778c")
+  loopProfileId String? // mapeia para um LoopProfile
+
+  cards CardLabel[]
+
+  @@index([boardId])
+}
+
+// Assignee = agent autônomo (não humano).
+model Assignee {
+  id      String  @id @default(uuid())
+  boardId String
+  board   Board   @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  name    String
+  model   String? // modelo/agent preferido (opus, gpt, ...)
+
+  cards CardAssignee[]
+
+  @@index([boardId])
+}
+
+// Perfil de loop (feature|bug|refactor|__default) — comportamento do agent por label.
+model LoopProfile {
+  id         String             @id @default(uuid())
+  boardId    String
+  board      Board              @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  profileId  String // 'feature' | 'bug' | 'refactor' | '__default' | custom
+  name       String
+  builtin    Boolean            @default(false)
+  description String             @default("")
+  phases     IterationPhase[]
+  validation ValidationStrategy
+  firstStep  String             @default("")
+
+  @@unique([boardId, profileId])
+  @@index([boardId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tabelas de junção N:N
+// ─────────────────────────────────────────────────────────────
+
+model CardLabel {
+  cardId  String
+  card    Card   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  labelId String
+  label   Label  @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([cardId, labelId])
+  @@index([labelId])
+}
+
+model CardAssignee {
+  cardId     String
+  card       Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  assigneeId String
+  assignee   Assignee @relation(fields: [assigneeId], references: [id], onDelete: Cascade)
+
+  @@id([cardId, assigneeId])
+  @@index([assigneeId])
+}

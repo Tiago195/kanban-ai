@@ -1,0 +1,43 @@
+{
+  "name": "@kanban-ai/api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Backend NestJS + Fastify do Kanban-AI",
+  "scripts": {
+    "build": "nest build",
+    "dev": "nest start --watch",
+    "start": "node dist/main.js",
+    "lint": "eslint src",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
+    "db:reset": "prisma migrate reset --force"
+  },
+  "prisma": {
+    "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^8.3.1",
+    "@kanban-ai/shared": "*",
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/platform-fastify": "^10.4.15",
+    "@prisma/client": "^6.1.0",
+    "fastify": "^5.2.0",
+    "pg": "^8.22.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "ws": "^8.18.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.4.9",
+    "@nestjs/schematics": "^10.2.3",
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "prisma": "^6.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}
