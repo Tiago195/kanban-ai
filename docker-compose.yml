@@ -17,5 +17,59 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: kanban-ai-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Dentro da rede do compose o host do banco é o nome do serviço `postgres`.
+      DATABASE_URL: 'postgresql://${POSTGRES_USER:-kanban}:${POSTGRES_PASSWORD:-kanban}@postgres:5432/${POSTGRES_DB:-kanban_ai}?schema=public'
+      API_PORT: '3333'
+      WS_PATH: ${WS_PATH:-/ws}
+      AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL:-opus}
+      AGENT_MAX_CONCURRENT_SESSIONS: ${AGENT_MAX_CONCURRENT_SESSIONS:-3}
+      AGENT_WATCHDOG_INTERVAL_MS: ${AGENT_WATCHDOG_INTERVAL_MS:-120000}
+      AGENT_WORKSPACES_DIR: ${AGENT_WORKSPACES_DIR:-./.agent-workspaces}
+      # Watch confiável em bind mount (inotify não propaga bem no Docker).
+      CHOKIDAR_USEPOLLING: 'true'
+      # tsc (nest --watch) usa o watcher do TypeScript, não o chokidar — força polling.
+      TSC_WATCHFILE: 'DynamicPriorityPolling'
+      TSC_WATCHDIRECTORY: 'DynamicPriorityPolling'
+    ports:
+      - '${API_PORT:-3333}:3333'
+    # Bind mount do repositório inteiro (código + node_modules do host) para
+    # hot-reload. As node_modules do host são glibc/Debian, compatíveis com
+    # a imagem node:22 (ver Dockerfile.dev). Não instalamos deps no container.
+    volumes:
+      - .:/app
+    entrypoint: ['sh', '/app/docker/api-dev-entrypoint.sh']
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: kanban-ai-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      WEB_PORT: '5173'
+      # O Vite (no navegador do host) fala com a API pela porta publicada no host.
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:3333}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3333/ws}
+      # O proxy do Vite (dentro do container) encaminha para o serviço `api`.
+      VITE_API_PROXY_TARGET: 'http://api:3333'
+      CHOKIDAR_USEPOLLING: 'true'
+    ports:
+      - '${WEB_PORT:-5173}:5173'
+    volumes:
+      - .:/app
+    entrypoint: ['sh', '/app/docker/web-dev-entrypoint.sh']
+
 volumes:
   kanban_pgdata:

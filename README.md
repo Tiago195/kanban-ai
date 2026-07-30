@@ -33,10 +33,34 @@ fluxos afetados — criando **tasks derivadas** quando encontra problemas.
 
 ## Começando
 
+Há dois modos de rodar o projeto. **Escolha um.**
+
+### Modo A — tudo no Docker (recomendado, hot-reload incluso)
+
+Sobe Postgres + API + Web em containers. API e Web têm **hot-reload** (edições no
+host refletem no container). Migrations e seed rodam automaticamente no boot da API
+(seed só é aplicado se o banco estiver vazio — nunca sobrescreve dados existentes).
+
+```bash
+cp .env.example .env
+docker compose up --build      # postgres + api + web
+curl localhost:3333/health     # API
+# abra http://localhost:5173    # Web (Vite)
+```
+
+Para derrubar: `docker compose down` (adicione `-v` para apagar também o volume do banco).
+
+> **Nota (ambiente com proxy TLS corporativo):** as imagens de dev **não** rodam
+> `npm ci` — elas reutilizam as `node_modules` do host via bind mount (evita o erro
+> `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` do proxy). Portanto, rode `npm install` no host
+> **uma vez** antes do primeiro `docker compose up`. Detalhes em `Dockerfile.dev`.
+
+### Modo B — só o banco no Docker, apps no host
+
 ```bash
 nvm use && npm install
 cp .env.example .env
-docker compose up -d
+docker compose up -d postgres
 
 # aguarde o Postgres ficar "healthy" antes de migrar (senão dá P1001):
 docker compose ps            # confira STATUS = healthy
@@ -46,6 +70,10 @@ npm run db:migrate && npm run db:seed
 npm run dev
 curl localhost:3333/health   # API_PORT padrão = 3333
 ```
+
+> **Não misture os modos ao mesmo tempo:** ambos publicam nas portas 3333/5173/5432.
+> Rodar `npm run dev` no host enquanto o `docker compose up` (Modo A) está de pé causa
+> conflito de porta (`EADDRINUSE`). Derrube um antes de subir o outro.
 
 > Se `npm run db:migrate` retornar `P1001: Can't reach database server`, o Postgres
 > ainda não terminou de subir. Espere o `docker compose ps` mostrar `healthy` e
@@ -72,5 +100,7 @@ kanban-ai/
 ├── apps/api/          # backend + loop engine + Prisma
 ├── packages/shared/   # contratos compartilhados
 ├── docs/              # reference/, adr/, loop-engine.md
-└── docker-compose.yml # Postgres 16
+├── Dockerfile.dev     # imagem de dev (hot-reload) para api + web
+├── docker/            # entrypoints de dev dos containers api/web
+└── docker-compose.yml # postgres + api + web (dev)
 ```

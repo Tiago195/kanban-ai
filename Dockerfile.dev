@@ -1,0 +1,21 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dockerfile de DESENVOLVIMENTO (hot-reload) para o monorepo kanban-ai.
+#
+# IMPORTANTE (ambiente com proxy TLS corporativo):
+#   Este ambiente intercepta TLS com uma CA corporativa que NÃO está no trust
+#   store de uma imagem limpa, então `npm ci` DENTRO do container falha com
+#   UNABLE_TO_GET_ISSUER_CERT_LOCALLY. Por isso NÃO instalamos deps aqui —
+#   o docker-compose faz bind mount das `node_modules` já instaladas no host.
+#
+# Usamos a imagem Debian (`node:22`), e NÃO a alpine, porque os binários nativos
+# do host (esbuild/rollup linux-x64-gnu, Prisma engine debian-openssl-3.0.x) são
+# glibc — compatíveis com Debian, incompatíveis com a musl da alpine.
+#
+# NÃO usar em produção — imagem de dev, deps vêm do host via bind mount.
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:22
+
+WORKDIR /app
+
+# Sem instalação de deps: o código e as node_modules do host são montados pelo
+# docker-compose. O entrypoint (api/web) rebuilda o shared e sobe em watch.

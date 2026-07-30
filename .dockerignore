@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.agent-workspaces
+*.log
+.env.local
+.env.*.local
+docs/reference
