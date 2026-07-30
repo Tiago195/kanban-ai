@@ -429,6 +429,18 @@
     outline: 2px dashed var(--accent);
     outline-offset: -2px;
   }
+  .column.drop-target {
+    outline: 2px dashed var(--accent);
+    outline-offset: -2px;
+    background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  }
+  .drop-placeholder {
+    height: 52px;
+    border-radius: var(--radius);
+    border: 2px dashed var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    flex: 0 0 auto;
+  }
   .column-header {
     display: flex;
     align-items: center;
@@ -519,7 +531,13 @@
     box-shadow: var(--shadow-lg);
   }
   .card.dragging {
-    opacity: 0.4;
+    opacity: 0;
+  }
+  .card.dragging-overlay {
+    opacity: 1;
+    cursor: grabbing;
+    box-shadow: var(--shadow-lg);
+    transform: rotate(2deg);
   }
   .card.type-epic {
     border-left-color: var(--warn);
@@ -1040,6 +1058,15 @@
     background: color-mix(in srgb, var(--accent) 14%, transparent);
     outline: 2px dashed var(--accent);
   }
+  .task-col.drop-target {
+    outline: 2px dashed var(--accent);
+    outline-offset: -2px;
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+  .drop-placeholder.task {
+    height: 40px;
+  }
   .task-card {
     background: var(--bg);
     border: 1px solid var(--border);
@@ -1052,7 +1079,13 @@
     border-color: var(--accent);
   }
   .task-card.dragging {
-    opacity: 0.5;
+    opacity: 0;
+  }
+  .task-card.dragging-overlay {
+    opacity: 1;
+    cursor: grabbing;
+    box-shadow: var(--shadow-lg);
+    transform: rotate(2deg);
   }
   .task-card.blocked {
     border-color: #ef4444;

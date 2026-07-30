@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   DndContext,
+  DragOverlay,
   PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -91,21 +93,10 @@ function getColumnFromOverId(
   return activeCard ? fallback(activeCard) : null;
 }
 
-function StoryCard({ card, onOpen }: { card: ApiCardSummary; onOpen: (card: ApiCardSummary) => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
-  const style = { transform: CSS.Transform.toString(transform), transition };
-
+function StoryCardContent({ card }: { card: ApiCardSummary }) {
   const hasDescription = Boolean(card.description && card.description.trim());
-
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={"card type-story" + (card.blocked ? " blocked" : "") + (isDragging ? " dragging" : "")}
-      onClick={() => onOpen(card)}
-      {...attributes}
-      {...listeners}
-    >
+    <>
       <div className="card-top">
         <span className="type-badge story">STORY</span>
         <span className="card-key">{card.key}</span>
@@ -118,6 +109,24 @@ function StoryCard({ card, onOpen }: { card: ApiCardSummary; onOpen: (card: ApiC
           <span className="card-badge">📝</span>
         </div>
       ) : null}
+    </>
+  );
+}
+
+function StoryCard({ card, onOpen }: { card: ApiCardSummary; onOpen: (card: ApiCardSummary) => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={"card type-story" + (card.blocked ? " blocked" : "") + (isDragging ? " dragging" : "")}
+      onClick={() => onOpen(card)}
+      {...attributes}
+      {...listeners}
+    >
+      <StoryCardContent card={card} />
     </div>
   );
 }
@@ -125,11 +134,13 @@ function StoryCard({ card, onOpen }: { card: ApiCardSummary; onOpen: (card: ApiC
 function StoryColumn({
   column,
   stories,
+  isDropTarget,
   onOpenStory,
   onCreateStory,
 }: {
   column: ApiBoardColumn;
   stories: ApiCardSummary[];
+  isDropTarget?: boolean;
   onOpenStory: (card: ApiCardSummary) => void;
   onCreateStory: (columnId: string) => void;
 }) {
@@ -138,7 +149,7 @@ function StoryColumn({
   const allowsCreate = column.title === "Backlog" || column.title === "To Do";
 
   return (
-    <div className="column">
+    <div className={"column" + (isDropTarget ? " drop-target" : "")}>
       <div className="column-header">
         <div className="column-title">{column.title}</div>
         <span className={"column-count" + (overLimit ? " over-limit" : "")}>{stories.length}</span>
@@ -154,6 +165,7 @@ function StoryColumn({
           {stories.map((story) => (
             <StoryCard key={story.id} card={story} onOpen={onOpenStory} />
           ))}
+          {isDropTarget ? <div className="drop-placeholder" /> : null}
         </div>
       </SortableContext>
       {allowsCreate ? (
@@ -162,6 +174,19 @@ function StoryColumn({
         </button>
       ) : null}
     </div>
+  );
+}
+
+function MiniCardContent({ card, showPoints }: { card: ApiCardSummary; showPoints?: boolean }) {
+  return (
+    <>
+      <div className="task-card-top">
+        <span className="card-key">{card.key}</span>
+        {showPoints && card.points != null ? <span className="points-badge">{card.points}</span> : null}
+        {card.blocked ? <span>⛔</span> : null}
+      </div>
+      <div className="task-card-title">{card.title}</div>
+    </>
   );
 }
 
@@ -186,12 +211,7 @@ function MiniCard({
       {...attributes}
       {...listeners}
     >
-      <div className="task-card-top">
-        <span className="card-key">{card.key}</span>
-        {showPoints && card.points != null ? <span className="points-badge">{card.points}</span> : null}
-        {card.blocked ? <span>⛔</span> : null}
-      </div>
-      <div className="task-card-title">{card.title}</div>
+      <MiniCardContent card={card} showPoints={showPoints} />
     </div>
   );
 }
@@ -217,12 +237,27 @@ function MiniKanban({
 }) {
   const moveCard = useMoveCard();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [overColId, setOverColId] = useState<string | null>(null);
+  const activeCard = activeId ? cards.find((card) => card.id === activeId) ?? null : null;
 
   return (
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
+      onDragStart={(event: DragStartEvent) => setActiveId(String(event.active.id))}
+      onDragOver={(event: DragOverEvent) => {
+        const overId = event.over ? String(event.over.id) : "";
+        const draggingId = String(event.active.id);
+        setOverColId(overId ? getColumnFromOverId(overId, cards, draggingId, fallbackColumn) : null);
+      }}
+      onDragCancel={() => {
+        setActiveId(null);
+        setOverColId(null);
+      }}
       onDragEnd={(event: DragEndEvent) => {
+        setActiveId(null);
+        setOverColId(null);
         const activeId = String(event.active.id);
         const overId = event.over ? String(event.over.id) : "";
         if (!overId) return;
@@ -235,8 +270,9 @@ function MiniKanban({
         {columns.map((column) => {
           const items = cards.filter((card) => fallbackColumn(card) === column.id);
           const canAdd = Boolean(onAddCard) && (allowAddOn ? allowAddOn(column) : true);
+          const isDropTarget = overColId === column.id && activeId != null;
           return (
-            <div key={column.id} className="task-col">
+            <div key={column.id} className={"task-col" + (isDropTarget ? " drop-target" : "")}>
               <div className="task-col-head">
                 <span className="task-col-title">{column.title}</span>
                 <span className="task-col-count">{items.length}</span>
@@ -246,6 +282,7 @@ function MiniKanban({
                   {items.map((item) => (
                     <MiniCard key={item.id} card={item} onOpen={onOpenCard} showPoints />
                   ))}
+                  {isDropTarget ? <div className="drop-placeholder task" /> : null}
                 </div>
               </SortableContext>
               {canAdd ? (
@@ -257,6 +294,13 @@ function MiniKanban({
           );
         })}
       </div>
+      <DragOverlay dropAnimation={null}>
+        {activeCard ? (
+          <div className={"task-card" + (activeCard.blocked ? " blocked" : "") + " dragging-overlay"}>
+            <MiniCardContent card={activeCard} showPoints />
+          </div>
+        ) : null}
+      </DragOverlay>
     </DndContext>
   );
 }
@@ -969,8 +1013,10 @@ export function BoardView() {
   const createCard = useCreateCard(boardId);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const [overColumnId, setOverColumnId] = useState<string | null>(null);
 
-  const { modals, openEpic, openStory, openTask, closeAllModals, closeTopModal, setDraggedCard } = useBoardUiStore();
+  const { modals, openEpic, openStory, openTask, closeAllModals, closeTopModal, setDraggedCard, draggedCardId } =
+    useBoardUiStore();
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1053,9 +1099,19 @@ export function BoardView() {
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragStart={(event: DragStartEvent) => setDraggedCard(String(event.active.id))}
-        onDragCancel={() => setDraggedCard(null)}
+        onDragOver={(event: DragOverEvent) => {
+          const overId = event.over ? String(event.over.id) : "";
+          const activeId = String(event.active.id);
+          const column = overId ? getColumnFromOverId(overId, stories, activeId, (card) => card.boardColumnId) : null;
+          setOverColumnId(column);
+        }}
+        onDragCancel={() => {
+          setDraggedCard(null);
+          setOverColumnId(null);
+        }}
         onDragEnd={(event: DragEndEvent) => {
           setDraggedCard(null);
+          setOverColumnId(null);
           const activeId = String(event.active.id);
           const overId = event.over ? String(event.over.id) : "";
           if (!overId) return;
@@ -1070,6 +1126,7 @@ export function BoardView() {
               key={column.id}
               column={column}
               stories={stories.filter((story) => story.boardColumnId === column.id)}
+              isDropTarget={overColumnId === column.id && draggedCardId != null}
               onOpenStory={(story) => openStory(story.id)}
               onCreateStory={(columnId) =>
                 createCard.mutate({
@@ -1079,6 +1136,18 @@ export function BoardView() {
             />
           ))}
         </div>
+        <DragOverlay dropAnimation={null}>
+          {draggedCardId
+            ? (() => {
+                const dragged = stories.find((story) => story.id === draggedCardId);
+                return dragged ? (
+                  <div className={"card type-story" + (dragged.blocked ? " blocked" : "") + " dragging-overlay"}>
+                    <StoryCardContent card={dragged} />
+                  </div>
+                ) : null;
+              })()
+            : null}
+        </DragOverlay>
       </DndContext>
 
       {openModals > 0 ? (
