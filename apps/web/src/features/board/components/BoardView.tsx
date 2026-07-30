@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -15,7 +15,8 @@ import { CSS } from "@dnd-kit/utilities";
 import type { ExecState, StoryPoints } from "@kanban-ai/shared";
 
 import { useCardAssignees } from "@/features/assignees";
-import { useAutoPlay, useLoopState, useStepLoop } from "@/features/ai-engine";
+import { useAgentChat, useAutoPlay, useLoopState, useStepLoop } from "@/features/ai-engine";
+import { useAgentChatStore } from "@/features/ai-engine/services/agentChatStore";
 import { useBoard, useCards, useCreateCard, useMoveCard, usePrimaryBoardId } from "@/features/board/hooks";
 import { useBoardUiStore } from "@/features/board/services";
 import { useCardLabels } from "@/features/labels";
@@ -178,12 +179,14 @@ function StoryColumn({
 }
 
 function MiniCardContent({ card, showPoints }: { card: ApiCardSummary; showPoints?: boolean }) {
+  const awaiting = useAgentChatStore((s) => Boolean(s.byTask[card.id]?.pending));
   return (
     <>
       <div className="task-card-top">
         <span className="card-key">{card.key}</span>
         {showPoints && card.points != null ? <span className="points-badge">{card.points}</span> : null}
         {card.blocked ? <span>⛔</span> : null}
+        {awaiting ? <span className="awaiting-badge" title="O agente aguarda sua resposta">✋</span> : null}
       </div>
       <div className="task-card-title">{card.title}</div>
     </>
@@ -897,6 +900,99 @@ function TaskLoopControls({ task, boardId }: { task: ApiCardDetails; boardId: st
   );
 }
 
+/** Chat/transcript do agente (streaming + HITL) — shadcn puro, sem TanStack AI. */
+function TaskChat({ task }: { task: ApiCardDetails }) {
+  const storyId = task.parentId;
+  const { messages, pending, isAnswering, answer } = useAgentChat(task.id, storyId);
+  const [draft, setDraft] = useState("");
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, pending]);
+
+  const submit = () => {
+    const text = draft.trim();
+    if (!text || !pending) return;
+    answer(text);
+    setDraft("");
+  };
+
+  const lastIsAi = messages.length > 0 && messages[messages.length - 1].role === "ai";
+  const thinking = lastIsAi && !pending;
+
+  return (
+    <div className="modal-section">
+      <div className="modal-section-title">💬 Conversa com o agente</div>
+      <div className="agent-chat">
+        <div className="agent-chat-scroll" ref={scrollRef}>
+          {messages.length === 0 ? (
+            <div className="agent-chat-empty">
+              Sem atividade ainda. Rode uma iteração para ver o agente pensar ao vivo.
+            </div>
+          ) : null}
+          {messages.map((msg) => {
+            const phaseMeta = msg.phase ? PHASE_META[msg.phase] : undefined;
+            return (
+              <div key={msg.id} className={"chat-bubble role-" + msg.role}>
+                <div className="chat-bubble-meta">
+                  <span className="chat-role">
+                    {msg.role === "ai" ? "🤖 Agente" : msg.role === "user" ? "🧑 Você" : "⚙️ Sistema"}
+                  </span>
+                  {msg.kind === "thought" ? <span className="chat-kind">pensando</span> : null}
+                  {phaseMeta ? (
+                    <span className="chat-phase">
+                      {phaseMeta.emoji} {phaseMeta.label}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="chat-bubble-text">{msg.text}</div>
+              </div>
+            );
+          })}
+          {thinking ? (
+            <div className="chat-typing" aria-live="polite">
+              <span className="dot" />
+              <span className="dot" />
+              <span className="dot" />
+              <span className="chat-typing-label">agente digitando…</span>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="agent-chat-input">
+          {pending ? (
+            <div className="agent-chat-question-hint">O agente aguarda sua resposta.</div>
+          ) : null}
+          <div className="agent-chat-input-row">
+            <input
+              className="chat-input"
+              value={draft}
+              placeholder={pending ? "Responda ao agente…" : "Disponível quando o agente perguntar"}
+              disabled={!pending || isAnswering}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  submit();
+                }
+              }}
+            />
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={submit}
+              disabled={!pending || isAnswering || draft.trim().length === 0}
+            >
+              {isAnswering ? "Enviando…" : "Responder"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TaskModal({
   boardId,
   taskId,
@@ -912,6 +1008,7 @@ function TaskModal({
 }) {
   const { data: task } = useCard(taskId);
   const updateCard = useUpdateCard();
+  const chatPending = useAgentChatStore((s) => s.byTask[taskId]?.pending ?? null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
 
@@ -935,6 +1032,7 @@ function TaskModal({
           <span className="type-badge task">TASK</span>
           <span className="card-key">{task.key}</span>
           {task.blocked ? <span className="blocked-flag">⛔ BLOQUEADO</span> : null}
+          {chatPending ? <span className="awaiting-badge">✋ aguardando você</span> : null}
           <span className={"exec-badge st-" + execMeta.cls} style={{ marginLeft: "auto" }}>
             {execMeta.label}
           </span>
@@ -970,6 +1068,8 @@ function TaskModal({
         <ChecklistSection card={task} boardId={boardId} />
 
         <TaskLoopControls task={task} boardId={boardId} />
+
+        <TaskChat task={task} />
 
         <div className="modal-section">
           <div className="modal-section-title">📓 Diário de iterações</div>

@@ -20,6 +20,30 @@ export interface AgentRunContext {
   files: string[];
 }
 
+/**
+ * Chunk incremental emitido pelo runner durante a execução (streaming ao vivo).
+ * O orchestrator repassa cada chunk para o WebSocket como `agent.chunk`.
+ */
+export interface AgentChunk {
+  /** Raciocínio interno (thought) ou saída/ação (output). */
+  kind: 'thought' | 'output';
+  /** Fragmento de texto. */
+  delta: string;
+}
+
+/**
+ * Pergunta que o runner faz ao humano (HITL). O orchestrator emite
+ * `agent.question`, coloca a sessão em `awaiting-input` e resolve a Promise
+ * retornada por `onQuestion` quando o humano responde (via endpoint → stdin).
+ */
+export interface AgentQuestion {
+  /** Id estável da pergunta (gerado pelo runner ou adapter). */
+  id: string;
+  prompt: string;
+  /** Opções sugeridas de resposta, quando a CLI as fornecer. */
+  options?: string[];
+}
+
 /** Entrada de uma execução de iteração. */
 export interface AgentRunInput {
   /** Diretório de trabalho isolado (git worktree) do repo-alvo. */
@@ -34,6 +58,17 @@ export interface AgentRunInput {
   context?: AgentRunContext;
   /** Cancelamento cooperativo (stop hard/abort). */
   signal?: AbortSignal;
+  /**
+   * Callback de streaming: chamado a cada chunk de stdout produzido pelo runner.
+   * O mock emite alguns chunks fake; a CLI real emite conforme o parser.
+   */
+  onChunk?: (chunk: AgentChunk) => void;
+  /**
+   * Callback de HITL: chamado quando o runner faz uma pergunta. Deve resolver
+   * com a resposta do humano. O mock nunca chama isto. O orchestrator fornece a
+   * implementação que emite `agent.question` e aguarda a resposta via endpoint.
+   */
+  onQuestion?: (question: AgentQuestion) => Promise<string>;
 }
 
 /** Resultado de uma execução de iteração. */

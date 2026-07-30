@@ -171,6 +171,14 @@ export const apiClient = {
       body: JSON.stringify({ mode }),
     });
   },
+
+  /** HITL: responde à pergunta pendente de uma story. */
+  answerQuestion(storyId: string, questionId: string, answer: string): Promise<{ accepted: boolean }> {
+    return request<{ accepted: boolean }>(`/cards/${storyId}/loop/answer`, {
+      method: "POST",
+      body: JSON.stringify({ questionId, answer }),
+    });
+  },
 };
 
 export function getHealth(): Promise<HealthResponse> {

@@ -138,6 +138,44 @@ export interface AutoStoppedEvent {
   mode: 'graceful' | 'hard';
 }
 
+/**
+ * Um chunk incremental do "pensamento"/saída da AI durante uma iteração.
+ * Emitido em tempo real enquanto o runner (Copilot CLI) produz stdout.
+ * NÃO deve invalidar cache no front — é acumulado num buffer reativo.
+ */
+export interface AgentChunkEvent {
+  type: 'agent.chunk';
+  taskId: string;
+  storyId: string;
+  /** Índice da iteração em curso, se já conhecido. */
+  iterationIndex?: number;
+  /** Natureza do chunk: raciocínio interno ou saída/ação. */
+  kind: 'thought' | 'output';
+  /** Fragmento de texto a ser anexado ao transcript. */
+  delta: string;
+}
+
+/**
+ * A AI pausou e fez uma pergunta ao humano (HITL). A iteração fica em
+ * `awaiting-input` até que a resposta seja enviada via endpoint dedicado.
+ */
+export interface AgentQuestionEvent {
+  type: 'agent.question';
+  taskId: string;
+  storyId: string;
+  questionId: string;
+  prompt: string;
+  /** Opções sugeridas de resposta, quando a CLI as fornecer. */
+  options?: string[];
+}
+
+/** A pergunta pendente foi respondida — a iteração retoma. */
+export interface AgentAnsweredEvent {
+  type: 'agent.answered';
+  taskId: string;
+  questionId: string;
+}
+
 /** Keep-alive. */
 export interface PingEvent {
   type: 'ping';
@@ -163,6 +201,9 @@ export type ServerEvent =
   | AgentSessionStateChangedEvent
   | AutoStartedEvent
   | AutoStoppedEvent
+  | AgentChunkEvent
+  | AgentQuestionEvent
+  | AgentAnsweredEvent
   | PingEvent;
 
 /** Nomes de eventos, úteis para type-guards e roteamento. */

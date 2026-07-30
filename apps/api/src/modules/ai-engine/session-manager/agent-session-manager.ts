@@ -2,6 +2,19 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AgentSessionState } from '@kanban-ai/shared';
 import { APP_CONFIG, type AppConfig } from '../../../shared/config/config';
 
+/** Pergunta pendente (HITL) numa sessão aguardando resposta do humano. */
+export interface PendingQuestion {
+  taskId: string;
+  questionId: string;
+  prompt: string;
+  options?: string[];
+  /** Resolve a Promise de `onQuestion` do runner com a resposta do humano. */
+  resolve: (answer: string) => void;
+  /** Rejeita (ex.: timeout HITL ou abort). */
+  reject: (err: Error) => void;
+  createdAt: number;
+}
+
 /** Estado interno de uma sessão de agent (por story). */
 interface AgentSession {
   storyId: string;
@@ -9,6 +22,8 @@ interface AgentSession {
   state: AgentSessionState;
   abort: AbortController;
   createdAt: number;
+  /** Pergunta pendente (HITL) — presente quando a sessão está em awaiting-input. */
+  pending: PendingQuestion | null;
 }
 
 /**
@@ -48,6 +63,7 @@ export class AgentSessionManager {
       state: 'idle',
       abort: new AbortController(),
       createdAt: Date.now(),
+      pending: null,
     };
     this.sessions.set(storyId, session);
     this.logger.log(`Sessão criada para story=${storyId}`);
@@ -67,10 +83,85 @@ export class AgentSessionManager {
   abort(storyId: string): void {
     const s = this.sessions.get(storyId);
     if (s) {
+      if (s.pending) {
+        s.pending.reject(new Error('aborted'));
+        s.pending = null;
+      }
       s.abort.abort();
       s.state = 'dead';
       this.logger.warn(`Sessão abortada (hard) story=${storyId}`);
     }
+  }
+
+  /**
+   * Registra uma pergunta pendente (HITL) e retorna uma Promise que resolve com
+   * a resposta do humano (via `resolveQuestion`). A sessão fica em espera até
+   * ser respondida, abortada ou expirar (hitlTimeoutMs).
+   */
+  waitForAnswer(
+    storyId: string,
+    question: { taskId: string; questionId: string; prompt: string; options?: string[] },
+  ): Promise<string> {
+    const session = this.sessions.get(storyId);
+    if (!session) {
+      return Promise.reject(new Error(`sessão inexistente para story=${storyId}`));
+    }
+    if (session.pending) {
+      session.pending.reject(new Error('substituída por nova pergunta'));
+    }
+
+    return new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (session.pending?.questionId === question.questionId) {
+          session.pending = null;
+        }
+        reject(new Error(`HITL timeout (${this.config.agent.hitlTimeoutMs}ms)`));
+      }, this.config.agent.hitlTimeoutMs);
+
+      session.pending = {
+        ...question,
+        createdAt: Date.now(),
+        resolve: (answer) => {
+          clearTimeout(timeout);
+          resolve(answer);
+        },
+        reject: (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        },
+      };
+      this.logger.log(
+        `Pergunta pendente (HITL) story=${storyId} task=${question.taskId} q=${question.questionId}`,
+      );
+    });
+  }
+
+  /** Resolve a pergunta pendente com a resposta do humano (endpoint HITL). */
+  resolveQuestion(storyId: string, questionId: string, answer: string): boolean {
+    const s = this.sessions.get(storyId);
+    if (!s?.pending || s.pending.questionId !== questionId) return false;
+    const { resolve } = s.pending;
+    s.pending = null;
+    resolve(answer);
+    this.logger.log(`Pergunta respondida story=${storyId} q=${questionId}`);
+    return true;
+  }
+
+  /** Retorna a pergunta pendente da sessão, se houver. */
+  getPending(storyId: string): PendingQuestion | null {
+    return this.sessions.get(storyId)?.pending ?? null;
+  }
+
+  /** Localiza a story cuja pergunta pendente corresponde a um questionId. */
+  findPendingByQuestion(
+    questionId: string,
+  ): { storyId: string; pending: PendingQuestion } | null {
+    for (const s of this.sessions.values()) {
+      if (s.pending?.questionId === questionId) {
+        return { storyId: s.storyId, pending: s.pending };
+      }
+    }
+    return null;
   }
 
   remove(storyId: string): void {

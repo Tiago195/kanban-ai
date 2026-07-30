@@ -172,6 +172,34 @@ export interface TaskCard extends CardBase {
 
 export type Card = EpicCard | StoryCard | TaskCard;
 
+/** Papel de uma mensagem no chat/transcript do agent. */
+export type AgentChatRole = 'ai' | 'user' | 'system';
+
+/**
+ * Mensagem do transcript/chat de uma task. Acumula o streaming da AI, as
+ * respostas do humano (HITL) e avisos de sistema. Vive num buffer reativo no
+ * front (não é persistido como Iteration).
+ */
+export interface AgentChatMessage {
+  id: string;
+  role: AgentChatRole;
+  /** Para mensagens da AI: distingue raciocínio de saída/ação. */
+  kind?: 'thought' | 'output';
+  /** Fase da iteração à qual a mensagem pertence, quando conhecida. */
+  phase?: IterationPhase;
+  text: string;
+  ts: number;
+}
+
+/** Pergunta pendente (HITL) associada a uma task aguardando resposta. */
+export interface PendingQuestion {
+  taskId: string;
+  questionId: string;
+  prompt: string;
+  options?: string[];
+  ts: number;
+}
+
 /** Estado completo de um board. */
 export interface BoardState {
   id: string;

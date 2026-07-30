@@ -7,6 +7,7 @@ import { CopilotCliRunner } from './runners/copilot-cli.runner';
 import { MockAgentRunner } from './runners/mock-agent.runner';
 import { AGENT_RUNNER, type AgentRunner } from './runners/agent-runner.interface';
 import { APP_CONFIG, type AppConfig } from '../../shared/config/config';
+import { WorkspaceService } from './workspaces/workspace.service';
 
 /**
  * Módulo do loop engine (núcleo).
@@ -24,6 +25,7 @@ import { APP_CONFIG, type AppConfig } from '../../shared/config/config';
     Orchestrator,
     AgentSessionManager,
     ValidationRunner,
+    WorkspaceService,
     CopilotCliRunner,
     MockAgentRunner,
     {

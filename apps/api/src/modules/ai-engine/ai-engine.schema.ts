@@ -6,3 +6,11 @@ export const stopAutoSchema = z.object({
 });
 
 export type StopAutoDto = z.infer<typeof stopAutoSchema>;
+
+/** Schema do corpo de resposta a uma pergunta HITL. */
+export const answerSchema = z.object({
+  questionId: z.string().min(1),
+  answer: z.string().min(1),
+});
+
+export type AnswerDto = z.infer<typeof answerSchema>;

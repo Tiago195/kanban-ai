@@ -13,6 +13,16 @@ export interface AppConfig {
     autoStepIntervalMs: number;
     workspacesDir: string;
     runnerKind: 'mock' | 'copilot-cli';
+    /** Comando base da CLI (ex.: 'copilot', 'node'). */
+    cliCommand: string;
+    /** Args template da CLI (separados por espaço). `{prompt}` é substituído se promptMode='arg'. */
+    cliArgs: string[];
+    /** Como o prompt chega à CLI: via stdin ou como argumento. */
+    promptMode: 'stdin' | 'arg';
+    /** Timeout de espera por resposta do humano (HITL). */
+    hitlTimeoutMs: number;
+    /** Timeout de inatividade de stdout do subprocesso. */
+    streamIdleTimeoutMs: number;
   };
 }
 
@@ -33,6 +43,11 @@ export function loadConfig(): AppConfig {
       autoStepIntervalMs: num(process.env.AGENT_AUTO_STEP_INTERVAL_MS, 1_500),
       workspacesDir: process.env.AGENT_WORKSPACES_DIR ?? './.agent-workspaces',
       runnerKind: process.env.AGENT_RUNNER_KIND === 'copilot-cli' ? 'copilot-cli' : 'mock',
+      cliCommand: process.env.AGENT_CLI_COMMAND ?? 'copilot',
+      cliArgs: (process.env.AGENT_CLI_ARGS ?? '').split(' ').filter((a) => a.length > 0),
+      promptMode: process.env.AGENT_CLI_PROMPT_MODE === 'arg' ? 'arg' : 'stdin',
+      hitlTimeoutMs: num(process.env.AGENT_HITL_TIMEOUT_MS, 600_000),
+      streamIdleTimeoutMs: num(process.env.AGENT_STREAM_IDLE_TIMEOUT_MS, 120_000),
     },
   };
 }

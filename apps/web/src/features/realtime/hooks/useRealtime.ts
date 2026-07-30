@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { ServerEvent } from "@kanban-ai/shared";
 
 import { queryKeys } from "@/features/board/services";
+import { useAgentChatStore } from "@/features/ai-engine/services/agentChatStore";
 import { WsClient } from "@/shared/services/wsClient";
 
 export type ConnectionStatus = "connecting" | "open" | "closed";
@@ -25,6 +26,33 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
       onClose: () => setStatus("closed"),
       onEvent: (event) => {
         setLastEvent(event);
+
+        // ── Streaming/HITL: buffer reativo, SEM invalidar cache (ADR-0017) ──
+        // Estes eventos não dependem de boardId (chat vive em memória).
+        if (event.type === "agent.chunk") {
+          useAgentChatStore.getState().appendChunk({
+            taskId: event.taskId,
+            kind: event.kind,
+            delta: event.delta,
+          });
+          return;
+        }
+
+        if (event.type === "agent.question") {
+          useAgentChatStore.getState().setQuestion({
+            taskId: event.taskId,
+            questionId: event.questionId,
+            prompt: event.prompt,
+            options: event.options,
+            ts: Date.now(),
+          });
+          return;
+        }
+
+        if (event.type === "agent.answered") {
+          useAgentChatStore.getState().clearQuestion(event.taskId);
+          return;
+        }
 
         if (!boardId) return;
 

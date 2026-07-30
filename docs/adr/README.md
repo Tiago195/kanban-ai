@@ -20,3 +20,6 @@ Registro das decisões de arquitetura da fundação. Formato leve
 | [0013](0013-epic-status-derived.md) | Status do epic derivado (computado), não persistido | Aceito |
 | [0014](0014-mock-agent-runner-default.md) | Runner MOCK determinístico como default na fatia do loop | Aceito |
 | [0015](0015-auto-play-server-side.md) | Auto-play server-side com `setInterval` in-process | Aceito |
+| [0016](0016-copilot-cli-subprocess-adapter.md) | Copilot CLI real via subprocesso + CliAdapter JSONL configurável | Aceito |
+| [0017](0017-streaming-hitl-websocket.md) | Streaming + HITL via WebSocket (rejeição de TanStack AI/SSE) + buffer reativo | Aceito |
+| [0018](0018-awaiting-input-in-process.md) | Estado `awaiting-input` mantido in-process (sem migration) | Aceito |

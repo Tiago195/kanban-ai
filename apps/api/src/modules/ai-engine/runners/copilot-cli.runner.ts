@@ -1,38 +1,209 @@
-import { Injectable, Logger } from '@nestjs/common';
-import type { AgentRunInput, AgentRunResult, AgentRunner } from './agent-runner.interface';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import * as readline from 'node:readline';
+import type {
+  AgentRunInput,
+  AgentRunResult,
+  AgentRunner,
+} from './agent-runner.interface';
+import { CliAdapter, type CliEvent } from './cli-adapter';
+import { APP_CONFIG, type AppConfig } from '../../../shared/config/config';
 
 /**
- * Implementação v1 do AgentRunner: invoca a **Copilot CLI** como subprocesso.
+ * Implementação real do AgentRunner: invoca a **Copilot CLI** (ou qualquer
+ * comando compatível com o protocolo JSONL do CliAdapter) como subprocesso.
  *
- * ⚠️ STUB — a execução real ainda não está implementada. Ver TODOs.
+ * Fluxo:
+ *  1. Monta o comando via CliAdapter e faz `spawn` no `input.cwd` (worktree).
+ *  2. Entrega o prompt (stdin ou arg, conforme promptMode).
+ *  3. Lê stdout linha a linha → parseia em CliEvent → emite `onChunk`
+ *     (thought/output), trata `question` (HITL, bloqueia via `onQuestion`) e
+ *     `result` (resultado final da iteração).
+ *  4. Respeita `input.signal` (AbortSignal) para stop hard: mata o processo.
+ *  5. Timeout de inatividade de stdout (streamIdleTimeoutMs).
  *
- * Decisões em aberto (documentadas em docs/loop-engine.md):
- *  - Formato exato do payload enviado à CLI (flags/stdin/arquivo de prompt).
- *  - Como detectar "iteração terminou": exit code, parse de stdout, ou arquivo
- *    de saída estruturado (JSON) escrito pela CLI.
- *  - Como extrair `dodTouched` / `nextStep` / `done` do output.
+ * Ver docs/loop-engine.md, ADR-0016 e ADR-0017.
  */
 @Injectable()
 export class CopilotCliRunner implements AgentRunner {
   readonly id = 'copilot-cli';
   private readonly logger = new Logger(CopilotCliRunner.name);
+  private readonly adapter: CliAdapter;
+
+  constructor(@Inject(APP_CONFIG) config: AppConfig) {
+    this.adapter = new CliAdapter(config);
+  }
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
-    this.logger.warn(
-      `CopilotCliRunner.run() é um STUB (cwd=${input.cwd}, model=${input.model}, phase=${input.phase})`,
+    const plan = this.adapter.buildSpawnPlan(input.prompt);
+    this.logger.log(
+      `spawn: ${plan.command} ${plan.args.join(' ')} (cwd=${input.cwd}, phase=${input.phase})`,
     );
 
-    // TODO: spawn('copilot', [...], { cwd: input.cwd, signal: input.signal })
-    // TODO: escrever o prompt (input.prompt) via stdin ou arquivo temporário.
-    // TODO: capturar stdout/stderr; respeitar input.signal (AbortSignal) para stop hard.
-    // TODO: parsear o resultado estruturado e mapear para AgentRunResult.
+    const child = spawn(plan.command, plan.args, {
+      cwd: input.cwd || process.cwd(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
 
-    return {
-      detail: '(stub) nenhuma execução real ocorreu',
-      summary: '(stub) iteração não implementada',
-      dodTouched: [],
-      nextStep: 'Implementar CopilotCliRunner.run()',
-      done: false,
-    };
+    return this.consume(child, input, plan.stdinPrompt);
+  }
+
+  private consume(
+    child: ChildProcessWithoutNullStreams,
+    input: AgentRunInput,
+    stdinPrompt: string | null,
+  ): Promise<AgentRunResult> {
+    return new Promise<AgentRunResult>((resolve, reject) => {
+      let result: AgentRunResult | null = null;
+      let settled = false;
+      let idleTimer: NodeJS.Timeout | null = null;
+      // Serializa o processamento das linhas para preservar ordem quando há
+      // await (HITL bloqueia até a resposta chegar).
+      let queue: Promise<void> = Promise.resolve();
+
+      const cleanup = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        if (input.signal) input.signal.removeEventListener('abort', onAbort);
+      };
+
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        fn();
+      };
+
+      const kill = () => {
+        if (!child.killed) child.kill('SIGTERM');
+      };
+
+      const onAbort = () => {
+        kill();
+        finish(() => reject(new Error('aborted')));
+      };
+
+      if (input.signal) {
+        if (input.signal.aborted) {
+          kill();
+          reject(new Error('aborted'));
+          return;
+        }
+        input.signal.addEventListener('abort', onAbort);
+      }
+
+      const resetIdle = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          kill();
+          finish(() =>
+            reject(
+              new Error(`stream idle timeout (${this.adapter.streamIdleTimeoutMs}ms)`),
+            ),
+          );
+        }, this.adapter.streamIdleTimeoutMs);
+      };
+      resetIdle();
+
+      const rl = readline.createInterface({ input: child.stdout });
+
+      rl.on('line', (line) => {
+        resetIdle();
+        const event = this.adapter.parseLine(line);
+        if (!event) return;
+        queue = queue.then(() =>
+          this.handleEvent(event, input, child, (r) => {
+            result = r;
+          }),
+        );
+        // Uma falha no processamento (ex.: HITL abortado/substituído/timeout)
+        // não pode virar unhandled rejection — encerra a iteração limpando o
+        // processo. `finish` é idempotente (só age uma vez).
+        queue.catch((err: unknown) => {
+          kill();
+          finish(() =>
+            reject(err instanceof Error ? err : new Error(String(err))),
+          );
+        });
+      });
+
+      child.stderr.on('data', (buf: Buffer) => {
+        this.logger.debug(`[cli stderr] ${buf.toString().trimEnd()}`);
+      });
+
+      child.on('error', (err) => {
+        finish(() => reject(err));
+      });
+
+      child.on('close', (code) => {
+        // Aguarda o processamento (incl. HITL) drenar antes de resolver. Um
+        // `.catch` evita unhandled rejection caso o queue já tenha falhado
+        // (a rejeição real já foi tratada no handler de `queue.catch` acima).
+        void queue
+          .then(() => {
+            finish(() => {
+              if (result) {
+                resolve(result);
+                return;
+              }
+              if (code === 0) {
+                resolve({
+                  detail: '(cli) processo encerrou sem evento result',
+                  summary: '(cli) iteração sem resultado estruturado',
+                  dodTouched: [],
+                  nextStep: 'Revisar saída da CLI (nenhum result emitido)',
+                  done: false,
+                });
+                return;
+              }
+              reject(new Error(`cli exited with code ${code}`));
+            });
+          })
+          .catch(() => undefined);
+      });
+
+      // Entrega o prompt via stdin quando aplicável.
+      if (stdinPrompt !== null) {
+        child.stdin.write(
+          stdinPrompt.endsWith('\n') ? stdinPrompt : `${stdinPrompt}\n`,
+        );
+      }
+    });
+  }
+
+  private async handleEvent(
+    event: CliEvent,
+    input: AgentRunInput,
+    child: ChildProcessWithoutNullStreams,
+    setResult: (r: AgentRunResult) => void,
+  ): Promise<void> {
+    switch (event.kind) {
+      case 'thought':
+      case 'output':
+        input.onChunk?.({ kind: event.kind, delta: event.text });
+        return;
+      case 'question': {
+        if (!input.onQuestion) {
+          this.logger.warn(`pergunta ignorada (sem onQuestion): ${event.prompt}`);
+          return;
+        }
+        const answer = await input.onQuestion({
+          id: event.id,
+          prompt: event.prompt,
+          options: event.options,
+        });
+        // Escreve a resposta no stdin da MESMA sessão → a CLI retoma.
+        child.stdin.write(answer.endsWith('\n') ? answer : `${answer}\n`);
+        return;
+      }
+      case 'result':
+        setResult({
+          detail: event.detail,
+          summary: event.summary,
+          dodTouched: event.dodTouched,
+          nextStep: event.nextStep,
+          done: event.done,
+        });
+        return;
+    }
   }
 }

@@ -9,7 +9,7 @@ import {
 import { PrismaService } from '../../shared/db/prisma.service';
 import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
 import { Orchestrator } from './orchestrator';
-import { stopAutoSchema, type StopAutoDto } from './ai-engine.schema';
+import { stopAutoSchema, answerSchema, type StopAutoDto, type AnswerDto } from './ai-engine.schema';
 
 /**
  * Endpoints REST do loop engine (fatia 3). Rotas sob o recurso card, mas em
@@ -59,6 +59,23 @@ export class AiEngineController {
   async state(@Param('id') id: string) {
     await this.ensureStory(id);
     return this.orchestrator.loopState(id);
+  }
+
+  /**
+   * HITL: responde à pergunta pendente de uma story (o id é o da STORY). A
+   * resposta é encaminhada ao subprocesso via stdin, retomando a iteração.
+   */
+  @Post(':id/loop/answer')
+  async answer(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(answerSchema)) dto: AnswerDto,
+  ): Promise<{ accepted: boolean }> {
+    await this.ensureStory(id);
+    const accepted = this.orchestrator.answerQuestion(id, dto.questionId, dto.answer);
+    if (!accepted) {
+      throw new NotFoundException('nenhuma pergunta pendente para essa story/questionId');
+    }
+    return { accepted };
   }
 
   private async ensureStory(id: string): Promise<void> {

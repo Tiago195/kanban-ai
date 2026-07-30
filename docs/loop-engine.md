@@ -6,15 +6,22 @@ Este documento descreve os estados, o ciclo de iteração, o gate de DOD, a
 validação final, a criação de task derivada, os loop profiles, os modos de parada,
 o watchdog com as **4 salvaguardas** e o ponto de extensão para BullMQ.
 
-> Estado atual: **loop engine implementado com runner MOCK server-side** (Fase 3).
-> `runIteration`, `stepStory`, auto-play/stop, gate de DOD, validação, `createDerivedTask`
-> e as 4 salvaguardas estão implementados no `orchestrator.ts` e persistem `Iteration`
-> no Postgres emitindo eventos WS. **Ainda stub nesta fatia:** `CopilotCliRunner` e
-> `WorkspaceService` (git worktrees) — a AI real e os worktrees entram na próxima fatia,
-> trocando apenas `AGENT_RUNNER_KIND` (ver [ADR-0014](adr/0014-mock-agent-runner-default.md)
-> e [ADR-0015](adr/0015-auto-play-server-side.md)). O `ValidationRunner` mock sempre
-> passa, então o caminho de task derivada existe mas não é exercitado no E2E. Este doc é o
-> **contrato** que a implementação segue. Código: `apps/api/src/modules/ai-engine/`.
+> Estado atual: **loop engine com runner real (Copilot CLI via subprocesso) + streaming
+> e HITL** (Fase 4). `runIteration`, `stepStory`, auto-play/stop, gate de DOD, validação,
+> `createDerivedTask` e as 4 salvaguardas estão no `orchestrator.ts` e persistem
+> `Iteration` no Postgres emitindo eventos WS. **Saíram do stub nesta fatia:**
+> `CopilotCliRunner` (spawn real atrás do `CliAdapter` JSONL configurável —
+> [ADR-0016](adr/0016-copilot-cli-subprocess-adapter.md)), `WorkspaceService` (git
+> worktree por execução alimentando o `cwd` — [ADR-0008](adr/0008-git-worktree-per-execution.md))
+> e `ValidationRunner` (heurístico mínimo por `affectedFlows`, tornando o caminho de
+> **task derivada** exercitável de verdade). O `MockAgentRunner` **permanece** como
+> fallback dev/test, alternável por `AGENT_RUNNER_KIND` (ver
+> [ADR-0014](adr/0014-mock-agent-runner-default.md) e
+> [ADR-0015](adr/0015-auto-play-server-side.md)). Novidades da fatia: **streaming ao
+> vivo do "pensamento"** e um novo estado efêmero **`awaiting-input`** (HITL) — ambos via
+> WebSocket ([ADR-0017](adr/0017-streaming-hitl-websocket.md),
+> [ADR-0018](adr/0018-awaiting-input-in-process.md)). Este doc é o **contrato** que a
+> implementação segue. Código: `apps/api/src/modules/ai-engine/`.
 
 ## Visão geral
 
@@ -138,18 +145,62 @@ As **4 salvaguardas obrigatórias** (todas in-process, sem Redis no v1):
 4. **Encerramento limpo**: cancelar a iteração em curso via **`AbortSignal`** no
    subprocess da Copilot CLI (stop hard).
 
-## AgentRunner plugável (v1: Copilot CLI)
+## AgentRunner plugável (Copilot CLI real + streaming + HITL)
 
-`AgentRunner` é uma **interface** (token de DI `AGENT_RUNNER`). A implementação v1,
-`CopilotCliRunner`, invoca a **Copilot CLI como subprocesso** e captura o
-resultado. Outras implementações (SDK, API remota) plugam sem tocar no
-orquestrador. Ver [ADR-0006](adr/0006-agent-runner-pluggable.md).
+`AgentRunner` é uma **interface** (token de DI `AGENT_RUNNER`). A implementação real,
+`CopilotCliRunner`, invoca a **Copilot CLI como subprocesso** atrás de um `CliAdapter`
+configurável e mapeia a saída para `AgentRunResult`. Outras implementações (SDK, API
+remota) plugam sem tocar no orquestrador. O `MockAgentRunner` permanece como fallback,
+alternável por `AGENT_RUNNER_KIND` (`mock` | `copilot-cli`). Ver
+[ADR-0006](adr/0006-agent-runner-pluggable.md) e
+[ADR-0016](adr/0016-copilot-cli-subprocess-adapter.md).
 
-**Decisões ainda em aberto** (documentar ao implementar):
-- Formato exato do payload enviado à Copilot CLI e como **detectar "iteração
-  terminou"** (parse de stdout, exit code, arquivo de saída).
-- Estratégia de `git worktree` (diretório base, cleanup) no `WorkspaceService`.
-- Valor default de `N` (limite de sessões concorrentes).
+### Contrato do CliAdapter (JSONL)
+
+O prompt/handoff é entregue por **stdin** (default; `AGENT_CLI_PROMPT_MODE`). O stdout
+é lido **linha a linha** como **JSONL** — uma linha JSON por evento:
+
+| `kind` | payload | efeito |
+|---|---|---|
+| `thought` | `{text}` | chunk de raciocínio → `onChunk` → `agent.chunk` (WS) |
+| `output` | `{text}` | chunk de saída/ação → `onChunk` → `agent.chunk` (WS) |
+| `question` | `{id, prompt, options?}` | pausa HITL → `onQuestion` → `agent.question` (WS) |
+| `result` | `{detail, summary, dodTouched[], nextStep, done}` | resultado final → `AgentRunResult` |
+
+Linhas **não-JSON** são toleradas e viram `thought` (fallback). Config por env:
+`AGENT_CLI_COMMAND`, `AGENT_CLI_ARGS`, `AGENT_CLI_PROMPT_MODE`,
+`AGENT_STREAM_IDLE_TIMEOUT_MS`, `AGENT_HITL_TIMEOUT_MS`.
+
+### Interface estendida (streaming + pergunta)
+
+`AgentRunInput` ganhou dois callbacks opcionais (mantendo o mock trivial e o
+orquestrador fazendo `await runner.run(input)`):
+- `onChunk?(chunk)` — chamado por evento de stream; o orchestrator repassa como
+  `agent.chunk` no WebSocket.
+- `onQuestion?(q): Promise<string>` — chamado quando a CLI emite `question`; **bloqueia**
+  até o usuário responder e resolve com o texto da resposta (escrito no **stdin** da
+  mesma sessão).
+
+### Fluxo HITL / `awaiting-input`
+
+Quando a CLI emite `question`, a iteração **pausa** (não avança de fase, não fecha
+task) e a story **permanece em In Progress** com um badge **"aguardando você"**
+(derivado do evento WS, **não** é coluna/estado novo). O orchestrator emite
+`agent.question`, registra a `PendingQuestion` no `AgentSessionManager`
+(`waitForAnswer`) e aguarda. O usuário responde via
+**`POST /cards/:id/loop/answer`** (id = story) → `resolveQuestion` → resposta no
+stdin → iteração retoma → emite `agent.answered`. O estado é **in-process** (sem
+migration; ver [ADR-0018](adr/0018-awaiting-input-in-process.md)); um restart mata o
+subprocesso e a sessão é reconciliada no boot. `AGENT_HITL_TIMEOUT_MS` rejeita esperas
+longas demais. Streaming e HITL trafegam pelo **WebSocket** existente — sem SSE nem
+TanStack AI (ver [ADR-0017](adr/0017-streaming-hitl-websocket.md)).
+
+### Validação real (mínimo viável)
+
+O `ValidationRunner` saiu do stub: percorre os `affectedFlows` da story aplicando a
+`ValidationStrategy` do profile como checagem heurística e retorna `problems[]`. Quando
+há `problems`, o caminho de **task derivada** (Fatia 3) é exercitado de verdade.
+Validação profunda (rodar testes no worktree) fica como evolução futura.
 
 ## Ponto de extensão: BullMQ + Redis
 

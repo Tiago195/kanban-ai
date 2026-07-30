@@ -1,10 +1,12 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { StopMode } from '@kanban-ai/shared';
-import type { ExecState } from '@kanban-ai/shared';
+import type { ExecState, AffectedFlow } from '@kanban-ai/shared';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { APP_CONFIG, type AppConfig } from '../../shared/config/config';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
+import { WorkspaceService } from './workspaces/workspace.service';
 import { AGENT_RUNNER, type AgentRunner } from './runners/agent-runner.interface';
 import { ValidationRunner } from './validators/validation.runner';
 import { resolveLoopProfile } from './loop-profiles/loop-profiles';
@@ -36,11 +38,17 @@ export class Orchestrator implements OnModuleInit {
   private readonly watchdogs = new Map<string, NodeJS.Timeout>();
   private readonly autoTimers = new Map<string, NodeJS.Timeout>();
   private readonly stopRequested = new Map<string, StopMode>();
+  // Guarda contra iterações concorrentes na MESMA story: enquanto uma iteração
+  // está em execução (inclusive parada em awaiting-input à espera de HITL), o
+  // auto-play não deve iniciar outra — senão a pergunta pendente seria
+  // substituída. Ver ADR-0018.
+  private readonly inFlight = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly sessions: AgentSessionManager,
     private readonly validation: ValidationRunner,
+    private readonly workspaces: WorkspaceService,
     private readonly realtime: RealtimeService,
     @Inject(AGENT_RUNNER) private readonly runner: AgentRunner,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -120,18 +128,76 @@ export class Orchestrator implements OnModuleInit {
     const phase = nextPhaseFor(task, profile);
     const agentId = raw?.assignees[0]?.assigneeId ?? null;
     const context = await this.buildContext(taskId, raw?.title ?? '(task)');
+    const storyId = context.storyId ?? taskId;
+
+    // b6: contexto do runner (sem os campos internos storyId/affectedFlows).
+    const { storyId: _s, affectedFlows: _af, ...runnerContext } = context;
+
+    // b6: worktree real como diretório de trabalho isolado.
+    let cwd = '';
+    try {
+      cwd = await this.workspaces.ensureWorktree(storyId);
+    } catch (err) {
+      this.logger.warn(
+        `Falha ao preparar worktree para story=${storyId}: ${(err as Error).message}`,
+      );
+    }
+
+    // b6: sinal de cancelamento cooperativo (stop hard) vindo da sessão.
+    const signal = this.sessions.get(storyId)?.abort.signal;
 
     const runResult = await this.runner.run({
-      cwd: '',
+      cwd,
       model: this.config.agent.defaultModel,
       phase,
-      prompt: '',
-      context,
+      prompt: this.buildPrompt(phase, context),
+      context: runnerContext,
+      signal,
+      // b6: repassa cada chunk de streaming para o WS (buffer reativo no front).
+      onChunk: (chunk) =>
+        this.realtime.broadcast({
+          type: 'agent.chunk',
+          taskId,
+          storyId,
+          kind: chunk.kind,
+          delta: chunk.delta,
+        }),
+      // b6: HITL — emite agent.question, entra em awaiting-input e aguarda resposta.
+      onQuestion: async (question) => {
+        const questionId = question.id || randomUUID();
+        this.realtime.broadcast({
+          type: 'agent.question',
+          taskId,
+          storyId,
+          questionId,
+          prompt: question.prompt,
+          options: question.options,
+        });
+        await this.log(taskId, `AI pausou e perguntou (HITL): ${question.prompt}`);
+        try {
+          const answer = await this.sessions.waitForAnswer(storyId, {
+            taskId,
+            questionId,
+            prompt: question.prompt,
+            options: question.options,
+          });
+          this.realtime.broadcast({ type: 'agent.answered', taskId, questionId });
+          await this.log(taskId, `resposta HITL recebida — retomando iteração`);
+          return answer;
+        } catch (err) {
+          this.realtime.broadcast({ type: 'agent.answered', taskId, questionId });
+          throw err;
+        }
+      },
     });
 
     if (phase === 'validation') {
       await this.setExecState(taskId, 'validating');
-      const outcome = await this.validation.validate(taskId, profile.validation);
+      const outcome = await this.validation.validate({
+        storyId,
+        strategy: profile.validation,
+        affectedFlows: context.affectedFlows,
+      });
 
       await this.appendIteration(taskId, {
         phase,
@@ -295,6 +361,19 @@ export class Orchestrator implements OnModuleInit {
    * próxima task pronta (serial) — artifact `stepStory` (1069–1078).
    */
   async stepStory(storyId: string): Promise<boolean> {
+    // Não sobrepor iterações na mesma story: se já há uma em execução (inclusive
+    // parada em awaiting-input aguardando HITL), pular este passo. Evita
+    // substituir a pergunta pendente. Ver ADR-0018.
+    if (this.inFlight.has(storyId)) return false;
+    this.inFlight.add(storyId);
+    try {
+      return await this.stepStoryInner(storyId);
+    } finally {
+      this.inFlight.delete(storyId);
+    }
+  }
+
+  private async stepStoryInner(storyId: string): Promise<boolean> {
     const tasks = await this.loadStoryTasks(storyId);
     if (tasks.length === 0) return false;
     const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -369,6 +448,8 @@ export class Orchestrator implements OnModuleInit {
     }
     this.stopRequested.delete(storyId);
     this.realtime.broadcast({ type: 'auto.stopped', storyId, mode });
+    // b6: story concluída/parada — limpa o worktree isolado.
+    void this.workspaces.cleanupWorktree(storyId).catch(() => undefined);
   }
 
   isAutoRunning(storyId: string): boolean {
@@ -393,6 +474,7 @@ export class Orchestrator implements OnModuleInit {
       this.logger.warn(`Watchdog: sessão morta para story=${storyId} — limpando`);
       this.sessions.remove(storyId);
       this.clearWatchdog(storyId);
+      void this.workspaces.cleanupWorktree(storyId).catch(() => undefined);
     }
   }
 
@@ -404,6 +486,7 @@ export class Orchestrator implements OnModuleInit {
       this.finishAuto(storyId, 'hard');
       this.clearWatchdog(storyId);
       this.sessions.remove(storyId);
+      void this.workspaces.cleanupWorktree(storyId).catch(() => undefined);
     }
     // graceful: o próximo tick do auto-play detecta e encerra.
   }
@@ -420,6 +503,15 @@ export class Orchestrator implements OnModuleInit {
   loopState(storyId: string): { isAutoRunning: boolean; session: string | null } {
     const session = this.sessions.get(storyId);
     return { isAutoRunning: this.isAutoRunning(storyId), session: session?.state ?? null };
+  }
+
+  /**
+   * HITL: entrega a resposta do humano à pergunta pendente da story, retomando
+   * a iteração pausada (a resposta é escrita no stdin do subprocesso pelo
+   * runner via a Promise de `onQuestion`). Retorna false se não havia pergunta.
+   */
+  answerQuestion(storyId: string, questionId: string, answer: string): boolean {
+    return this.sessions.resolveQuestion(storyId, questionId, answer);
   }
 
   // ── Mutações persistidas + emissão ────────────────────────────────────────
@@ -548,7 +640,15 @@ export class Orchestrator implements OnModuleInit {
   private async buildContext(
     taskId: string,
     taskTitle: string,
-  ): Promise<{ taskTitle: string; project: string; notes: string; flowNames: string[]; files: string[] }> {
+  ): Promise<{
+    taskTitle: string;
+    project: string;
+    notes: string;
+    flowNames: string[];
+    files: string[];
+    storyId: string | null;
+    affectedFlows: AffectedFlow[];
+  }> {
     const task = await this.prisma.card.findUnique({
       where: { id: taskId },
       select: { parentId: true },
@@ -559,13 +659,40 @@ export class Orchestrator implements OnModuleInit {
           select: { aiProject: true, aiNotes: true, affectedFlows: true },
         })
       : null;
-    const flows = story?.affectedFlows ?? [];
+    const flows = (story?.affectedFlows ?? []) as AffectedFlow[];
     return {
       taskTitle,
       project: story?.aiProject ?? '',
       notes: story?.aiNotes ?? '',
       flowNames: flows.map((f) => f.name),
       files: flows.flatMap((f) => f.files),
+      storyId: task?.parentId ?? null,
+      affectedFlows: flows,
     };
+  }
+
+  /**
+   * Constrói o prompt/handoff entregue ao runner a partir do contexto de
+   * domínio e da fase. A CLI real recebe isto via stdin (ou arg); o mock ignora
+   * e usa `context`. Mantido simples nesta fatia — o diário completo já é
+   * persistido em `Iteration` e pode ser incorporado em evolução futura.
+   */
+  private buildPrompt(
+    phase: LoopTask['phases'][number],
+    context: Awaited<ReturnType<Orchestrator['buildContext']>>,
+  ): string {
+    const lines = [
+      `# Fase: ${phase}`,
+      `## Task: ${context.taskTitle}`,
+    ];
+    if (context.project) lines.push(`## Projeto: ${context.project}`);
+    if (context.notes) lines.push(`## Notas: ${context.notes}`);
+    if (context.flowNames.length > 0) {
+      lines.push(`## Fluxos afetados: ${context.flowNames.join(', ')}`);
+    }
+    if (context.files.length > 0) {
+      lines.push(`## Arquivos: ${context.files.join(', ')}`);
+    }
+    return lines.join('\n');
   }
 }

@@ -1,34 +1,64 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { ValidationStrategy } from '@kanban-ai/shared';
+import type { AffectedFlow, ValidationStrategy } from '@kanban-ai/shared';
 
-/** Resultado da iteração final de validação. */
 export interface ValidationOutcome {
   passed: boolean;
-  /** Problemas encontrados → viram tasks derivadas. */
   problems: Array<{ title: string; description: string }>;
 }
 
-/**
- * Executa a **iteração final de validação** quando todos os DOD estão marcados.
- *
- * Faz "teste de mesa" empírico dos **fluxos afetados** declarados pela story
- * (`affectedFlows`). Se encontra problemas, o Orchestrator cria uma **task
- * derivada** (derivedFrom) com contexto completo.
- *
- * ⚠️ STUB — a lógica real de validação ainda não está implementada.
- */
 @Injectable()
 export class ValidationRunner {
   private readonly logger = new Logger(ValidationRunner.name);
 
-  async validate(
-    storyId: string,
-    strategy: ValidationStrategy,
-  ): Promise<ValidationOutcome> {
-    this.logger.warn(`ValidationRunner.validate() STUB — story=${storyId} strategy=${strategy}`);
-    // TODO: percorrer affectedFlows da story e validar cada fluxo empiricamente.
-    // TODO: mapear a estratégia (flows+regression | bug-gone+regression | regression-only).
-    // TODO: retornar problems[] para o Orchestrator derivar tasks.
-    return { passed: true, problems: [] };
+  // NOTE b6: assinatura mudou para receber affectedFlows; integração completa no orchestrator em b6.
+  /**
+   * Executa validação heurística mínima (sem rodar suíte real de testes).
+   *
+   * Regras:
+   * - Estratégias com "flows" exigem lista de fluxos afetados não vazia.
+   * - Cada fluxo deve referenciar ao menos um arquivo para teste de mesa.
+   */
+  async validate(input: {
+    storyId: string;
+    strategy: ValidationStrategy;
+    affectedFlows: AffectedFlow[];
+  }): Promise<ValidationOutcome> {
+    const { storyId, strategy, affectedFlows } = input;
+    const problems: ValidationOutcome['problems'] = [];
+
+    switch (strategy) {
+      case 'flows+regression':
+        if (affectedFlows.length === 0) {
+          problems.push({
+            title: 'Nenhum fluxo afetado declarado',
+            description: `A estratégia ${strategy} requer fluxos afetados para validação, mas a story não declara nenhum.`,
+          });
+        }
+        break;
+      case 'bug-gone+regression':
+      case 'regression-only':
+        // Nessas estratégias, flows podem vir vazios; validamos arquivos só quando houver fluxos.
+        break;
+      default: {
+        const exhaustiveCheck: never = strategy;
+        this.logger.warn(`Estratégia de validação não mapeada: ${String(exhaustiveCheck)}`);
+      }
+    }
+
+    for (const flow of affectedFlows) {
+      if (flow.files.length === 0) {
+        problems.push({
+          title: `Fluxo "${flow.name}" sem arquivos`,
+          description: `O fluxo afetado "${flow.name}" não referencia arquivos; não é possível fazer teste de mesa.`,
+        });
+      }
+    }
+
+    const passed = problems.length === 0;
+    this.logger.debug(
+      `Validation heurística concluída: story=${storyId} strategy=${strategy} flows=${affectedFlows.length} passed=${passed}`,
+    );
+
+    return { passed, problems };
   }
 }
