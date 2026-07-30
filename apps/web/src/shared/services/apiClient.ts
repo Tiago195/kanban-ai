@@ -20,6 +20,12 @@ export interface HealthResponse {
   [key: string]: unknown;
 }
 
+/** Estado do loop de uma story, retornado pelo endpoint GET /cards/:id/loop/state. */
+export interface LoopStateResponse {
+  isAutoRunning: boolean;
+  session: string | null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${baseUrl}${path}`, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -138,6 +144,31 @@ export const apiClient = {
   removeFlow(flowId: string): Promise<void> {
     return request<void>(`/flows/${flowId}`, {
       method: "DELETE",
+    });
+  },
+
+  // ── Loop engine (AI) ──────────────────────────────────────────────────────
+
+  getLoopState(storyId: string): Promise<LoopStateResponse> {
+    return request<LoopStateResponse>(`/cards/${storyId}/loop/state`);
+  },
+
+  stepLoop(storyId: string): Promise<{ ran: boolean }> {
+    return request<{ ran: boolean }>(`/cards/${storyId}/loop/step`, {
+      method: "POST",
+    });
+  },
+
+  startAutoLoop(storyId: string): Promise<{ running: boolean }> {
+    return request<{ running: boolean }>(`/cards/${storyId}/loop/auto/start`, {
+      method: "POST",
+    });
+  },
+
+  stopAutoLoop(storyId: string, mode: "graceful" | "hard" = "graceful"): Promise<{ running: boolean }> {
+    return request<{ running: boolean }>(`/cards/${storyId}/loop/auto/stop`, {
+      method: "POST",
+      body: JSON.stringify({ mode }),
     });
   },
 };

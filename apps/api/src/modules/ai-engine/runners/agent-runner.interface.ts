@@ -7,6 +7,19 @@
  */
 import type { IterationPhase } from '@kanban-ai/shared';
 
+/** Contexto de domínio da task/story para o runner mock gerar conteúdo coerente. */
+export interface AgentRunContext {
+  taskTitle: string;
+  /** Projeto-alvo (aiContext.project da story pai). */
+  project: string;
+  /** Notas de efeitos colaterais (aiContext.notes da story pai). */
+  notes: string;
+  /** Nomes dos fluxos afetados da story pai. */
+  flowNames: string[];
+  /** Arquivos vinculados aos fluxos afetados. */
+  files: string[];
+}
+
 /** Entrada de uma execução de iteração. */
 export interface AgentRunInput {
   /** Diretório de trabalho isolado (git worktree) do repo-alvo. */
@@ -17,6 +30,8 @@ export interface AgentRunInput {
   phase: IterationPhase;
   /** Prompt/handoff construído a partir do diário da task. */
   prompt: string;
+  /** Contexto de domínio (usado pelo runner mock; a CLI real usa `prompt`/`cwd`). */
+  context?: AgentRunContext;
   /** Cancelamento cooperativo (stop hard/abort). */
   signal?: AbortSignal;
 }

@@ -6,10 +6,15 @@ Este documento descreve os estados, o ciclo de iteração, o gate de DOD, a
 validação final, a criação de task derivada, os loop profiles, os modos de parada,
 o watchdog com as **4 salvaguardas** e o ponto de extensão para BullMQ.
 
-> Estado atual: **stub com contratos definidos**. A execução real de iterações
-> ainda não está implementada (TODOs no `orchestrator.ts`). Este doc é o
-> **contrato** que a implementação deve seguir. Código:
-> `apps/api/src/modules/ai-engine/`.
+> Estado atual: **loop engine implementado com runner MOCK server-side** (Fase 3).
+> `runIteration`, `stepStory`, auto-play/stop, gate de DOD, validação, `createDerivedTask`
+> e as 4 salvaguardas estão implementados no `orchestrator.ts` e persistem `Iteration`
+> no Postgres emitindo eventos WS. **Ainda stub nesta fatia:** `CopilotCliRunner` e
+> `WorkspaceService` (git worktrees) — a AI real e os worktrees entram na próxima fatia,
+> trocando apenas `AGENT_RUNNER_KIND` (ver [ADR-0014](adr/0014-mock-agent-runner-default.md)
+> e [ADR-0015](adr/0015-auto-play-server-side.md)). O `ValidationRunner` mock sempre
+> passa, então o caminho de task derivada existe mas não é exercitado no E2E. Este doc é o
+> **contrato** que a implementação segue. Código: `apps/api/src/modules/ai-engine/`.
 
 ## Visão geral
 

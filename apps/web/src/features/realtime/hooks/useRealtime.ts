@@ -60,6 +60,39 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
 
         if (event.type === "epic.status.derived") {
           void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
+          return;
+        }
+
+        // ── Loop engine events ────────────────────────────────────────────
+        // Iteration/exec-state changes target a task (which is a Card).
+        if (event.type === "iteration.appended" || event.type === "task.state.changed") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.card(event.taskId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
+          return;
+        }
+
+        if (event.type === "task.derived") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.card(event.originTaskId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.card(event.derivedTaskId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
+          return;
+        }
+
+        if (event.type === "auto.started" || event.type === "auto.stopped") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.loopState(event.storyId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.card(event.storyId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
+          return;
+        }
+
+        if (event.type === "agent.session.state_changed") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.loopState(event.storyId) });
+          return;
+        }
+
+        if (event.type === "story.entered_in_progress") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.loopState(event.storyId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
         }
       },
     });

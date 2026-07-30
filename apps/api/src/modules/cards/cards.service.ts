@@ -14,6 +14,8 @@ import type {
   UpdateDodItemDto,
 } from './cards.schema';
 import { deriveEpicStatus, type ColumnLike } from './cards.epic-status';
+import { mapIteration, type PrismaIterationRow } from './iteration.mapper';
+import { Orchestrator } from '../ai-engine/orchestrator';
 
 /** Status derivado exposto na leitura, por epic. */
 export interface EpicStatusView {
@@ -31,6 +33,7 @@ export class CardsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
+    private readonly orchestrator: Orchestrator,
   ) {}
 
   async findAll(boardId?: string) {
@@ -41,8 +44,8 @@ export class CardsService {
     return this.attachEpicStatus(cards);
   }
 
-  findOne(id: string) {
-    return this.prisma.card.findUnique({
+  async findOne(id: string) {
+    const card = await this.prisma.card.findUnique({
       where: { id },
       include: {
         dodItems: { orderBy: { position: 'asc' } },
@@ -53,8 +56,14 @@ export class CardsService {
         labels: { include: { label: true } },
         assignees: { include: { assignee: true } },
         children: true,
+        dependsOn: { include: { dependsOn: { select: { id: true, key: true, title: true, execState: true } } } },
       },
     });
+    if (!card) return card;
+    return {
+      ...card,
+      iterations: card.iterations.map((it) => mapIteration(it as PrismaIterationRow)),
+    };
   }
 
   /**
@@ -230,6 +239,8 @@ export class CardsService {
       result.toColumn.title.trim().toLowerCase() === 'in progress'
     ) {
       this.realtime.broadcast({ type: 'story.entered_in_progress', storyId: id });
+      // Acorda o loop engine (auto-play server-side).
+      await this.orchestrator.onStoryEnterInProgress(id);
     }
 
     // Recomputa e emite o status do epic pai (para stories).

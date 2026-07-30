@@ -18,3 +18,5 @@ Registro das decisões de arquitetura da fundação. Formato leve
 | [0011](0011-tanstack-query-zustand.md) | Server-state TanStack Query + UI-state Zustand | Aceito |
 | [0012](0012-realtime-ws-invalidates-cache.md) | Realtime: WebSocket invalida o cache do TanStack Query | Aceito |
 | [0013](0013-epic-status-derived.md) | Status do epic derivado (computado), não persistido | Aceito |
+| [0014](0014-mock-agent-runner-default.md) | Runner MOCK determinístico como default na fatia do loop | Aceito |
+| [0015](0015-auto-play-server-side.md) | Auto-play server-side com `setInterval` in-process | Aceito |

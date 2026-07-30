@@ -13,6 +13,7 @@ import { CSS } from "@dnd-kit/utilities";
 import type { ExecState, StoryPoints } from "@kanban-ai/shared";
 
 import { useCardAssignees } from "@/features/assignees";
+import { useAutoPlay, useLoopState, useStepLoop } from "@/features/ai-engine";
 import { useBoard, useCards, useCreateCard, useMoveCard, usePrimaryBoardId } from "@/features/board/hooks";
 import { useBoardUiStore } from "@/features/board/services";
 import { useCardLabels } from "@/features/labels";
@@ -785,6 +786,73 @@ function StoryModal({
   );
 }
 
+function TaskLoopControls({ task, boardId }: { task: ApiCardDetails; boardId: string }) {
+  const storyId = task.parentId;
+  const { data: loopState } = useLoopState(storyId, Boolean(storyId));
+  const stepLoop = useStepLoop(boardId);
+  const { start, stop } = useAutoPlay(boardId);
+
+  const running = loopState?.isAutoRunning ?? false;
+  const execState = task.execState ?? "idle";
+  const deps = task.dependsOn ?? [];
+  const busy = stepLoop.isPending || start.isPending || stop.isPending;
+
+  const onStep = () => {
+    if (storyId) stepLoop.mutate(storyId);
+  };
+  const onToggleAuto = () => {
+    if (!storyId) return;
+    if (running) stop.mutate({ storyId, mode: "graceful" });
+    else start.mutate(storyId);
+  };
+
+  return (
+    <div className="modal-section">
+      <div className="modal-section-title">🤖 Loop do agente</div>
+
+      {task.loopType ? (
+        <div className="ai-loop-type">
+          Perfil de loop: <strong>{task.loopType}</strong>
+        </div>
+      ) : null}
+
+      {task.derivedFromId ? (
+        <div className="ai-derived">🔗 Task derivada de uma validação</div>
+      ) : null}
+
+      {deps.length > 0 ? (
+        <div className="ai-deps">
+          ⏳ Aguarda:{" "}
+          {deps.map((dep, index) => (
+            <span key={dep.dependsOn.id}>
+              {dep.dependsOn.key}
+              {dep.dependsOn.execState === "done" ? " ✓" : ""}
+              {index < deps.length - 1 ? ", " : ""}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="ai-exec-controls">
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={onStep}
+          disabled={!storyId || execState === "done" || busy}
+        >
+          ▶ Rodar 1 iteração
+        </button>
+        <button
+          className={"btn btn-sm " + (running ? "btn-ghost" : "btn-primary")}
+          onClick={onToggleAuto}
+          disabled={!storyId || busy}
+        >
+          {running ? "⏸ Parar auto-play" : "⏩ Auto-play"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TaskModal({
   boardId,
   taskId,
@@ -856,6 +924,8 @@ function TaskModal({
         <LabelsSection card={task} boardId={boardId} boardLabels={boardLabels} />
         <AssigneesSection card={task} boardId={boardId} boardAssignees={boardAssignees} />
         <ChecklistSection card={task} boardId={boardId} />
+
+        <TaskLoopControls task={task} boardId={boardId} />
 
         <div className="modal-section">
           <div className="modal-section-title">📓 Diário de iterações</div>

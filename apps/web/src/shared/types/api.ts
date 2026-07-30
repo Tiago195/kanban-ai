@@ -54,7 +54,18 @@ export interface ApiCardSummary {
   aiNotes?: string | null;
   loopType?: string | null;
   execState?: ExecState | null;
+  derivedFromId?: string | null;
   epicStatus?: EpicStatusSummary;
+}
+
+/** Uma dependência de task exposta pelo GET /cards/:id (task pré-requisito). */
+export interface TaskDependencyView {
+  dependsOn: {
+    id: string;
+    key: string;
+    title: string;
+    execState: ExecState | null;
+  };
 }
 
 export interface ApiCardDetails extends ApiCardSummary {
@@ -66,4 +77,5 @@ export interface ApiCardDetails extends ApiCardSummary {
   labels: Array<{ label: Label }>;
   assignees: Array<{ assignee: Assignee }>;
   children: ApiCardSummary[];
+  dependsOn?: TaskDependencyView[];
 }

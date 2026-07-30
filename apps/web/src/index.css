@@ -1307,6 +1307,62 @@
   .flow-del:hover {
     color: #e03131;
   }
+
+  /* botões genéricos (modais) */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 12px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-sm {
+    font-size: 12px;
+    padding: 5px 10px;
+  }
+  .btn-ghost {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .btn-ghost:not(:disabled):hover {
+    background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:not(:disabled):hover {
+    background: color-mix(in srgb, var(--accent) 85%, #000);
+  }
+
+  /* controles do loop do agente (task modal) */
+  .ai-loop-type {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  .ai-derived,
+  .ai-deps {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  .ai-exec-controls {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+  }
 }
 
 /* scrollbars globais (fora dos modais) */

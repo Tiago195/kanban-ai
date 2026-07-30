@@ -10,7 +10,9 @@ export interface AppConfig {
     defaultModel: string;
     maxConcurrentSessions: number;
     watchdogIntervalMs: number;
+    autoStepIntervalMs: number;
     workspacesDir: string;
+    runnerKind: 'mock' | 'copilot-cli';
   };
 }
 
@@ -28,7 +30,9 @@ export function loadConfig(): AppConfig {
       defaultModel: process.env.AGENT_DEFAULT_MODEL ?? 'opus',
       maxConcurrentSessions: num(process.env.AGENT_MAX_CONCURRENT_SESSIONS, 3),
       watchdogIntervalMs: num(process.env.AGENT_WATCHDOG_INTERVAL_MS, 120_000),
+      autoStepIntervalMs: num(process.env.AGENT_AUTO_STEP_INTERVAL_MS, 1_500),
       workspacesDir: process.env.AGENT_WORKSPACES_DIR ?? './.agent-workspaces',
+      runnerKind: process.env.AGENT_RUNNER_KIND === 'copilot-cli' ? 'copilot-cli' : 'mock',
     },
   };
 }
