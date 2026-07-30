@@ -27,9 +27,16 @@ export interface LoopStateResponse {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Só declara Content-Type JSON quando há corpo. Fastify rejeita (400 "Body cannot be
+  // empty") requisições com content-type application/json e corpo vazio — o que quebrava
+  // os POSTs sem body do loop (step / auto/start).
+  const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) ?? {}) };
+  if (init?.body != null && headers["Content-Type"] == null && headers["content-type"] == null) {
+    headers["Content-Type"] = "application/json";
+  }
   const res = await fetch(`${baseUrl}${path}`, {
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
+    headers,
   });
 
   if (!res.ok) {
