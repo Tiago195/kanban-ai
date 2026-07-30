@@ -10,60 +10,71 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { StoryPoints } from "@kanban-ai/shared";
-import { Check, Plus, Trash2 } from "lucide-react";
+import type { ExecState, StoryPoints } from "@kanban-ai/shared";
 
 import { useCardAssignees } from "@/features/assignees";
 import { useBoard, useCards, useCreateCard, useMoveCard, usePrimaryBoardId } from "@/features/board/hooks";
 import { useBoardUiStore } from "@/features/board/services";
 import { useCardLabels } from "@/features/labels";
 import { useCard, useDodMutations, useFlows, useUpdateCard } from "@/features/stories";
-import { Badge } from "@/shared/components/ui/badge";
-import { Button } from "@/shared/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/shared/components/ui/dialog";
-import { Input } from "@/shared/components/ui/input";
-import { Label } from "@/shared/components/ui/label";
-import { ScrollArea } from "@/shared/components/ui/scroll-area";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/components/ui/select";
-import { Separator } from "@/shared/components/ui/separator";
-import { Textarea } from "@/shared/components/ui/textarea";
-import { cn } from "@/shared/utils/cn";
 import type { ApiBoardColumn, ApiCardDetails, ApiCardSummary } from "@/shared/types";
 
 const BOARD_COLUMNS = ["Backlog", "To Do", "In Progress", "Review", "Done"] as const;
 const STORY_POINTS = [1, 2, 3, 5, 8, 13] as const;
 const TASK_COLUMNS = ["To Do", "In Progress", "Review", "Done"] as const;
 
-function SortableCardItem({ card, onClick }: { card: ApiCardSummary; onClick: (card: ApiCardSummary) => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
+const AVATAR_PALETTE = ["#4c6ef5", "#22a06b", "#e5484d", "#f59e0b", "#8b5cf6", "#0ea5e9", "#ec4899", "#14b8a6"];
 
-  return (
-    <button
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn(
-        "w-full rounded-md border bg-card p-3 text-left shadow-sm hover:border-primary/50",
-        isDragging && "opacity-70",
-      )}
-      onClick={() => onClick(card)}
-      {...attributes}
-      {...listeners}
-    >
-      <p className="text-xs text-muted-foreground">{card.key}</p>
-      <p className="text-sm font-medium">{card.title}</p>
-    </button>
-  );
+const EXEC_STATE_META: Record<ExecState, { label: string; cls: string }> = {
+  idle: { label: "Ocioso", cls: "idle" },
+  analyzing: { label: "Analisando", cls: "analyzing" },
+  implementing: { label: "Implementando", cls: "implementing" },
+  validating: { label: "Validando", cls: "validating" },
+  "blocked-dep": { label: "Bloqueada (derivada)", cls: "blocked" },
+  done: { label: "Concluída", cls: "done" },
+};
+
+const PHASE_META: Record<string, { label: string; emoji: string }> = {
+  reproduce: { label: "Reproduzir", emoji: "🔁" },
+  analysis: { label: "Análise", emoji: "🔎" },
+  implementation: { label: "Implementação", emoji: "🛠️" },
+  validation: { label: "Validação", emoji: "🧪" },
+};
+
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .map((word) => word[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 }
 
-function statusLabel(status?: "todo" | "inprogress" | "done") {
-  if (status === "done") return "Done";
-  if (status === "inprogress") return "In Progress";
-  return "To Do";
+function avatarColor(seed: string) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
 }
 
-function statusVariant(status?: "todo" | "inprogress" | "done"): "outline" | "secondary" {
-  if (status === "done") return "secondary";
-  return "outline";
+function epicStatusLabel(status?: "todo" | "inprogress" | "done") {
+  if (status === "done") return "DONE";
+  if (status === "inprogress") return "IN PROGRESS";
+  return "TODO";
+}
+
+function relativeTime(ts: number) {
+  const diff = Date.now() - ts;
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return "agora";
+  const m = Math.floor(s / 60);
+  if (m < 60) return "há " + m + " min";
+  const h = Math.floor(m / 60);
+  if (h < 24) return "há " + h + " h";
+  const dd = Math.floor(h / 24);
+  if (dd < 7) return "há " + dd + " d";
+  return new Date(ts).toLocaleDateString("pt-BR");
 }
 
 function getColumnFromOverId(
@@ -79,32 +90,34 @@ function getColumnFromOverId(
   return activeCard ? fallback(activeCard) : null;
 }
 
-function SidePanel({
-  open,
-  onOpenChange,
-  index,
-  title,
-  children,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  index: number;
-  title: string;
-  children: ReactNode;
-}) {
+function StoryCard({ card, onOpen }: { card: ApiCardSummary; onOpen: (card: ApiCardSummary) => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+
+  const hasDescription = Boolean(card.description && card.description.trim());
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
-      <DialogContent
-        showOverlay={false}
-        className="top-20 h-[calc(100vh-6rem)] w-[420px] translate-x-0 translate-y-0 p-0"
-        style={{ left: 80 + index * 440 }}
-      >
-        <DialogHeader className="border-b px-4 py-3">
-          <DialogTitle>{title}</DialogTitle>
-        </DialogHeader>
-        <ScrollArea className="h-[calc(100%-57px)] px-4 py-3">{children}</ScrollArea>
-      </DialogContent>
-    </Dialog>
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={"card type-story" + (card.blocked ? " blocked" : "") + (isDragging ? " dragging" : "")}
+      onClick={() => onOpen(card)}
+      {...attributes}
+      {...listeners}
+    >
+      <div className="card-top">
+        <span className="type-badge story">STORY</span>
+        <span className="card-key">{card.key}</span>
+        {card.blocked ? <span className="blocked-flag">⛔</span> : null}
+        {card.points != null ? <span className="points-badge">{card.points}</span> : null}
+      </div>
+      <div className="card-title">{card.title}</div>
+      {hasDescription ? (
+        <div className="card-meta">
+          <span className="card-badge">📝</span>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -119,74 +132,404 @@ function StoryColumn({
   onOpenStory: (card: ApiCardSummary) => void;
   onCreateStory: (columnId: string) => void;
 }) {
+  const points = stories.reduce((sum, story) => sum + (story.points ?? 0), 0);
+  const overLimit = column.wipLimit != null && stories.length > column.wipLimit;
+  const allowsCreate = column.title === "Backlog" || column.title === "To Do";
+
   return (
-    <div className="flex h-full min-h-[480px] w-64 flex-col rounded-lg border bg-muted/30">
-      <div className="flex items-center justify-between border-b px-3 py-2">
-        <h3 className="text-sm font-semibold">{column.title}</h3>
-        {(column.title === "Backlog" || column.title === "To Do") && (
-          <Button variant="ghost" size="icon" onClick={() => onCreateStory(column.id)}>
-            <Plus className="h-4 w-4" />
-          </Button>
-        )}
+    <div className="column">
+      <div className="column-header">
+        <div className="column-title">{column.title}</div>
+        <span className={"column-count" + (overLimit ? " over-limit" : "")}>{stories.length}</span>
+        {points > 0 ? <span className="column-points">{points} pts</span> : null}
+        {column.wipLimit != null ? (
+          <span className="column-wip">
+            {stories.length}/{column.wipLimit}
+          </span>
+        ) : null}
       </div>
-      <ScrollArea className="h-[430px] p-2">
-        <SortableContext items={stories.map((story) => story.id)} strategy={verticalListSortingStrategy}>
-          <div id={"column:" + column.id} className="space-y-2">
-            {stories.map((story) => (
-              <SortableCardItem key={story.id} card={story} onClick={onOpenStory} />
-            ))}
-          </div>
-        </SortableContext>
-      </ScrollArea>
+      <SortableContext items={stories.map((story) => story.id)} strategy={verticalListSortingStrategy}>
+        <div id={"column:" + column.id} className="card-list">
+          {stories.map((story) => (
+            <StoryCard key={story.id} card={story} onOpen={onOpenStory} />
+          ))}
+        </div>
+      </SortableContext>
+      {allowsCreate ? (
+        <button className="add-card-btn" onClick={() => onCreateStory(column.id)}>
+          + Adicionar história
+        </button>
+      ) : null}
     </div>
   );
 }
 
-function DodSection({ card, boardId }: { card: ApiCardDetails; boardId: string }) {
-  const [text, setText] = useState("");
-  const { addDod, updateDod, removeDod } = useDodMutations();
+function MiniCard({
+  card,
+  onOpen,
+  showPoints,
+}: {
+  card: ApiCardSummary;
+  onOpen: (card: ApiCardSummary) => void;
+  showPoints?: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
+  const style = { transform: CSS.Transform.toString(transform), transition };
 
   return (
-    <section className="space-y-2">
-      <p className="text-sm font-semibold">DOD</p>
-      <div className="space-y-2">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={"task-card" + (card.blocked ? " blocked" : "") + (isDragging ? " dragging" : "")}
+      onClick={() => onOpen(card)}
+      {...attributes}
+      {...listeners}
+    >
+      <div className="task-card-top">
+        <span className="card-key">{card.key}</span>
+        {showPoints && card.points != null ? <span className="points-badge">{card.points}</span> : null}
+        {card.blocked ? <span>⛔</span> : null}
+      </div>
+      <div className="task-card-title">{card.title}</div>
+    </div>
+  );
+}
+
+function MiniKanban({
+  boardId,
+  columns,
+  cards,
+  fallbackColumn,
+  onOpenCard,
+  onAddCard,
+  addLabel,
+  allowAddOn,
+}: {
+  boardId: string;
+  columns: ApiBoardColumn[];
+  cards: ApiCardSummary[];
+  fallbackColumn: (card: ApiCardSummary) => string | null;
+  onOpenCard: (card: ApiCardSummary) => void;
+  onAddCard?: (columnId: string) => void;
+  addLabel?: string;
+  allowAddOn?: (column: ApiBoardColumn) => boolean;
+}) {
+  const moveCard = useMoveCard();
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={(event: DragEndEvent) => {
+        const activeId = String(event.active.id);
+        const overId = event.over ? String(event.over.id) : "";
+        if (!overId) return;
+        const destination = getColumnFromOverId(overId, cards, activeId, fallbackColumn);
+        if (!destination) return;
+        moveCard.mutate({ boardId, cardId: activeId, dto: { columnId: destination } });
+      }}
+    >
+      <div className="task-board">
+        {columns.map((column) => {
+          const items = cards.filter((card) => fallbackColumn(card) === column.id);
+          const canAdd = Boolean(onAddCard) && (allowAddOn ? allowAddOn(column) : true);
+          return (
+            <div key={column.id} className="task-col">
+              <div className="task-col-head">
+                <span className="task-col-title">{column.title}</span>
+                <span className="task-col-count">{items.length}</span>
+              </div>
+              <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+                <div id={"column:" + column.id} className="task-list">
+                  {items.map((item) => (
+                    <MiniCard key={item.id} card={item} onOpen={onOpenCard} showPoints />
+                  ))}
+                </div>
+              </SortableContext>
+              {canAdd ? (
+                <button className="task-add" onClick={() => onAddCard?.(column.id)}>
+                  {addLabel ?? "+ Adicionar"}
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </DndContext>
+  );
+}
+
+function ChecklistSection({ card, boardId }: { card: ApiCardDetails; boardId: string }) {
+  const [text, setText] = useState("");
+  const { addDod, updateDod, removeDod } = useDodMutations();
+  const done = card.dodItems.filter((item) => item.done).length;
+
+  const commit = () => {
+    const value = text.trim();
+    if (!value) return;
+    addDod.mutate({ boardId, cardId: card.id, dto: { text: value } });
+    setText("");
+  };
+
+  return (
+    <div className="modal-section">
+      <div className="modal-section-title">
+        Definition of Done (DOD)
+        {card.dodItems.length ? (
+          <span>
+            {done}/{card.dodItems.length}
+          </span>
+        ) : null}
+      </div>
+      <div className="checklist">
         {card.dodItems.map((item) => (
-          <div key={item.id} className="flex items-center gap-2 rounded border p-2">
-            <button
-              className={cn(
-                "flex h-5 w-5 items-center justify-center rounded border",
-                item.done && "bg-primary text-primary-foreground",
-              )}
-              onClick={() =>
+          <div key={item.id} className="check-item">
+            <input
+              type="checkbox"
+              checked={item.done}
+              onChange={() =>
                 updateDod.mutate({ boardId, cardId: card.id, itemId: item.id, dto: { done: !item.done } })
               }
-            >
-              {item.done ? <Check className="h-3.5 w-3.5" /> : null}
-            </button>
-            <span className={cn("flex-1 text-sm", item.done && "line-through text-muted-foreground")}>{item.text}</span>
-            <Button
-              size="icon"
-              variant="ghost"
+            />
+            <span className={"txt" + (item.done ? " done" : "")}>{item.text}</span>
+            <button
+              className="del-check"
               onClick={() => removeDod.mutate({ boardId, cardId: card.id, itemId: item.id })}
             >
-              <Trash2 className="h-4 w-4" />
-            </Button>
+              🗑
+            </button>
           </div>
         ))}
       </div>
-      <div className="flex gap-2">
-        <Input value={text} onChange={(event) => setText(event.target.value)} placeholder="Novo item" />
-        <Button
-          onClick={() => {
-            if (!text.trim()) return;
-            addDod.mutate({ boardId, cardId: card.id, dto: { text: text.trim() } });
-            setText("");
+      <div className="add-check-row">
+        <input
+          className="criteria-input"
+          value={text}
+          placeholder="Critério de concluído…"
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commit();
+            }
           }}
-        >
-          Adicionar
-        </Button>
+        />
+        <button className="kb-btn kb-btn-ghost kb-btn-sm" onClick={commit}>
+          + Adicionar
+        </button>
       </div>
-    </section>
+    </div>
+  );
+}
+
+function LabelsSection({
+  card,
+  boardId,
+  boardLabels,
+}: {
+  card: ApiCardDetails;
+  boardId: string;
+  boardLabels: Array<{ id: string; name: string; color: string }>;
+}) {
+  const { attachLabel, detachLabel } = useCardLabels();
+  const selected = new Set(card.labels.map((entry) => entry.label.id));
+
+  return (
+    <div className="modal-section">
+      <div className="modal-section-title">Labels</div>
+      <div className="label-editor">
+        {boardLabels.map((label) => {
+          const isSelected = selected.has(label.id);
+          return (
+            <span
+              key={label.id}
+              className={"label-option" + (isSelected ? " selected" : "")}
+              onClick={() => {
+                if (isSelected) {
+                  detachLabel.mutate({ boardId, cardId: card.id, labelId: label.id });
+                } else {
+                  attachLabel.mutate({ boardId, cardId: card.id, labelId: label.id });
+                }
+              }}
+            >
+              <span className="swatch" style={{ background: label.color }} />
+              <span>{label.name}</span>
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AssigneesSection({
+  card,
+  boardId,
+  boardAssignees,
+}: {
+  card: ApiCardDetails;
+  boardId: string;
+  boardAssignees: Array<{ id: string; name: string; model: string | null }>;
+}) {
+  const { attachAssignee, detachAssignee } = useCardAssignees();
+  const selected = new Set(card.assignees.map((entry) => entry.assignee.id));
+
+  return (
+    <div className="modal-section">
+      <div className="modal-section-title">🤖 Agentes responsáveis</div>
+      <div className="assignee-editor">
+        {boardAssignees.map((assignee) => {
+          const isSelected = selected.has(assignee.id);
+          return (
+            <span
+              key={assignee.id}
+              className={"assignee-option" + (isSelected ? " selected" : "")}
+              onClick={() => {
+                if (isSelected) {
+                  detachAssignee.mutate({ boardId, cardId: card.id, assigneeId: assignee.id });
+                } else {
+                  attachAssignee.mutate({ boardId, cardId: card.id, assigneeId: assignee.id });
+                }
+              }}
+            >
+              <span className="mini-avatar" style={{ background: avatarColor(assignee.name) }}>
+                {initials(assignee.name)}
+              </span>
+              <span>🤖 {assignee.name}</span>
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CommentsSection({ card }: { card: ApiCardDetails }) {
+  return (
+    <div className="modal-section">
+      <div className="modal-section-title">Comentários</div>
+      <div className="comment-list">
+        {card.comments
+          .slice()
+          .sort((a, b) => b.ts - a.ts)
+          .map((comment) => (
+            <div key={comment.id} className="comment">
+              <span className="mini-avatar" style={{ background: avatarColor(comment.authorId ?? "AI") }}>
+                {initials(comment.authorId ?? "AI")}
+              </span>
+              <div className="comment-body">
+                <div>
+                  <span className="comment-author">{comment.authorId ?? "AI"}</span>
+                  <span className="comment-time">{relativeTime(comment.ts)}</span>
+                </div>
+                <div className="comment-text">{comment.text}</div>
+              </div>
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+}
+
+function ActivitySection({ card }: { card: ApiCardDetails }) {
+  return (
+    <div className="modal-section">
+      <div className="modal-section-title">Atividade</div>
+      <div className="activity-list">
+        {card.activities.slice(0, 30).map((activity) => (
+          <div key={activity.id} className="activity-item">
+            <b>{activity.text}</b>
+            <span className="activity-time">{relativeTime(activity.ts)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ModalPanel({ level, children }: { level?: "epic" | "task"; children: ReactNode }) {
+  const cls = level === "epic" ? "modal-panel lvl-epic" : level === "task" ? "modal-panel lvl-task" : "modal-panel";
+  return (
+    <div className={cls} onClick={(event) => event.stopPropagation()}>
+      <div className="kb-modal">{children}</div>
+    </div>
+  );
+}
+
+function EpicModal({
+  boardId,
+  epicId,
+  boardColumns,
+  stories,
+  onOpenStory,
+  onClose,
+  onCreateStory,
+}: {
+  boardId: string;
+  epicId: string;
+  boardColumns: ApiBoardColumn[];
+  stories: ApiCardSummary[];
+  onOpenStory: (storyId: string) => void;
+  onClose: () => void;
+  onCreateStory: (columnId: string, parentId: string) => void;
+}) {
+  const { data: epic } = useCard(epicId);
+  const flowColumns = boardColumns.filter((column) => !column.isTaskColumn).sort((a, b) => a.position - b.position);
+  const epicStories = stories.filter((story) => story.parentId === epicId).sort((a, b) => a.position - b.position);
+  const done = epic?.epicStatus?.done ?? 0;
+  const total = epic?.epicStatus?.total ?? 0;
+
+  return (
+    <ModalPanel level="epic">
+      <div className="modal-header">
+        <div className="modal-key-row">
+          <span className="type-badge epic">EPIC</span>
+          <span className="card-key">{epic?.key ?? ""}</span>
+          {epic ? (
+            <span className={"epic-status-inline status-" + (epic.epicStatus?.status ?? "todo")}>
+              {epicStatusLabel(epic.epicStatus?.status)} · {done}/{total}
+            </span>
+          ) : null}
+        </div>
+        <div className="modal-title-row">
+          <input className="card-title-input" value={epic?.title ?? ""} readOnly />
+          <button className="modal-close" onClick={onClose} aria-label="Fechar épico">
+            ✕
+          </button>
+        </div>
+      </div>
+      <div className="modal-body">
+        {epic?.description ? (
+          <div className="modal-section">
+            <div className="modal-section-title">Descrição</div>
+            <div className="card-desc-input" style={{ whiteSpace: "pre-wrap" }}>
+              {epic.description}
+            </div>
+          </div>
+        ) : null}
+        <div className="modal-section">
+          <div className="modal-section-title">
+            Histórias
+            {total ? (
+              <span>
+                {done}/{total}
+              </span>
+            ) : null}
+          </div>
+          <MiniKanban
+            boardId={boardId}
+            columns={flowColumns}
+            cards={epicStories}
+            fallbackColumn={(card) => card.boardColumnId}
+            onOpenCard={(card) => onOpenStory(card.id)}
+            onAddCard={(columnId) => onCreateStory(columnId, epicId)}
+            addLabel="+ História"
+            allowAddOn={(column) => column.title === "Backlog" || column.title === "To Do"}
+          />
+        </div>
+      </div>
+    </ModalPanel>
   );
 }
 
@@ -197,7 +540,6 @@ function StoryModal({
   boardLabels,
   boardAssignees,
   onOpenTask,
-  panelIndex,
   onClose,
 }: {
   boardId: string;
@@ -206,25 +548,17 @@ function StoryModal({
   boardLabels: Array<{ id: string; name: string; color: string }>;
   boardAssignees: Array<{ id: string; name: string; model: string | null }>;
   onOpenTask: (taskId: string) => void;
-  panelIndex: number;
   onClose: () => void;
 }) {
   const { data: story } = useCard(storyId);
   const updateCard = useUpdateCard();
-  const moveCard = useMoveCard();
   const createCard = useCreateCard(boardId);
-  const { attachLabel, detachLabel } = useCardLabels();
-  const { attachAssignee, detachAssignee } = useCardAssignees();
   const { addFlow, removeFlow } = useFlows();
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [points, setPoints] = useState("");
-  const [labelToAdd, setLabelToAdd] = useState("");
-  const [assigneeToAdd, setAssigneeToAdd] = useState("");
   const [flowName, setFlowName] = useState("");
-  const [flowFiles, setFlowFiles] = useState("");
-  const [flowNote, setFlowNote] = useState("");
 
   useEffect(() => {
     if (!story) return;
@@ -241,267 +575,181 @@ function StoryModal({
     .filter((column) => TASK_COLUMNS.includes(column.title as (typeof TASK_COLUMNS)[number]))
     .sort((a, b) => a.position - b.position);
 
-  const existingLabelIds = new Set(story.labels.map((entry) => entry.label.id));
-  const existingAssigneeIds = new Set(story.assignees.map((entry) => entry.assignee.id));
+  const saveCard = () =>
+    updateCard.mutate({
+      boardId,
+      cardId: story.id,
+      dto: {
+        title,
+        description,
+        points: points ? (Number(points) as StoryPoints) : null,
+      },
+    });
 
-  const taskSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const addFlowItem = () => {
+    const value = flowName.trim();
+    if (!value) return;
+    addFlow.mutate({ boardId, cardId: story.id, dto: { name: value, files: [] } });
+    setFlowName("");
+  };
+
+  const createTask = () => {
+    const todoColumn = taskColumns.find((column) => column.title === "To Do");
+    if (!todoColumn) return;
+    createCard.mutate({
+      dto: { boardId, type: "task", title: "Nova task", parentId: story.id, columnId: todoColumn.id },
+    });
+  };
 
   return (
-    <SidePanel open onOpenChange={(open) => !open && onClose()} index={panelIndex} title={"Story " + story.key}>
-      <div className="space-y-4">
-        <div className="space-y-2">
-          <Label>Título</Label>
-          <Input value={title} onChange={(event) => setTitle(event.target.value)} />
-          <Label>Descrição</Label>
-          <Textarea rows={3} value={description} onChange={(event) => setDescription(event.target.value)} />
-          <Label>Points</Label>
-          <Select value={points || "none"} onValueChange={(value) => setPoints(value === "none" ? "" : value)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Sem pontos" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">Sem pontos</SelectItem>
-              {STORY_POINTS.map((point) => (
-                <SelectItem key={point} value={String(point)}>
-                  {point}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            onClick={() =>
-              updateCard.mutate({
-                boardId,
-                cardId: story.id,
-                dto: {
-                  title,
-                  description,
-                  points: points ? (Number(points) as StoryPoints) : null,
-                },
-              })
-            }
-          >
-            Salvar
-          </Button>
+    <ModalPanel>
+      <div className="modal-header">
+        <div className="modal-key-row">
+          <span className="type-badge story">STORY</span>
+          <span className="card-key">{story.key}</span>
+          {story.blocked ? <span className="blocked-flag">⛔ BLOQUEADO</span> : null}
+          {story.points != null ? <span className="points-badge">{story.points}</span> : null}
+        </div>
+        <div className="modal-title-row">
+          <input
+            className="card-title-input"
+            value={title}
+            placeholder="Título da história"
+            onChange={(event) => setTitle(event.target.value)}
+            onBlur={saveCard}
+          />
+          <button className="modal-close" onClick={onClose} aria-label="Fechar história">
+            ✕
+          </button>
+        </div>
+      </div>
+      <div className="modal-body">
+        <div className="modal-section">
+          <div className="field-row">
+            <div className="field">
+              <label>Story Points</label>
+              <select
+                className="select-inline"
+                value={points}
+                onChange={(event) => {
+                  setPoints(event.target.value);
+                  updateCard.mutate({
+                    boardId,
+                    cardId: story.id,
+                    dto: {
+                      title,
+                      description,
+                      points: event.target.value ? (Number(event.target.value) as StoryPoints) : null,
+                    },
+                  });
+                }}
+              >
+                <option value="">—</option>
+                {STORY_POINTS.map((point) => (
+                  <option key={point} value={String(point)}>
+                    {point}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
 
-        <Separator />
-        <DodSection card={story} boardId={boardId} />
-
-        <Separator />
-        <section className="space-y-2">
-          <p className="text-sm font-semibold">Labels</p>
-          <div className="flex flex-wrap gap-2">
-            {story.labels.map((entry) => (
-              <Badge key={entry.label.id} className="text-white" style={{ backgroundColor: entry.label.color }}>
-                {entry.label.name}
-                <button
-                  className="ml-2"
-                  onClick={() => detachLabel.mutate({ boardId, cardId: story.id, labelId: entry.label.id })}
-                >
-                  ×
-                </button>
-              </Badge>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <Select value={labelToAdd} onValueChange={setLabelToAdd}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecionar label" />
-              </SelectTrigger>
-              <SelectContent>
-                {boardLabels
-                  .filter((label) => !existingLabelIds.has(label.id))
-                  .map((label) => (
-                    <SelectItem key={label.id} value={label.id}>
-                      {label.name}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            <Button
-              onClick={() => {
-                if (!labelToAdd) return;
-                attachLabel.mutate({ boardId, cardId: story.id, labelId: labelToAdd });
-                setLabelToAdd("");
-              }}
-            >
-              Adicionar
-            </Button>
-          </div>
-        </section>
-
-        <section className="space-y-2">
-          <p className="text-sm font-semibold">Assignees</p>
-          <div className="flex flex-wrap gap-2">
-            {story.assignees.map((entry) => (
-              <Badge key={entry.assignee.id} variant="outline">
-                {entry.assignee.name + " (" + (entry.assignee.model ?? "-") + ")"}
-                <button
-                  className="ml-2"
-                  onClick={() =>
-                    detachAssignee.mutate({ boardId, cardId: story.id, assigneeId: entry.assignee.id })
-                  }
-                >
-                  ×
-                </button>
-              </Badge>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <Select value={assigneeToAdd} onValueChange={setAssigneeToAdd}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecionar assignee" />
-              </SelectTrigger>
-              <SelectContent>
-                {boardAssignees
-                  .filter((assignee) => !existingAssigneeIds.has(assignee.id))
-                  .map((assignee) => (
-                    <SelectItem key={assignee.id} value={assignee.id}>
-                      {assignee.name}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            <Button
-              onClick={() => {
-                if (!assigneeToAdd) return;
-                attachAssignee.mutate({ boardId, cardId: story.id, assigneeId: assigneeToAdd });
-                setAssigneeToAdd("");
-              }}
-            >
-              Adicionar
-            </Button>
-          </div>
-        </section>
-
-        <Separator />
-        <section className="space-y-2">
-          <p className="text-sm font-semibold">Affected flows</p>
-          {story.affectedFlows.map((flow) => (
-            <div key={flow.id} className="rounded border p-2 text-sm">
-              <div className="flex items-center justify-between">
-                <strong>{flow.name}</strong>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => removeFlow.mutate({ boardId, cardId: story.id, flowId: flow.id })}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-              <p className="text-muted-foreground">{flow.note}</p>
-            </div>
-          ))}
-          <Input value={flowName} onChange={(event) => setFlowName(event.target.value)} placeholder="Nome" />
-          <Input
-            value={flowFiles}
-            onChange={(event) => setFlowFiles(event.target.value)}
-            placeholder="Arquivos separados por vírgula"
+        <div className="modal-section">
+          <div className="modal-section-title">Descrição</div>
+          <textarea
+            className="card-desc-input"
+            rows={3}
+            value={description}
+            placeholder="Como um <usuário>, quero <objetivo>, para <benefício>…"
+            onChange={(event) => setDescription(event.target.value)}
+            onBlur={saveCard}
           />
-          <Textarea value={flowNote} onChange={(event) => setFlowNote(event.target.value)} placeholder="Nota" />
-          <Button
-            onClick={() => {
-              if (!flowName.trim()) return;
-              addFlow.mutate({
-                boardId,
-                cardId: story.id,
-                dto: {
-                  name: flowName.trim(),
-                  files: flowFiles
-                    .split(",")
-                    .map((item) => item.trim())
-                    .filter(Boolean),
-                  note: flowNote.trim() || undefined,
-                },
-              });
-              setFlowName("");
-              setFlowFiles("");
-              setFlowNote("");
-            }}
-          >
-            Adicionar flow
-          </Button>
-        </section>
+        </div>
 
-        <Separator />
-        <section className="space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold">Tasks</p>
-            <Button
-              size="sm"
-              onClick={() => {
-                const todoColumn = taskColumns.find((column) => column.title === "To Do");
-                if (!todoColumn) return;
-                createCard.mutate({
-                  dto: {
-                    boardId,
-                    type: "task",
-                    title: "Nova task",
-                    parentId: story.id,
-                    columnId: todoColumn.id,
-                  },
-                });
+        <LabelsSection card={story} boardId={boardId} boardLabels={boardLabels} />
+        <AssigneesSection card={story} boardId={boardId} boardAssignees={boardAssignees} />
+
+        <div className="modal-section">
+          <div className="modal-section-title">
+            🌊 Fluxos afetados
+            {story.affectedFlows.length ? <span>({story.affectedFlows.length})</span> : null}
+          </div>
+          <div className="flows-list">
+            {story.affectedFlows.length === 0 ? (
+              <div className="diary-empty">Nenhum fluxo mapeado. A validação final usa esta lista.</div>
+            ) : null}
+            {story.affectedFlows.map((flow) => (
+              <div key={flow.id} className="flow-item">
+                <div className="flow-top">
+                  <span className="flow-name">{flow.name}</span>
+                  <button
+                    className="flow-del"
+                    onClick={() => removeFlow.mutate({ boardId, cardId: story.id, flowId: flow.id })}
+                  >
+                    🗑
+                  </button>
+                </div>
+                {flow.files.length ? <div className="flow-files">{flow.files.join(", ")}</div> : null}
+              </div>
+            ))}
+          </div>
+          <div className="add-check-row">
+            <input
+              className="criteria-input"
+              value={flowName}
+              placeholder="Nome do fluxo (ex.: Cadastro de caixa)…"
+              onChange={(event) => setFlowName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  addFlowItem();
+                }
               }}
-            >
-              Nova task
-            </Button>
+            />
+            <button className="kb-btn kb-btn-ghost kb-btn-sm" onClick={addFlowItem}>
+              + Adicionar fluxo
+            </button>
           </div>
+        </div>
 
-          <DndContext
-            sensors={taskSensors}
-            collisionDetection={closestCenter}
-            onDragEnd={(event: DragEndEvent) => {
-              const activeId = String(event.active.id);
-              const overId = event.over ? String(event.over.id) : "";
-              if (!overId) return;
-              const destination = getColumnFromOverId(overId, tasks, activeId, (card) => card.taskColumnId);
-              if (!destination) return;
-              moveCard.mutate({ boardId, cardId: activeId, dto: { columnId: destination } });
+        <div className="modal-section">
+          <div className="modal-section-title">
+            Tasks
+            {tasks.length ? (
+              <span>
+                {tasks.filter((task) => {
+                  const doneColumn = taskColumns.find((column) => column.title === "Done");
+                  return doneColumn ? task.taskColumnId === doneColumn.id : false;
+                }).length}
+                /{tasks.length}
+              </span>
+            ) : null}
+            <button className="kb-btn kb-btn-ghost kb-btn-sm" style={{ marginLeft: "auto" }} onClick={createTask}>
+              + Task
+            </button>
+          </div>
+          <MiniKanban
+            boardId={boardId}
+            columns={taskColumns}
+            cards={tasks}
+            fallbackColumn={(card) => card.taskColumnId}
+            onOpenCard={(card) => onOpenTask(card.id)}
+            onAddCard={(columnId) => {
+              createCard.mutate({
+                dto: { boardId, type: "task", title: "Nova task", parentId: story.id, columnId },
+              });
             }}
-          >
-            <div className="grid grid-cols-2 gap-2">
-              {taskColumns.map((column) => {
-                const items = tasks.filter((task) => task.taskColumnId === column.id);
-                return (
-                  <div key={column.id} className="rounded border bg-muted/20">
-                    <p className="border-b px-2 py-1 text-xs font-semibold">{column.title}</p>
-                    <ScrollArea className="h-40 p-2">
-                      <SortableContext items={items.map((task) => task.id)} strategy={verticalListSortingStrategy}>
-                        <div id={"column:" + column.id} className="space-y-2">
-                          {items.map((task) => (
-                            <SortableCardItem key={task.id} card={task} onClick={(item) => onOpenTask(item.id)} />
-                          ))}
-                        </div>
-                      </SortableContext>
-                    </ScrollArea>
-                  </div>
-                );
-              })}
-            </div>
-          </DndContext>
-        </section>
+            addLabel="+ Task"
+            allowAddOn={(column) => column.title === "To Do"}
+          />
+        </div>
 
-        <Separator />
-        <section className="space-y-2">
-          <p className="text-sm font-semibold">Comentários</p>
-          <div className="space-y-1 text-xs text-muted-foreground">
-            {story.comments.map((comment) => (
-              <p key={comment.id}>{comment.text}</p>
-            ))}
-          </div>
-        </section>
-
-        <section className="space-y-2">
-          <p className="text-sm font-semibold">Atividades</p>
-          <div className="space-y-1 text-xs text-muted-foreground">
-            {story.activities.map((activity) => (
-              <p key={activity.id}>{activity.text}</p>
-            ))}
-          </div>
-        </section>
+        <ChecklistSection card={story} boardId={boardId} />
+        <CommentsSection card={story} />
+        <ActivitySection card={story} />
       </div>
-    </SidePanel>
+    </ModalPanel>
   );
 }
 
@@ -510,24 +758,18 @@ function TaskModal({
   taskId,
   boardLabels,
   boardAssignees,
-  panelIndex,
   onClose,
 }: {
   boardId: string;
   taskId: string;
   boardLabels: Array<{ id: string; name: string; color: string }>;
   boardAssignees: Array<{ id: string; name: string; model: string | null }>;
-  panelIndex: number;
   onClose: () => void;
 }) {
   const { data: task } = useCard(taskId);
   const updateCard = useUpdateCard();
-  const { attachLabel, detachLabel } = useCardLabels();
-  const { attachAssignee, detachAssignee } = useCardAssignees();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [labelToAdd, setLabelToAdd] = useState("");
-  const [assigneeToAdd, setAssigneeToAdd] = useState("");
 
   useEffect(() => {
     if (!task) return;
@@ -537,189 +779,80 @@ function TaskModal({
 
   if (!task) return null;
 
-  const existingLabelIds = new Set(task.labels.map((entry) => entry.label.id));
-  const existingAssigneeIds = new Set(task.assignees.map((entry) => entry.assignee.id));
+  const execState = task.execState ?? "idle";
+  const execMeta = EXEC_STATE_META[execState] ?? EXEC_STATE_META.idle;
+
+  const saveCard = () => updateCard.mutate({ boardId, cardId: task.id, dto: { title, description } });
 
   return (
-    <SidePanel open onOpenChange={(open) => !open && onClose()} index={panelIndex} title={"Task " + task.key}>
-      <div className="space-y-4">
-        <Label>Título</Label>
-        <Input value={title} onChange={(event) => setTitle(event.target.value)} />
-        <Label>Descrição</Label>
-        <Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
-        <Button onClick={() => updateCard.mutate({ cardId: task.id, boardId, dto: { title, description } })}>Salvar</Button>
-
-        <Separator />
-        <DodSection card={task} boardId={boardId} />
-
-        <Separator />
-        <section className="space-y-2">
-          <p className="text-sm font-semibold">Labels</p>
-          <div className="flex flex-wrap gap-2">
-            {task.labels.map((entry) => (
-              <Badge key={entry.label.id} className="text-white" style={{ backgroundColor: entry.label.color }}>
-                {entry.label.name}
-                <button
-                  className="ml-2"
-                  onClick={() => detachLabel.mutate({ boardId, cardId: task.id, labelId: entry.label.id })}
-                >
-                  ×
-                </button>
-              </Badge>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <Select value={labelToAdd} onValueChange={setLabelToAdd}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecionar label" />
-              </SelectTrigger>
-              <SelectContent>
-                {boardLabels
-                  .filter((label) => !existingLabelIds.has(label.id))
-                  .map((label) => (
-                    <SelectItem key={label.id} value={label.id}>
-                      {label.name}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            <Button
-              onClick={() => {
-                if (!labelToAdd) return;
-                attachLabel.mutate({ boardId, cardId: task.id, labelId: labelToAdd });
-                setLabelToAdd("");
-              }}
-            >
-              Adicionar
-            </Button>
-          </div>
-        </section>
-
-        <section className="space-y-2">
-          <p className="text-sm font-semibold">Assignees</p>
-          <div className="flex flex-wrap gap-2">
-            {task.assignees.map((entry) => (
-              <Badge key={entry.assignee.id} variant="outline">
-                {entry.assignee.name}
-                <button
-                  className="ml-2"
-                  onClick={() =>
-                    detachAssignee.mutate({ boardId, cardId: task.id, assigneeId: entry.assignee.id })
-                  }
-                >
-                  ×
-                </button>
-              </Badge>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <Select value={assigneeToAdd} onValueChange={setAssigneeToAdd}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecionar assignee" />
-              </SelectTrigger>
-              <SelectContent>
-                {boardAssignees
-                  .filter((assignee) => !existingAssigneeIds.has(assignee.id))
-                  .map((assignee) => (
-                    <SelectItem key={assignee.id} value={assignee.id}>
-                      {assignee.name}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            <Button
-              onClick={() => {
-                if (!assigneeToAdd) return;
-                attachAssignee.mutate({ boardId, cardId: task.id, assigneeId: assigneeToAdd });
-                setAssigneeToAdd("");
-              }}
-            >
-              Adicionar
-            </Button>
-          </div>
-        </section>
-
-        <Separator />
-        <section className="space-y-2">
-          <p className="text-sm font-semibold">Iterations</p>
-          <div className="space-y-2 text-xs">
-            {task.iterations.map((iteration) => (
-              <div key={iteration.id} className="rounded border p-2">
-                <p className="font-semibold">#{iteration.index} · {iteration.phase}</p>
-                <p className="text-muted-foreground">{iteration.summary}</p>
-              </div>
-            ))}
-          </div>
-        </section>
+    <ModalPanel level="task">
+      <div className="modal-header">
+        <div className="modal-key-row">
+          <span className="type-badge task">TASK</span>
+          <span className="card-key">{task.key}</span>
+          {task.blocked ? <span className="blocked-flag">⛔ BLOQUEADO</span> : null}
+          <span className={"exec-badge st-" + execMeta.cls} style={{ marginLeft: "auto" }}>
+            {execMeta.label}
+          </span>
+        </div>
+        <div className="modal-title-row">
+          <input
+            className="card-title-input"
+            value={title}
+            placeholder="Título da task"
+            onChange={(event) => setTitle(event.target.value)}
+            onBlur={saveCard}
+          />
+          <button className="modal-close" onClick={onClose} aria-label="Fechar task">
+            ✕
+          </button>
+        </div>
       </div>
-    </SidePanel>
-  );
-}
+      <div className="modal-body">
+        <div className="modal-section">
+          <div className="modal-section-title">Descrição</div>
+          <textarea
+            className="card-desc-input"
+            rows={3}
+            value={description}
+            placeholder="Descrição da task…"
+            onChange={(event) => setDescription(event.target.value)}
+            onBlur={saveCard}
+          />
+        </div>
 
-function EpicModal({
-  boardId,
-  epicId,
-  boardColumns,
-  stories,
-  onOpenStory,
-  onClose,
-}: {
-  boardId: string;
-  epicId: string;
-  boardColumns: ApiBoardColumn[];
-  stories: ApiCardSummary[];
-  onOpenStory: (storyId: string) => void;
-  onClose: () => void;
-}) {
-  const { data: epic } = useCard(epicId);
-  const moveCard = useMoveCard();
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+        <LabelsSection card={task} boardId={boardId} boardLabels={boardLabels} />
+        <AssigneesSection card={task} boardId={boardId} boardAssignees={boardAssignees} />
+        <ChecklistSection card={task} boardId={boardId} />
 
-  const flowColumns = boardColumns.filter((column) => !column.isTaskColumn).sort((a, b) => a.position - b.position);
-  const epicStories = stories.filter((story) => story.parentId === epicId).sort((a, b) => a.position - b.position);
-
-  return (
-    <SidePanel open onOpenChange={(open) => !open && onClose()} index={0} title={"Epic " + (epic?.key ?? "")}>
-      <div className="space-y-3">
-        <p className="text-sm text-muted-foreground">{epic?.description}</p>
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={(event: DragEndEvent) => {
-            const activeId = String(event.active.id);
-            const overId = event.over ? String(event.over.id) : "";
-            if (!overId) return;
-            const destination = getColumnFromOverId(overId, epicStories, activeId, (card) => card.boardColumnId);
-            if (!destination) return;
-            moveCard.mutate({ boardId, cardId: activeId, dto: { columnId: destination } });
-          }}
-        >
-          <div className="space-y-2">
-            {flowColumns.map((column) => {
-              const columnStories = epicStories.filter((story) => story.boardColumnId === column.id);
+        <div className="modal-section">
+          <div className="modal-section-title">📓 Diário de iterações</div>
+          <div className="diary">
+            {task.iterations.length === 0 ? (
+              <div className="diary-empty">
+                Sem iterações ainda. Rode 1 iteração ou mova a história para In Progress.
+              </div>
+            ) : null}
+            {task.iterations.map((iteration) => {
+              const phase = PHASE_META[iteration.phase] ?? { label: iteration.phase, emoji: "•" };
               return (
-                <div key={column.id} className="rounded border bg-muted/20">
-                  <p className="border-b px-2 py-1 text-xs font-semibold">{column.title}</p>
-                  <ScrollArea className="h-36 p-2">
-                    <SortableContext items={columnStories.map((story) => story.id)} strategy={verticalListSortingStrategy}>
-                      <div id={"column:" + column.id} className="space-y-2">
-                        {columnStories.map((story) => (
-                          <SortableCardItem
-                            key={story.id}
-                            card={story}
-                            onClick={(item) => onOpenStory(item.id)}
-                          />
-                        ))}
-                      </div>
-                    </SortableContext>
-                  </ScrollArea>
+                <div key={iteration.id} className="iter">
+                  <div className="iter-head">
+                    <span className="iter-phase">
+                      {phase.emoji} {phase.label}
+                    </span>
+                    <span className="iter-idx">#{iteration.index}</span>
+                    <span className="iter-agent">{relativeTime(iteration.ts)}</span>
+                  </div>
+                  {iteration.summary ? <div className="iter-summary">{iteration.summary}</div> : null}
+                  {iteration.detail ? <div className="iter-detail">{iteration.detail}</div> : null}
                 </div>
               );
             })}
           </div>
-        </DndContext>
+        </div>
       </div>
-    </SidePanel>
+    </ModalPanel>
   );
 }
 
@@ -750,121 +883,140 @@ export function BoardView() {
   const epics = (cards ?? []).filter((card) => card.type === "epic").sort((a, b) => a.position - b.position);
   const stories = (cards ?? []).filter((card) => card.type === "story").sort((a, b) => a.position - b.position);
 
-  if (loadingBoards) return <section className="rounded-lg border bg-card p-6">Carregando board...</section>;
+  if (loadingBoards) {
+    return (
+      <div className="work-area">
+        <div className="board">Carregando board…</div>
+      </div>
+    );
+  }
   if (boardError || !boardId) {
-    return <section className="rounded-lg border bg-card p-6">Não foi possível carregar boards.</section>;
+    return (
+      <div className="work-area">
+        <div className="board">Não foi possível carregar boards.</div>
+      </div>
+    );
   }
 
+  const openModals = [modals.epicId, modals.storyId, modals.taskId].filter(Boolean).length;
+  const modalLayerClass =
+    "modal-layer" + (openModals >= 3 ? " depth-3" : openModals === 2 ? " depth-2" : "");
+
   return (
-    <section className="space-y-4">
-      <div className="grid grid-cols-[260px_1fr] gap-4">
-        <aside className="rounded-lg border bg-card p-3">
-          <h2 className="mb-3 text-sm font-semibold">Epics</h2>
-          <ScrollArea className="h-[520px] pr-2">
-            <div className="space-y-2">
-              {epics.map((epic) => {
-                const done = epic.epicStatus?.done ?? 0;
-                const total = epic.epicStatus?.total ?? 0;
-                const progress = total > 0 ? (done / total) * 100 : 0;
-                return (
-                  <button
-                    key={epic.id}
-                    className="w-full rounded-md border p-2 text-left hover:border-primary/50"
-                    onClick={() => openEpic(epic.id)}
-                  >
-                    <p className="text-xs text-muted-foreground">{epic.key}</p>
-                    <p className="text-sm font-medium">{epic.title}</p>
-                    <div className="mt-1 flex items-center justify-between text-xs">
-                      <Badge variant={statusVariant(epic.epicStatus?.status)}>{statusLabel(epic.epicStatus?.status)}</Badge>
-                      <span>{done + "/" + total}</span>
-                    </div>
-                    <div className="mt-2 h-1.5 rounded bg-muted">
-                      <div className="h-1.5 rounded bg-primary" style={{ width: progress + "%" }} />
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </ScrollArea>
-        </aside>
+    <div className="work-area">
+      <aside className="epics-sidebar">
+        <div className="epics-header">
+          <span className="epics-title">ÉPICOS</span>
+          <span className="column-count">{epics.length}</span>
+        </div>
+        <div className="epics-list">
+          {epics.length === 0 ? (
+            <div className="epic-empty">Nenhum épico ainda. Crie um para agrupar histórias.</div>
+          ) : null}
+          {epics.map((epic) => {
+            const status = epic.epicStatus?.status ?? "todo";
+            const done = epic.epicStatus?.done ?? 0;
+            const total = epic.epicStatus?.total ?? 0;
+            const width = total > 0 ? Math.round((done / total) * 100) : 0;
+            return (
+              <div
+                key={epic.id}
+                className={"epic-card status-" + status}
+                onClick={() => openEpic(epic.id)}
+              >
+                <div className="epic-top">
+                  <span className="epic-key">{epic.key}</span>
+                  {epic.blocked ? <span>⛔</span> : null}
+                  <span className={"epic-status status-" + status}>{epicStatusLabel(status)}</span>
+                </div>
+                <div className="epic-title">{epic.title}</div>
+                <div className="epic-progress">
+                  <span style={{ width: width + "%" }} />
+                </div>
+                <div className="epic-meta">
+                  <span>
+                    🧩 {done}/{total} histórias
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </aside>
 
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragStart={(event: DragStartEvent) => setDraggedCard(String(event.active.id))}
-          onDragCancel={() => setDraggedCard(null)}
-          onDragEnd={(event: DragEndEvent) => {
-            setDraggedCard(null);
-            const activeId = String(event.active.id);
-            const overId = event.over ? String(event.over.id) : "";
-            if (!overId) return;
-            const destination = getColumnFromOverId(overId, stories, activeId, (card) => card.boardColumnId);
-            if (!destination) return;
-            moveCard.mutate({ boardId, cardId: activeId, dto: { columnId: destination } });
-          }}
-        >
-          <div className="flex gap-3 overflow-x-auto pb-2">
-            {boardColumns.map((column) => (
-              <StoryColumn
-                key={column.id}
-                column={column}
-                stories={stories.filter((story) => story.boardColumnId === column.id)}
-                onOpenStory={(story) => openStory(story.id, story.parentId)}
-                onCreateStory={(columnId) =>
-                  createCard.mutate({
-                    dto: {
-                      boardId,
-                      type: "story",
-                      title: "Nova story",
-                      columnId,
-                      points: 1,
-                    },
-                  })
-                }
-              />
-            ))}
-          </div>
-        </DndContext>
-      </div>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={(event: DragStartEvent) => setDraggedCard(String(event.active.id))}
+        onDragCancel={() => setDraggedCard(null)}
+        onDragEnd={(event: DragEndEvent) => {
+          setDraggedCard(null);
+          const activeId = String(event.active.id);
+          const overId = event.over ? String(event.over.id) : "";
+          if (!overId) return;
+          const destination = getColumnFromOverId(overId, stories, activeId, (card) => card.boardColumnId);
+          if (!destination) return;
+          moveCard.mutate({ boardId, cardId: activeId, dto: { columnId: destination } });
+        }}
+      >
+        <div className="board">
+          {boardColumns.map((column) => (
+            <StoryColumn
+              key={column.id}
+              column={column}
+              stories={stories.filter((story) => story.boardColumnId === column.id)}
+              onOpenStory={(story) => openStory(story.id, story.parentId)}
+              onCreateStory={(columnId) =>
+                createCard.mutate({
+                  dto: { boardId, type: "story", title: "Nova story", columnId, points: 1 },
+                })
+              }
+            />
+          ))}
+        </div>
+      </DndContext>
 
-      {(modals.epicId || modals.storyId || modals.taskId) && (
-        <button className="fixed inset-0 z-40 cursor-default" onClick={closeAllModals} aria-label="fechar" />
-      )}
+      {openModals > 0 ? (
+        <div className={modalLayerClass} onClick={closeAllModals}>
+          {modals.epicId ? (
+            <EpicModal
+              boardId={boardId}
+              epicId={modals.epicId}
+              boardColumns={board?.columns ?? []}
+              stories={stories}
+              onOpenStory={(storyId) => openStory(storyId, modals.epicId)}
+              onClose={closeTopModal}
+              onCreateStory={(columnId, parentId) =>
+                createCard.mutate({
+                  dto: { boardId, type: "story", title: "Nova story", columnId, parentId, points: 1 },
+                })
+              }
+            />
+          ) : null}
 
-      {modals.epicId ? (
-        <EpicModal
-          boardId={boardId}
-          epicId={modals.epicId}
-          boardColumns={board?.columns ?? []}
-          stories={stories}
-          onOpenStory={(storyId) => openStory(storyId, modals.epicId)}
-          onClose={() => closeTopModal()}
-        />
+          {modals.storyId ? (
+            <StoryModal
+              boardId={boardId}
+              storyId={modals.storyId}
+              boardColumns={board?.columns ?? []}
+              boardLabels={board?.labels ?? []}
+              boardAssignees={board?.assignees ?? []}
+              onOpenTask={openTask}
+              onClose={closeTopModal}
+            />
+          ) : null}
+
+          {modals.taskId ? (
+            <TaskModal
+              boardId={boardId}
+              taskId={modals.taskId}
+              boardLabels={board?.labels ?? []}
+              boardAssignees={board?.assignees ?? []}
+              onClose={closeTopModal}
+            />
+          ) : null}
+        </div>
       ) : null}
-
-      {modals.storyId ? (
-        <StoryModal
-          boardId={boardId}
-          storyId={modals.storyId}
-          boardColumns={board?.columns ?? []}
-          boardLabels={board?.labels ?? []}
-          boardAssignees={board?.assignees ?? []}
-          onOpenTask={openTask}
-          panelIndex={modals.epicId ? 1 : 0}
-          onClose={() => closeTopModal()}
-        />
-      ) : null}
-
-      {modals.taskId ? (
-        <TaskModal
-          boardId={boardId}
-          taskId={modals.taskId}
-          boardLabels={board?.labels ?? []}
-          boardAssignees={board?.assignees ?? []}
-          panelIndex={modals.epicId ? 2 : 1}
-          onClose={() => closeTopModal()}
-        />
-      ) : null}
-    </section>
+    </div>
   );
 }
