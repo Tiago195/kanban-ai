@@ -10,11 +10,26 @@ Gerir os **cards** — o agregado central do domínio. Um card é **polimórfico
 
 ```
 cards/
-├── cards.schema.ts     # schemas Zod (validação de entrada) + tipos
-├── cards.service.ts    # regras de negócio + acesso via PrismaService
-├── cards.controller.ts # rotas REST
+├── cards.schema.ts       # schemas Zod (validação de entrada) + tipos
+├── cards.epic-status.ts  # helper puro deriveEpicStatus (status derivado do epic)
+├── cards.service.ts      # regras de negócio + acesso via PrismaService
+├── cards.controller.ts   # rotas REST
 └── cards.module.ts
 ```
+
+## Rotas
+
+- `GET /cards?boardId=` — lista (epics vêm com `epicStatus: {status,done,total}`
+  computado, ver [ADR-0013](../../../../../docs/adr/0013-epic-status-derived.md)).
+- `GET /cards/:id` — card com relações (dodItems, labels, assignees, flows, ...).
+- `POST /cards` — cria (invariante task só em Backlog/To Do).
+- `PATCH /cards/:id/move` — move entre colunas (board ou mini-kanban), reordena
+  posições, seta `everInProgress`, recomputa epic pai; em `$transaction`.
+- `PATCH /cards/:id` — edita título/descrição/points/blocked/aiContext.
+- DOD: `POST /cards/:id/dod`, `PATCH /dod/:itemId`, `DELETE /dod/:itemId`.
+- Labels: `POST /cards/:id/labels`, `DELETE /cards/:id/labels/:labelId`.
+- Assignees: `POST /cards/:id/assignees`, `DELETE /cards/:id/assignees/:assigneeId`.
+- Flows: `POST /cards/:id/flows`, `DELETE /flows/:flowId`.
 
 ## Invariantes (NUNCA violar)
 
@@ -34,7 +49,9 @@ cards/
 - Tipos de domínio compartilhados vêm de `@kanban-ai/shared` (`CardType`,
   `ExecState`, `StoryPoints`, etc.) — **não** duplicar.
 - Mudanças de card que a UI observa devem emitir eventos WS (`card.created`,
-  `card.moved`, `task.state.changed`, `dod.checked`) via `RealtimeService`.
+  `card.moved`, `card.updated`, `dod.checked`, `label.attached`/`label.detached`,
+  `assignee.attached`/`assignee.detached`, `flow.changed`, `epic.status.derived`)
+  via `RealtimeService` (global — basta injetar).
 
 ## O que NÃO mexer
 

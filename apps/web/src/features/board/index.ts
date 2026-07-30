@@ -1,2 +1,3 @@
-export { BoardPlaceholder } from './components/BoardPlaceholder';
-export type { BoardFeatureMeta } from './types';
+export { BoardView } from "./components/BoardView";
+export * from "./hooks";
+export * from "./services";

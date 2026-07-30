@@ -1,2 +1,2 @@
-export { LabelsPlaceholder } from './components/LabelsPlaceholder';
-export type { LabelsFeatureMeta } from './types';
+export { LabelsPlaceholder } from "./components/LabelsPlaceholder";
+export { useCardLabels } from "./hooks/useCardLabels";

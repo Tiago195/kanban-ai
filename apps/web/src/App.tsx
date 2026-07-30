@@ -1,51 +1,43 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 
-import { AppLayout } from '@/shared/components/AppLayout';
-import { Button } from '@/shared/components/ui/button';
-import { getHealth } from '@/shared/services/apiClient';
-import { useRealtime } from '@/features/realtime';
-import { BoardPlaceholder } from '@/features/board';
-import { EpicsPlaceholder } from '@/features/epics';
-import { StoriesPlaceholder } from '@/features/stories';
-import { TasksPlaceholder } from '@/features/tasks';
-import { LabelsPlaceholder } from '@/features/labels';
-import { AssigneesPlaceholder } from '@/features/assignees';
-import { AiEnginePlaceholder } from '@/features/ai-engine';
+import { AssigneesPlaceholder } from "@/features/assignees";
+import { BoardView, usePrimaryBoardId } from "@/features/board";
+import { useBoardUiStore, type AppTabId } from "@/features/board/services";
+import { EpicsPlaceholder } from "@/features/epics";
+import { LabelsPlaceholder } from "@/features/labels";
+import { useRealtime } from "@/features/realtime";
+import { StoriesPlaceholder } from "@/features/stories";
+import { TasksPlaceholder } from "@/features/tasks";
+import { AiEnginePlaceholder } from "@/features/ai-engine";
+import { AppLayout } from "@/shared/components/AppLayout";
+import { Button } from "@/shared/components/ui/button";
+import { getHealth } from "@/shared/services/apiClient";
 
-type TabId =
-  | 'board'
-  | 'epics'
-  | 'stories'
-  | 'tasks'
-  | 'labels'
-  | 'assignees'
-  | 'ai-engine';
-
-const TABS: { id: TabId; label: string }[] = [
-  { id: 'board', label: 'Board' },
-  { id: 'epics', label: 'Epics' },
-  { id: 'stories', label: 'Stories' },
-  { id: 'tasks', label: 'Tasks' },
-  { id: 'labels', label: 'Labels' },
-  { id: 'assignees', label: 'Assignees' },
-  { id: 'ai-engine', label: 'AI Engine' },
+const TABS: { id: AppTabId; label: string }[] = [
+  { id: "board", label: "Board" },
+  { id: "epics", label: "Epics" },
+  { id: "stories", label: "Stories" },
+  { id: "tasks", label: "Tasks" },
+  { id: "labels", label: "Labels" },
+  { id: "assignees", label: "Assignees" },
+  { id: "ai-engine", label: "AI Engine" },
 ];
 
-function TabContent({ tab }: { tab: TabId }) {
+function TabContent({ tab }: { tab: AppTabId }) {
   switch (tab) {
-    case 'board':
-      return <BoardPlaceholder />;
-    case 'epics':
+    case "board":
+      return <BoardView />;
+    case "epics":
       return <EpicsPlaceholder />;
-    case 'stories':
+    case "stories":
       return <StoriesPlaceholder />;
-    case 'tasks':
+    case "tasks":
       return <TasksPlaceholder />;
-    case 'labels':
+    case "labels":
       return <LabelsPlaceholder />;
-    case 'assignees':
+    case "assignees":
       return <AssigneesPlaceholder />;
-    case 'ai-engine':
+    case "ai-engine":
       return <AiEnginePlaceholder />;
     default:
       return null;
@@ -53,23 +45,19 @@ function TabContent({ tab }: { tab: TabId }) {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<TabId>('board');
-  const [health, setHealth] = useState<string>('carregando…');
-  const { status, lastEvent } = useRealtime();
+  const [health, setHealth] = useState<string>("carregando…");
+  const { activeTab, setActiveTab } = useBoardUiStore();
+  const { boardId } = usePrimaryBoardId();
+  const { status, lastEvent } = useRealtime(undefined, boardId);
 
   useEffect(() => {
     getHealth()
       .then((res) => setHealth(res.status ?? JSON.stringify(res)))
-      .catch((err: unknown) => setHealth(`indisponível (${String(err)})`));
+      .catch((err: unknown) => setHealth("indisponível (" + String(err) + ")"));
   }, []);
 
   const nav = TABS.map((t) => (
-    <Button
-      key={t.id}
-      variant={t.id === tab ? 'default' : 'ghost'}
-      size="sm"
-      onClick={() => setTab(t.id)}
-    >
+    <Button key={t.id} variant={t.id === activeTab ? "default" : "ghost"} size="sm" onClick={() => setActiveTab(t.id)}>
       {t.label}
     </Button>
   ));
@@ -84,10 +72,10 @@ export default function App() {
           WS: <strong>{status}</strong>
         </span>
         <span className="rounded-md border border-border px-3 py-1">
-          Último evento: <strong>{lastEvent ? lastEvent.type : 'nenhum'}</strong>
+          Último evento: <strong>{lastEvent ? lastEvent.type : "nenhum"}</strong>
         </span>
       </div>
-      <TabContent tab={tab} />
+      <TabContent tab={activeTab} />
     </AppLayout>
   );
 }

@@ -37,10 +37,20 @@ fluxos afetados — criando **tasks derivadas** quando encontra problemas.
 nvm use && npm install
 cp .env.example .env
 docker compose up -d
+
+# aguarde o Postgres ficar "healthy" antes de migrar (senão dá P1001):
+docker compose ps            # confira STATUS = healthy
+# ou: until docker inspect --format '{{.State.Health.Status}}' kanban-ai-postgres | grep -q healthy; do sleep 1; done
+
 npm run db:migrate && npm run db:seed
 npm run dev
-curl localhost:3000/health
+curl localhost:3333/health   # API_PORT padrão = 3333
 ```
+
+> Se `npm run db:migrate` retornar `P1001: Can't reach database server`, o Postgres
+> ainda não terminou de subir. Espere o `docker compose ps` mostrar `healthy` e
+> rode de novo — o migrate é idempotente. Em ambientes com egress TCP restrito,
+> veja o workaround em [CONTRIBUTING.md](CONTRIBUTING.md#banco-de-dados-em-ambientes-restritos).
 
 Detalhes em [CONTRIBUTING.md](CONTRIBUTING.md).
 

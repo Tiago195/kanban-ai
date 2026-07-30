@@ -14,3 +14,7 @@ Registro das decisões de arquitetura da fundação. Formato leve
 | [0007](0007-remove-dor-and-acceptance.md) | Remover DOR e `acceptance` no v1 (só DOD) | Aceito |
 | [0008](0008-git-worktree-per-execution.md) | Git worktree isolado por execução | Aceito |
 | [0009](0009-no-auth-v1.md) | Sem autenticação no v1 | Aceito |
+| [0010](0010-dnd-kit.md) | Drag-and-drop com @dnd-kit | Aceito |
+| [0011](0011-tanstack-query-zustand.md) | Server-state TanStack Query + UI-state Zustand | Aceito |
+| [0012](0012-realtime-ws-invalidates-cache.md) | Realtime: WebSocket invalida o cache do TanStack Query | Aceito |
+| [0013](0013-epic-status-derived.md) | Status do epic derivado (computado), não persistido | Aceito |

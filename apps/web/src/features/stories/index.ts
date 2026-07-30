@@ -1,2 +1,2 @@
-export { StoriesPlaceholder } from './components/StoriesPlaceholder';
-export type { StoriesFeatureMeta } from './types';
+export { StoriesPlaceholder } from "./components/StoriesPlaceholder";
+export * from "./hooks";

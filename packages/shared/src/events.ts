@@ -7,7 +7,10 @@
  */
 
 import type { AgentSessionState, ExecState } from './enums';
-import type { Card, Iteration } from './domain';
+import type { AffectedFlow, Card, Iteration } from './domain';
+
+/** Status derivado de um epic a partir das stories filhas. */
+export type EpicDerivedStatus = 'todo' | 'inprogress' | 'done';
 
 /** Um card mudou de coluna (drag-and-drop no board ou no mini-kanban). */
 export interface CardMovedEvent {
@@ -23,6 +26,60 @@ export interface CardMovedEvent {
 export interface CardCreatedEvent {
   type: 'card.created';
   card: Card;
+}
+
+/** Campos de um card foram atualizados (título, descrição, points, aiContext). */
+export interface CardUpdatedEvent {
+  type: 'card.updated';
+  cardId: string;
+  card: Card;
+}
+
+/** Uma label foi anexada a um card. */
+export interface LabelAttachedEvent {
+  type: 'label.attached';
+  cardId: string;
+  labelId: string;
+}
+
+/** Uma label foi removida de um card. */
+export interface LabelDetachedEvent {
+  type: 'label.detached';
+  cardId: string;
+  labelId: string;
+}
+
+/** Um assignee foi anexado a um card. */
+export interface AssigneeAttachedEvent {
+  type: 'assignee.attached';
+  cardId: string;
+  assigneeId: string;
+}
+
+/** Um assignee foi removido de um card. */
+export interface AssigneeDetachedEvent {
+  type: 'assignee.detached';
+  cardId: string;
+  assigneeId: string;
+}
+
+/** Os affectedFlows de uma story mudaram (criação/remoção). */
+export interface FlowChangedEvent {
+  type: 'flow.changed';
+  cardId: string;
+  flows: AffectedFlow[];
+}
+
+/**
+ * O status derivado de um epic mudou (recomputado a partir das stories filhas
+ * após um move). A web usa isto para atualizar a sidebar de epics sem F5.
+ */
+export interface EpicStatusDerivedEvent {
+  type: 'epic.status.derived';
+  epicId: string;
+  status: EpicDerivedStatus;
+  done: number;
+  total: number;
 }
 
 /** Estado de execução de uma task mudou. */
@@ -91,6 +148,13 @@ export interface PingEvent {
 export type ServerEvent =
   | CardMovedEvent
   | CardCreatedEvent
+  | CardUpdatedEvent
+  | LabelAttachedEvent
+  | LabelDetachedEvent
+  | AssigneeAttachedEvent
+  | AssigneeDetachedEvent
+  | FlowChangedEvent
+  | EpicStatusDerivedEvent
   | TaskStateChangedEvent
   | DodCheckedEvent
   | IterationAppendedEvent
