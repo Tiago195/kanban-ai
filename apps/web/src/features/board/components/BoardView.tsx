@@ -428,6 +428,12 @@ function CommentsSection({ card }: { card: ApiCardDetails }) {
             </div>
           ))}
       </div>
+      <form className="comment-form" onSubmit={(event) => event.preventDefault()} title="Em breve — comentários manuais chegam com o AI engine">
+        <input className="comment-input" placeholder="Escreva um comentário… (em breve)" autoComplete="off" disabled />
+        <button className="btn btn-primary btn-sm" type="submit" disabled>
+          Enviar
+        </button>
+      </form>
     </div>
   );
 }
@@ -475,10 +481,23 @@ function EpicModal({
   onCreateStory: (columnId: string, parentId: string) => void;
 }) {
   const { data: epic } = useCard(epicId);
+  const updateCard = useUpdateCard();
   const flowColumns = boardColumns.filter((column) => !column.isTaskColumn).sort((a, b) => a.position - b.position);
   const epicStories = stories.filter((story) => story.parentId === epicId).sort((a, b) => a.position - b.position);
   const done = epic?.epicStatus?.done ?? 0;
   const total = epic?.epicStatus?.total ?? 0;
+
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+
+  useEffect(() => {
+    if (!epic) return;
+    setTitle(epic.title);
+    setDescription(epic.description ?? "");
+  }, [epic]);
+
+  const saveEpic = () =>
+    epic && updateCard.mutate({ boardId, cardId: epic.id, dto: { title, description } });
 
   return (
     <ModalPanel level="epic">
@@ -493,21 +512,32 @@ function EpicModal({
           ) : null}
         </div>
         <div className="modal-title-row">
-          <input className="card-title-input" value={epic?.title ?? ""} readOnly />
+          <input
+            className="card-title-input"
+            value={title}
+            placeholder="Título do épico"
+            onChange={(event) => setTitle(event.target.value)}
+            onBlur={saveEpic}
+            disabled={!epic}
+          />
           <button className="modal-close" onClick={onClose} aria-label="Fechar épico">
             ✕
           </button>
         </div>
       </div>
       <div className="modal-body">
-        {epic?.description ? (
-          <div className="modal-section">
-            <div className="modal-section-title">Descrição</div>
-            <div className="card-desc-input" style={{ whiteSpace: "pre-wrap" }}>
-              {epic.description}
-            </div>
-          </div>
-        ) : null}
+        <div className="modal-section">
+          <div className="modal-section-title">Descrição</div>
+          <textarea
+            className="card-desc-input"
+            rows={3}
+            value={description}
+            placeholder="Descreva o objetivo do épico…"
+            onChange={(event) => setDescription(event.target.value)}
+            onBlur={saveEpic}
+            disabled={!epic}
+          />
+        </div>
         <div className="modal-section">
           <div className="modal-section-title">
             Histórias
@@ -528,6 +558,8 @@ function EpicModal({
             allowAddOn={(column) => column.title === "Backlog" || column.title === "To Do"}
           />
         </div>
+        {epic ? <CommentsSection card={epic} /> : null}
+        {epic ? <ActivitySection card={epic} /> : null}
       </div>
     </ModalPanel>
   );
@@ -851,6 +883,9 @@ function TaskModal({
             })}
           </div>
         </div>
+
+        <CommentsSection card={task} />
+        <ActivitySection card={task} />
       </div>
     </ModalPanel>
   );
