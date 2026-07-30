@@ -22,7 +22,7 @@ interface BoardUiState {
   setActiveTab: (tab: AppTabId) => void;
   setDraggedCard: (cardId: string | null) => void;
   openEpic: (epicId: string) => void;
-  openStory: (storyId: string, epicId?: string | null) => void;
+  openStory: (storyId: string) => void;
   openTask: (taskId: string) => void;
   closeTopModal: () => void;
   closeEpic: () => void;
@@ -46,10 +46,10 @@ export const useBoardUiStore = create<BoardUiState>((set) => ({
       modals: { epicId, storyId: null, taskId: null },
     })),
 
-  openStory: (storyId, epicId = null) =>
+  openStory: (storyId) =>
     set((state) => ({
       modals: {
-        epicId: epicId ?? state.modals.epicId,
+        epicId: state.modals.epicId,
         storyId,
         taskId: null,
       },

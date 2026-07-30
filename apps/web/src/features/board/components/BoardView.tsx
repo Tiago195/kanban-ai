@@ -965,7 +965,7 @@ export function BoardView() {
               key={column.id}
               column={column}
               stories={stories.filter((story) => story.boardColumnId === column.id)}
-              onOpenStory={(story) => openStory(story.id, story.parentId)}
+              onOpenStory={(story) => openStory(story.id)}
               onCreateStory={(columnId) =>
                 createCard.mutate({
                   dto: { boardId, type: "story", title: "Nova story", columnId, points: 1 },
@@ -984,7 +984,7 @@ export function BoardView() {
               epicId={modals.epicId}
               boardColumns={board?.columns ?? []}
               stories={stories}
-              onOpenStory={(storyId) => openStory(storyId, modals.epicId)}
+              onOpenStory={(storyId) => openStory(storyId)}
               onClose={closeTopModal}
               onCreateStory={(columnId, parentId) =>
                 createCard.mutate({
