@@ -7,9 +7,9 @@ import type {
   Comment,
   ExecState,
   Iteration,
-  Label,
-  LoopProfile,
+  IterationPhase,
   StoryPoints,
+  ValidationStrategy,
 } from "@kanban-ai/shared";
 
 export interface ApiBoardColumn {
@@ -20,13 +20,42 @@ export interface ApiBoardColumn {
   isTaskColumn: boolean;
 }
 
+/** Label como retornada pela API (loopProfileId é o profileId string, não o uuid). */
+export interface ApiLabel {
+  id: string;
+  boardId?: string;
+  name: string;
+  color: string;
+  loopProfileId: string | null;
+}
+
+/** Loop profile como retornado pela API: uuid em `id`, chave lógica em `profileId`. */
+export interface ApiLoopProfile {
+  id: string;
+  boardId: string;
+  profileId: string;
+  name: string;
+  builtin: boolean;
+  description: string;
+  phases: IterationPhase[];
+  validation: ValidationStrategy;
+  firstStep: string;
+}
+
 export interface ApiBoard {
   id: string;
   title: string;
   columns: ApiBoardColumn[];
-  labels: Label[];
+  labels: ApiLabel[];
   assignees: Assignee[];
-  loopProfiles: LoopProfile[];
+  loopProfiles: ApiLoopProfile[];
+  defaultModel?: string | null;
+}
+
+/** Um modelo de AI disponível para o login atual do Copilot CLI. */
+export interface ApiAgentModel {
+  id: string;
+  label: string;
 }
 
 export interface EpicStatusSummary {
@@ -52,10 +81,14 @@ export interface ApiCardSummary {
   aiSummary?: string | null;
   aiProject?: string | null;
   aiNotes?: string | null;
+  model?: string | null;
+  resolvedModel?: string | null;
   loopType?: string | null;
   execState?: ExecState | null;
   derivedFromId?: string | null;
   epicStatus?: EpicStatusSummary;
+  labelIds?: string[];
+  assigneeIds?: string[];
 }
 
 /** Uma dependência de task exposta pelo GET /cards/:id (task pré-requisito). */
@@ -74,7 +107,7 @@ export interface ApiCardDetails extends ApiCardSummary {
   activities: Activity[];
   affectedFlows: AffectedFlow[];
   iterations: Iteration[];
-  labels: Array<{ label: Label }>;
+  labels: Array<{ label: ApiLabel }>;
   assignees: Array<{ assignee: Assignee }>;
   children: ApiCardSummary[];
   dependsOn?: TaskDependencyView[];

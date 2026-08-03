@@ -19,6 +19,11 @@ export function useCreateCard(boardId: string | null) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.card(card.id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.board(boardId) });
+      // O card recém-criado (ex.: task) vive em `children` do pai — invalida o
+      // pai para que o mini-kanban dentro do modal reaja sem F5.
+      if (card.parentId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.card(card.parentId) });
+      }
     },
   });
 }

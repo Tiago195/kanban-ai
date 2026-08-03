@@ -15,11 +15,23 @@ interface ModalStack {
   taskId: string | null;
 }
 
+export interface BoardFilters {
+  q: string;
+  type: "" | "story" | "task";
+  label: string;
+  assignee: string;
+}
+
+const initialFilters: BoardFilters = { q: "", type: "", label: "", assignee: "" };
+
 interface BoardUiState {
   activeTab: AppTabId;
   draggedCardId: string | null;
   modals: ModalStack;
+  filters: BoardFilters;
   setActiveTab: (tab: AppTabId) => void;
+  setFilters: (patch: Partial<BoardFilters>) => void;
+  resetFilters: () => void;
   setDraggedCard: (cardId: string | null) => void;
   openEpic: (epicId: string) => void;
   openStory: (storyId: string) => void;
@@ -37,8 +49,11 @@ export const useBoardUiStore = create<BoardUiState>((set) => ({
   activeTab: "board",
   draggedCardId: null,
   modals: initialModals,
+  filters: initialFilters,
 
   setActiveTab: (activeTab) => set({ activeTab }),
+  setFilters: (patch) => set((state) => ({ filters: { ...state.filters, ...patch } })),
+  resetFilters: () => set({ filters: initialFilters }),
   setDraggedCard: (draggedCardId) => set({ draggedCardId }),
 
   openEpic: (epicId) =>

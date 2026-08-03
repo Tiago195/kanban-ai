@@ -43,6 +43,7 @@ export const updateCardSchema = z
     aiSummary: z.string().optional(),
     aiProject: z.string().optional(),
     aiNotes: z.string().optional(),
+    model: z.string().nullable().optional(),
   })
   .refine((o) => Object.keys(o).length > 0, { message: 'nenhum campo para atualizar' });
 

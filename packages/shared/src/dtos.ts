@@ -39,6 +39,8 @@ export interface UpdateCardDto {
   aiSummary?: string;
   aiProject?: string;
   aiNotes?: string;
+  /** Modelo de AI deste card (null = herdar do pai/board). */
+  model?: string | null;
 }
 
 /** Criar item de DOD (POST /cards/:id/dod). */

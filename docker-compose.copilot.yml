@@ -1,0 +1,57 @@
+# ─── Override OPCIONAL: Copilot CLI real dentro do container da API ───────────
+#
+# Este override monta o pacote `@github/copilot` do host (read-only) e configura
+# o runner para executar o Copilot CLI real via adapter JSONL. O loop engine
+# passa a usar o Copilot de verdade em vez do runner mock.
+#
+# Uso:
+#   export GH_TOKEN=$(gh auth token)      # token do GitHub (auth do Copilot)
+#   docker compose -f docker-compose.yml -f docker-compose.copilot.yml up -d api
+#
+# Pré-requisitos no HOST:
+#   • `@github/copilot` instalado globalmente (npm i -g @github/copilot)
+#   • Um token do GitHub com acesso ao Copilot em GH_TOKEN (ou COPILOT_GITHUB_TOKEN).
+#     Ex.: export GH_TOKEN=$(gh auth token)
+#
+# Ajuste COPILOT_PKG_DIR se o pacote estiver em outro caminho:
+#   COPILOT_PKG_DIR=/caminho/@github/copilot GH_TOKEN=$(gh auth token) \
+#     docker compose -f docker-compose.yml -f docker-compose.copilot.yml up -d api
+#
+# Notas:
+#   • Auth é feita 100% via env token — NÃO montamos ~/.copilot (evita conflito
+#     com a sua sessão de CLI no host e problemas de escrita read-only).
+#   • O Copilot precisa de um HOME gravável para persistir estado de sessão;
+#     usamos um volume nomeado dedicado (copilot_home).
+#   • O binário do host roda sob o node:22 do container (validado: mesma glibc).
+
+services:
+  api:
+    environment:
+      AGENT_RUNNER_KIND: copilot-cli
+      AGENT_CLI_COMMAND: node
+      AGENT_CLI_ARGS: /app/docker/copilot-cli-adapter.mjs {prompt}
+      AGENT_CLI_PROMPT_MODE: arg
+      # O adapter invoca o Copilot real montado em /opt/copilot.
+      COPILOT_BIN: /opt/copilot/index.js
+      # HOME gravável para o Copilot persistir estado de sessão.
+      HOME: /home/copilot
+      # Auth do Copilot via token do GitHub (defina GH_TOKEN no ambiente do host).
+      GH_TOKEN: ${GH_TOKEN:-}
+      COPILOT_GITHUB_TOKEN: ${COPILOT_GITHUB_TOKEN:-${GH_TOKEN:-}}
+      # Alias de modelo do domínio ('opus'/'gpt'/'copilot') é traduzido pelo
+      # adapter para um id válido do Copilot CLI. Force um id com COPILOT_MODEL.
+      COPILOT_MODEL: ${COPILOT_MODEL:-}
+      # O `copilot` agêntico pode ficar em silêncio (sem stdout) por um bom tempo.
+      # O adapter emite heartbeat a cada COPILOT_HEARTBEAT_MS para não estourar o
+      # idle timeout do runner; ainda assim damos folga extra no idle timeout.
+      COPILOT_HEARTBEAT_MS: ${COPILOT_HEARTBEAT_MS:-20000}
+      AGENT_STREAM_IDLE_TIMEOUT_MS: ${AGENT_STREAM_IDLE_TIMEOUT_MS:-300000}
+    volumes:
+      - .:/app
+      # Pacote do Copilot CLI (read-only). Sobrescreva com COPILOT_PKG_DIR.
+      - ${COPILOT_PKG_DIR:-${HOME}/.nvm/versions/node/v22.17.1/lib/node_modules/@github/copilot}:/opt/copilot:ro
+      # HOME gravável dedicado para o estado de sessão do Copilot.
+      - copilot_home:/home/copilot
+
+volumes:
+  copilot_home:

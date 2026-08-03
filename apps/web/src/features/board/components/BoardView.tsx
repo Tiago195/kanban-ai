@@ -3,9 +3,12 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
-  closestCenter,
+  pointerWithin,
+  rectIntersection,
+  useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
@@ -17,10 +20,11 @@ import type { ExecState, StoryPoints } from "@kanban-ai/shared";
 import { useCardAssignees } from "@/features/assignees";
 import { useAgentChat, useAutoPlay, useLoopState, useStepLoop } from "@/features/ai-engine";
 import { useAgentChatStore } from "@/features/ai-engine/services/agentChatStore";
-import { useBoard, useCards, useCreateCard, useMoveCard, usePrimaryBoardId } from "@/features/board/hooks";
+import { useBoard, useCards, useCreateCard, useDeleteCard, useModels, useMoveCard, usePrimaryBoardId } from "@/features/board/hooks";
 import { useBoardUiStore } from "@/features/board/services";
-import { useCardLabels } from "@/features/labels";
+import { useCardLabels, LABEL_PALETTE } from "@/features/labels";
 import { useCard, useDodMutations, useFlows, useUpdateCard } from "@/features/stories";
+import { showToast } from "@/shared/services/toastStore";
 import type { ApiBoardColumn, ApiCardDetails, ApiCardSummary } from "@/shared/types";
 
 const BOARD_COLUMNS = ["Backlog", "To Do", "In Progress", "Review", "Done"] as const;
@@ -94,6 +98,39 @@ function getColumnFromOverId(
   return activeCard ? fallback(activeCard) : null;
 }
 
+/**
+ * Estratégia de colisão robusta para board com colunas de altura variável
+ * (inclusive vazias): prioriza o droppable sob o ponteiro; se não houver,
+ * usa interseção de retângulos. Evita o bug em que colunas vazias — sem cards
+ * para o `closestCenter` mirar — ficam impossíveis de receber um drop.
+ */
+const boardCollision: CollisionDetection = (args) => {
+  const pointer = pointerWithin(args);
+  if (pointer.length > 0) return pointer;
+  return rectIntersection(args);
+};
+
+/**
+ * Registra a lista de uma coluna como droppable no dnd-kit (id `column:<id>`),
+ * de modo que seja possível soltar um card mesmo quando a coluna está vazia.
+ */
+function ColumnDropZone({
+  columnId,
+  className,
+  children,
+}: {
+  columnId: string;
+  className: string;
+  children: ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: "column:" + columnId });
+  return (
+    <div ref={setNodeRef} id={"column:" + columnId} className={className + (isOver ? " is-over" : "")}>
+      {children}
+    </div>
+  );
+}
+
 function StoryCardContent({ card }: { card: ApiCardSummary }) {
   const hasDescription = Boolean(card.description && card.description.trim());
   return (
@@ -162,12 +199,12 @@ function StoryColumn({
         ) : null}
       </div>
       <SortableContext items={stories.map((story) => story.id)} strategy={verticalListSortingStrategy}>
-        <div id={"column:" + column.id} className="card-list">
+        <ColumnDropZone columnId={column.id} className="card-list">
           {stories.map((story) => (
             <StoryCard key={story.id} card={story} onOpen={onOpenStory} />
           ))}
           {isDropTarget ? <div className="drop-placeholder" /> : null}
-        </div>
+        </ColumnDropZone>
       </SortableContext>
       {allowsCreate ? (
         <button className="add-card-btn" onClick={() => onCreateStory(column.id)}>
@@ -247,7 +284,7 @@ function MiniKanban({
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={boardCollision}
       onDragStart={(event: DragStartEvent) => setActiveId(String(event.active.id))}
       onDragOver={(event: DragOverEvent) => {
         const overId = event.over ? String(event.over.id) : "";
@@ -266,7 +303,13 @@ function MiniKanban({
         if (!overId) return;
         const destination = getColumnFromOverId(overId, cards, activeId, fallbackColumn);
         if (!destination) return;
-        moveCard.mutate({ boardId, cardId: activeId, dto: { columnId: destination } });
+        const movedCard = cards.find((card) => card.id === activeId);
+        moveCard.mutate({
+          boardId,
+          cardId: activeId,
+          dto: { columnId: destination },
+          parentId: movedCard?.parentId ?? null,
+        });
       }}
     >
       <div className="task-board">
@@ -281,12 +324,12 @@ function MiniKanban({
                 <span className="task-col-count">{items.length}</span>
               </div>
               <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
-                <div id={"column:" + column.id} className="task-list">
+                <ColumnDropZone columnId={column.id} className="task-list">
                   {items.map((item) => (
                     <MiniCard key={item.id} card={item} onOpen={onOpenCard} showPoints />
                   ))}
                   {isDropTarget ? <div className="drop-placeholder task" /> : null}
-                </div>
+                </ColumnDropZone>
               </SortableContext>
               {canAdd ? (
                 <button className="task-add" onClick={() => onAddCard?.(column.id)}>
@@ -380,8 +423,27 @@ function LabelsSection({
   boardId: string;
   boardLabels: Array<{ id: string; name: string; color: string }>;
 }) {
-  const { attachLabel, detachLabel } = useCardLabels();
+  const { attachLabel, detachLabel, createLabel, deleteLabel } = useCardLabels();
   const selected = new Set(card.labels.map((entry) => entry.label.id));
+
+  const handleAddLabel = () => {
+    const name = window.prompt("Nome da nova label:");
+    const trimmed = name?.trim();
+    if (!trimmed) return;
+    const color = LABEL_PALETTE[boardLabels.length % LABEL_PALETTE.length];
+    createLabel.mutate(
+      { boardId, cardId: card.id, name: trimmed, color },
+      { onSuccess: () => showToast(`Label "${trimmed}" criada`) },
+    );
+  };
+
+  const handleDeleteLabel = (label: { id: string; name: string }) => {
+    if (!window.confirm(`Excluir a label "${label.name}" de TODO o board?`)) return;
+    deleteLabel.mutate(
+      { boardId, labelId: label.id },
+      { onSuccess: () => showToast(`Label "${label.name}" excluída`) },
+    );
+  };
 
   return (
     <div className="modal-section">
@@ -403,9 +465,23 @@ function LabelsSection({
             >
               <span className="swatch" style={{ background: label.color }} />
               <span>{label.name}</span>
+              <button
+                type="button"
+                className="del"
+                title="Excluir label do board"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteLabel(label);
+                }}
+              >
+                🗑
+              </button>
             </span>
           );
         })}
+        <button type="button" className="kb-btn kb-btn-ghost kb-btn-sm" onClick={handleAddLabel}>
+          + Nova label
+        </button>
       </div>
     </div>
   );
@@ -511,6 +587,108 @@ function ModalPanel({ level, children }: { level?: "epic" | "task"; children: Re
   );
 }
 
+function DangerZoneSection({
+  boardId,
+  card,
+  onDeleted,
+}: {
+  boardId: string;
+  card: ApiCardDetails;
+  onDeleted: () => void;
+}) {
+  const deleteCard = useDeleteCard(boardId);
+  const typeLabel = card.type === "epic" ? "épico" : card.type === "story" ? "história" : "task";
+  const childCount = card.children?.length ?? 0;
+
+  const onDelete = () => {
+    const extra =
+      childCount > 0 ? `\n\nIsto também remove ${childCount} card(s) filho(s) em cascata.` : "";
+    const ok = window.confirm(`Excluir ${typeLabel} "${card.title}"?${extra}\n\nEsta ação não pode ser desfeita.`);
+    if (!ok) return;
+    deleteCard.mutate(
+      { cardId: card.id, parentId: card.parentId },
+      { onSuccess: () => onDeleted() },
+    );
+  };
+
+  return (
+    <div className="modal-section danger-zone">
+      <div className="modal-section-title">Zona de perigo</div>
+      <button className="kb-btn kb-btn-danger" onClick={onDelete} disabled={deleteCard.isPending}>
+        {deleteCard.isPending ? "Excluindo…" : `🗑 Excluir ${typeLabel}`}
+      </button>
+      {childCount > 0 ? (
+        <span className="danger-hint">Remove {childCount} card(s) filho(s) em cascata.</span>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Seletor de modelo de AI para um card (epic/story/task), com herança em
+ * cascata. Exibe o modelo efetivo (resolvedModel) e sua origem (próprio vs.
+ * herdado), e permite escolher um modelo específico ou "Herdar do pai".
+ */
+function CardModelSelector({
+  boardId,
+  card,
+}: {
+  boardId: string;
+  card: ApiCardDetails;
+}) {
+  const modelsQuery = useModels();
+  const updateCard = useUpdateCard();
+  const models = modelsQuery.data?.models ?? [];
+  const own = card.model ?? null;
+  const resolved = card.resolvedModel ?? null;
+  const inherited = own === null;
+
+  const labelFor = (id: string | null): string => {
+    if (!id) return "—";
+    return models.find((m) => m.id === id)?.label ?? id;
+  };
+
+  const inheritLabel =
+    card.type === "task"
+      ? "Herdar (história → épico → quadro)"
+      : card.type === "story"
+        ? "Herdar (épico → quadro)"
+        : "Herdar (quadro)";
+
+  return (
+    <div className="modal-section">
+      <div className="modal-section-title">Modelo de AI</div>
+      <select
+        className="card-desc-input"
+        value={own ?? ""}
+        disabled={updateCard.isPending || modelsQuery.isLoading}
+        onChange={(event) => {
+          const value = event.target.value === "" ? null : event.target.value;
+          updateCard.mutate({ boardId, cardId: card.id, dto: { model: value } });
+        }}
+      >
+        <option value="">{inheritLabel}</option>
+        {models.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.label}
+          </option>
+        ))}
+      </select>
+      <div className="modal-hint">
+        {inherited ? (
+          <>
+            Herdado: <strong>{labelFor(resolved)}</strong>
+          </>
+        ) : (
+          <>
+            Definido neste card: <strong>{labelFor(resolved)}</strong>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function EpicModal({
   boardId,
   epicId,
@@ -537,15 +715,21 @@ function EpicModal({
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [aiProject, setAiProject] = useState("");
+  const [aiNotes, setAiNotes] = useState("");
 
   useEffect(() => {
     if (!epic) return;
     setTitle(epic.title);
     setDescription(epic.description ?? "");
+    setAiProject(epic.aiProject ?? "");
+    setAiNotes(epic.aiNotes ?? "");
   }, [epic]);
 
   const saveEpic = () =>
     epic && updateCard.mutate({ boardId, cardId: epic.id, dto: { title, description } });
+  const saveAiContext = () =>
+    epic && updateCard.mutate({ boardId, cardId: epic.id, dto: { aiProject, aiNotes } });
 
   return (
     <ModalPanel level="epic">
@@ -587,6 +771,34 @@ function EpicModal({
           />
         </div>
         <div className="modal-section">
+          <div className="modal-section-title">Projeto-alvo (repositório onde a AI trabalha)</div>
+          <input
+            className="card-desc-input"
+            value={aiProject}
+            placeholder="/caminho/para/o/repo-alvo ou URL do repositório"
+            onChange={(event) => setAiProject(event.target.value)}
+            onBlur={saveAiContext}
+            disabled={!epic}
+          />
+          <div className="modal-hint">
+            A AI cria uma branch/worktree isolada nesse repositório. As histórias
+            herdam este projeto se não definirem o seu.
+          </div>
+        </div>
+        <div className="modal-section">
+          <div className="modal-section-title">Notas para a AI (contexto/escopo)</div>
+          <textarea
+            className="card-desc-input"
+            rows={3}
+            value={aiNotes}
+            placeholder="Instruções, restrições e escopo para o agent…"
+            onChange={(event) => setAiNotes(event.target.value)}
+            onBlur={saveAiContext}
+            disabled={!epic}
+          />
+        </div>
+        {epic ? <CardModelSelector boardId={boardId} card={epic} /> : null}
+        <div className="modal-section">
           <div className="modal-section-title">
             Histórias
             {total ? (
@@ -608,8 +820,375 @@ function EpicModal({
         </div>
         {epic ? <CommentsSection card={epic} /> : null}
         {epic ? <ActivitySection card={epic} /> : null}
+        {epic ? <DangerZoneSection boardId={boardId} card={epic} onDeleted={onClose} /> : null}
       </div>
     </ModalPanel>
+  );
+}
+
+function CreateEpicModal({
+  boardId,
+  boardColumns,
+  onClose,
+  onCreated,
+}: {
+  boardId: string;
+  boardColumns: ApiBoardColumn[];
+  onClose: () => void;
+  onCreated: (epicId: string) => void;
+}) {
+  const createCard = useCreateCard(boardId);
+  const backlog = boardColumns.find((column) => column.title === "Backlog" && !column.isTaskColumn);
+
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+
+  const titleRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    titleRef.current?.focus();
+  }, []);
+
+  const canSubmit = title.trim().length > 0 && !createCard.isPending;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    createCard.mutate(
+      {
+        dto: {
+          boardId,
+          type: "epic",
+          columnId: backlog?.id,
+          title: title.trim(),
+          description: description.trim() || undefined,
+        },
+      },
+      {
+        onSuccess: (card) => onCreated(card.id),
+      },
+    );
+  };
+
+  return (
+    <div className="modal-layer" onClick={onClose}>
+      <div className="modal-panel lvl-epic" onClick={(event) => event.stopPropagation()}>
+        <div className="kb-modal">
+          <div className="modal-header">
+            <div className="modal-key-row">
+              <span className="type-badge epic">EPIC</span>
+              <span className="card-key">Novo épico</span>
+            </div>
+            <div className="modal-title-row">
+              <input
+                ref={titleRef}
+                className="card-title-input"
+                value={title}
+                placeholder="Título do épico (obrigatório)"
+                onChange={(event) => setTitle(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+              />
+              <button className="modal-close" onClick={onClose} aria-label="Fechar">
+                ✕
+              </button>
+            </div>
+          </div>
+          <div className="modal-body">
+            <div className="modal-section">
+              <div className="modal-section-title">Descrição</div>
+              <textarea
+                className="card-desc-input"
+                rows={4}
+                value={description}
+                placeholder="Descreva o objetivo do épico…"
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </div>
+            <div className="modal-section">
+              <div className="field-row" style={{ justifyContent: "flex-end", gap: 8 }}>
+                <button className="kb-btn kb-btn-ghost" onClick={onClose}>
+                  Cancelar
+                </button>
+                <button className="kb-btn kb-btn-primary" onClick={submit} disabled={!canSubmit}>
+                  {createCard.isPending ? "Criando…" : "Criar épico"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreateStoryModal({
+  boardId,
+  boardColumns,
+  columnId,
+  parentId,
+  onClose,
+  onCreated,
+}: {
+  boardId: string;
+  boardColumns: ApiBoardColumn[];
+  columnId: string;
+  parentId: string | null;
+  onClose: () => void;
+  onCreated: (storyId: string) => void;
+}) {
+  const createCard = useCreateCard(boardId);
+  const creatableColumns = boardColumns.filter(
+    (column) => !column.isTaskColumn && (column.title === "Backlog" || column.title === "To Do"),
+  );
+
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [points, setPoints] = useState<StoryPoints>(1);
+  const [selectedColumn, setSelectedColumn] = useState<string>(columnId || creatableColumns[0]?.id || "");
+
+  const titleRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    titleRef.current?.focus();
+  }, []);
+
+  const canSubmit = title.trim().length > 0 && Boolean(selectedColumn) && !createCard.isPending;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    createCard.mutate(
+      {
+        dto: {
+          boardId,
+          type: "story",
+          parentId: parentId ?? undefined,
+          columnId: selectedColumn,
+          title: title.trim(),
+          description: description.trim() || undefined,
+          points,
+        },
+      },
+      {
+        onSuccess: (card) => onCreated(card.id),
+      },
+    );
+  };
+
+  return (
+    <div className="modal-layer" onClick={onClose}>
+      <div className="modal-panel lvl-story" onClick={(event) => event.stopPropagation()}>
+        <div className="kb-modal">
+          <div className="modal-header">
+            <div className="modal-key-row">
+              <span className="type-badge story">STORY</span>
+              <span className="card-key">Nova história</span>
+            </div>
+            <div className="modal-title-row">
+              <input
+                ref={titleRef}
+                className="card-title-input"
+                value={title}
+                placeholder="Título da história (obrigatório)"
+                onChange={(event) => setTitle(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+              />
+              <button className="modal-close" onClick={onClose} aria-label="Fechar">
+                ✕
+              </button>
+            </div>
+          </div>
+          <div className="modal-body">
+            <div className="modal-section">
+              <div className="field-row">
+                <div className="field">
+                  <label>Coluna</label>
+                  <select
+                    className="select-inline"
+                    value={selectedColumn}
+                    onChange={(event) => setSelectedColumn(event.target.value)}
+                  >
+                    {creatableColumns.map((column) => (
+                      <option key={column.id} value={column.id}>
+                        {column.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Story points</label>
+                  <select
+                    className="select-inline"
+                    value={points}
+                    onChange={(event) => setPoints(Number(event.target.value) as StoryPoints)}
+                  >
+                    {[1, 2, 3, 5, 8, 13].map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="modal-section">
+              <div className="modal-section-title">Descrição</div>
+              <textarea
+                className="card-desc-input"
+                rows={4}
+                value={description}
+                placeholder="Como um <usuário>, quero <objetivo>, para <benefício>…"
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </div>
+            <div className="modal-section">
+              <div className="field-row" style={{ justifyContent: "flex-end", gap: 8 }}>
+                <button className="kb-btn kb-btn-ghost" onClick={onClose}>
+                  Cancelar
+                </button>
+                <button className="kb-btn kb-btn-primary" onClick={submit} disabled={!canSubmit}>
+                  {createCard.isPending ? "Criando…" : "Criar história"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreateTaskModal({
+  boardId,
+  parentId,
+  taskColumns,
+  defaultColumnId,
+  onClose,
+  onCreated,
+}: {
+  boardId: string;
+  parentId: string;
+  taskColumns: ApiBoardColumn[];
+  defaultColumnId: string | null;
+  onClose: () => void;
+  onCreated: (taskId: string) => void;
+}) {
+  const createCard = useCreateCard(boardId);
+  const creatableColumns = taskColumns.filter((column) => column.title === "To Do" || column.title === "Backlog");
+  const initialColumn = defaultColumnId ?? creatableColumns[0]?.id ?? null;
+
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [columnId, setColumnId] = useState<string | null>(initialColumn);
+
+  const titleRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    titleRef.current?.focus();
+  }, []);
+
+  const canSubmit = title.trim().length > 0 && Boolean(columnId) && !createCard.isPending;
+
+  const submit = () => {
+    if (!canSubmit || !columnId) return;
+    createCard.mutate(
+      {
+        dto: {
+          boardId,
+          type: "task",
+          parentId,
+          columnId,
+          title: title.trim(),
+          description: description.trim() || undefined,
+        },
+      },
+      {
+        onSuccess: (card) => {
+          onCreated(card.id);
+          onClose();
+        },
+      },
+    );
+  };
+
+  return (
+    <div className="modal-layer depth-3" onClick={onClose}>
+      <div className="modal-panel lvl-task" onClick={(event) => event.stopPropagation()}>
+        <div className="kb-modal">
+          <div className="modal-header">
+            <div className="modal-key-row">
+              <span className="type-badge task">TASK</span>
+              <span className="card-key">Nova task</span>
+            </div>
+            <div className="modal-title-row">
+              <input
+                ref={titleRef}
+                className="card-title-input"
+                value={title}
+                placeholder="Título da task (obrigatório)"
+                onChange={(event) => setTitle(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+              />
+              <button className="modal-close" onClick={onClose} aria-label="Fechar">
+                ✕
+              </button>
+            </div>
+          </div>
+          <div className="modal-body">
+            <div className="modal-section">
+              <div className="field-row">
+                <div className="field">
+                  <label>Coluna</label>
+                  <select
+                    className="select-inline"
+                    value={columnId ?? ""}
+                    onChange={(event) => setColumnId(event.target.value || null)}
+                  >
+                    {creatableColumns.map((column) => (
+                      <option key={column.id} value={column.id}>
+                        {column.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-section">
+              <div className="modal-section-title">Descrição</div>
+              <textarea
+                className="card-desc-input"
+                rows={4}
+                value={description}
+                placeholder="Descreva o que a task precisa entregar…"
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </div>
+
+            <div className="modal-section">
+              <div className="field-row" style={{ justifyContent: "flex-end", gap: 8 }}>
+                <button className="kb-btn kb-btn-ghost" onClick={onClose}>
+                  Cancelar
+                </button>
+                <button className="kb-btn kb-btn-primary" onClick={submit} disabled={!canSubmit}>
+                  {createCard.isPending ? "Criando…" : "Criar task"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -632,19 +1211,23 @@ function StoryModal({
 }) {
   const { data: story } = useCard(storyId);
   const updateCard = useUpdateCard();
-  const createCard = useCreateCard(boardId);
   const { addFlow, removeFlow } = useFlows();
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [points, setPoints] = useState("");
+  const [aiProject, setAiProject] = useState("");
+  const [aiNotes, setAiNotes] = useState("");
   const [flowName, setFlowName] = useState("");
+  const [createTaskColumnId, setCreateTaskColumnId] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
     if (!story) return;
     setTitle(story.title);
     setDescription(story.description ?? "");
     setPoints(story.points ? String(story.points) : "");
+    setAiProject(story.aiProject ?? "");
+    setAiNotes(story.aiNotes ?? "");
   }, [story]);
 
   if (!story) return null;
@@ -666,6 +1249,9 @@ function StoryModal({
       },
     });
 
+  const saveAiContext = () =>
+    updateCard.mutate({ boardId, cardId: story.id, dto: { aiProject, aiNotes } });
+
   const addFlowItem = () => {
     const value = flowName.trim();
     if (!value) return;
@@ -675,14 +1261,12 @@ function StoryModal({
 
   const createTask = () => {
     const todoColumn = taskColumns.find((column) => column.title === "To Do");
-    if (!todoColumn) return;
-    createCard.mutate({
-      dto: { boardId, type: "task", title: "Nova task", parentId: story.id, columnId: todoColumn.id },
-    });
+    setCreateTaskColumnId(todoColumn?.id ?? null);
   };
 
   return (
-    <ModalPanel>
+    <>
+      <ModalPanel>
       <div className="modal-header">
         <div className="modal-key-row">
           <span className="type-badge story">STORY</span>
@@ -746,6 +1330,35 @@ function StoryModal({
             onBlur={saveCard}
           />
         </div>
+
+        <div className="modal-section">
+          <div className="modal-section-title">Projeto-alvo (repositório onde a AI trabalha)</div>
+          <input
+            className="card-desc-input"
+            value={aiProject}
+            placeholder="Deixe vazio para herdar do épico, ou informe /caminho/do/repo"
+            onChange={(event) => setAiProject(event.target.value)}
+            onBlur={saveAiContext}
+          />
+          <div className="modal-hint">
+            A AI cria uma branch/worktree isolada nesse repositório. Se vazio,
+            herda o projeto-alvo do épico pai.
+          </div>
+        </div>
+
+        <div className="modal-section">
+          <div className="modal-section-title">Notas para a AI (contexto/escopo)</div>
+          <textarea
+            className="card-desc-input"
+            rows={3}
+            value={aiNotes}
+            placeholder="Instruções, restrições e escopo para o agent…"
+            onChange={(event) => setAiNotes(event.target.value)}
+            onBlur={saveAiContext}
+          />
+        </div>
+
+        <CardModelSelector boardId={boardId} card={story} />
 
         <LabelsSection card={story} boardId={boardId} boardLabels={boardLabels} />
         <AssigneesSection card={story} boardId={boardId} boardAssignees={boardAssignees} />
@@ -815,11 +1428,7 @@ function StoryModal({
             cards={tasks}
             fallbackColumn={(card) => card.taskColumnId}
             onOpenCard={(card) => onOpenTask(card.id)}
-            onAddCard={(columnId) => {
-              createCard.mutate({
-                dto: { boardId, type: "task", title: "Nova task", parentId: story.id, columnId },
-              });
-            }}
+            onAddCard={(columnId) => setCreateTaskColumnId(columnId)}
             addLabel="+ Task"
             allowAddOn={(column) => column.title === "To Do"}
           />
@@ -828,8 +1437,20 @@ function StoryModal({
         <ChecklistSection card={story} boardId={boardId} />
         <CommentsSection card={story} />
         <ActivitySection card={story} />
+        <DangerZoneSection boardId={boardId} card={story} onDeleted={onClose} />
       </div>
     </ModalPanel>
+      {createTaskColumnId !== undefined ? (
+        <CreateTaskModal
+          boardId={boardId}
+          parentId={story.id}
+          taskColumns={taskColumns}
+          defaultColumnId={createTaskColumnId}
+          onClose={() => setCreateTaskColumnId(undefined)}
+          onCreated={(taskId) => onOpenTask(taskId)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -919,8 +1540,8 @@ function TaskChat({ task }: { task: ApiCardDetails }) {
     setDraft("");
   };
 
-  const lastIsAi = messages.length > 0 && messages[messages.length - 1].role === "ai";
-  const thinking = lastIsAi && !pending;
+  const streaming = useAgentChatStore((s) => Boolean(s.byTask[task.id]?.streaming));
+  const thinking = streaming && !pending;
 
   return (
     <div className="modal-section">
@@ -1065,6 +1686,7 @@ function TaskModal({
 
         <LabelsSection card={task} boardId={boardId} boardLabels={boardLabels} />
         <AssigneesSection card={task} boardId={boardId} boardAssignees={boardAssignees} />
+        <CardModelSelector boardId={boardId} card={task} />
         <ChecklistSection card={task} boardId={boardId} />
 
         <TaskLoopControls task={task} boardId={boardId} />
@@ -1100,6 +1722,7 @@ function TaskModal({
 
         <CommentsSection card={task} />
         <ActivitySection card={task} />
+        <DangerZoneSection boardId={boardId} card={task} onDeleted={onClose} />
       </div>
     </ModalPanel>
   );
@@ -1110,13 +1733,15 @@ export function BoardView() {
   const { data: board } = useBoard(boardId);
   const { data: cards } = useCards(boardId);
   const moveCard = useMoveCard();
-  const createCard = useCreateCard(boardId);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const [overColumnId, setOverColumnId] = useState<string | null>(null);
+  const [createEpicOpen, setCreateEpicOpen] = useState(false);
+  const [createStoryCtx, setCreateStoryCtx] = useState<{ columnId: string; parentId: string | null } | null>(null);
 
   const { modals, openEpic, openStory, openTask, closeAllModals, closeTopModal, setDraggedCard, draggedCardId } =
     useBoardUiStore();
+  const filters = useBoardUiStore((state) => state.filters);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1131,8 +1756,27 @@ export function BoardView() {
     .filter((column) => BOARD_COLUMNS.includes(column.title as (typeof BOARD_COLUMNS)[number]))
     .sort((a, b) => a.position - b.position);
 
+  const cardMatches = (card: ApiCardSummary) => {
+    if (filters.label && !(card.labelIds ?? []).includes(filters.label)) return false;
+    if (filters.assignee && !(card.assigneeIds ?? []).includes(filters.assignee)) return false;
+    if (filters.q) {
+      const haystack = (card.title + " " + card.description + " " + card.key).toLowerCase();
+      if (!haystack.includes(filters.q.trim().toLowerCase())) return false;
+    }
+    return true;
+  };
+
+  // O filtro "Só Tasks" esconde as stories do board principal (tasks vivem dentro
+  // das stories). "Só Histórias" e o valor vazio mantêm as stories visíveis.
+  const showStories = filters.type !== "task";
+
   const epics = (cards ?? []).filter((card) => card.type === "epic").sort((a, b) => a.position - b.position);
-  const stories = (cards ?? []).filter((card) => card.type === "story").sort((a, b) => a.position - b.position);
+  const stories = showStories
+    ? (cards ?? [])
+        .filter((card) => card.type === "story")
+        .filter(cardMatches)
+        .sort((a, b) => a.position - b.position)
+    : [];
 
   if (loadingBoards) {
     return (
@@ -1159,6 +1803,15 @@ export function BoardView() {
         <div className="epics-header">
           <span className="epics-title">ÉPICOS</span>
           <span className="column-count">{epics.length}</span>
+          <button
+            className="kb-btn kb-btn-primary kb-btn-sm"
+            type="button"
+            title="Criar novo épico"
+            style={{ marginLeft: "auto" }}
+            onClick={() => setCreateEpicOpen(true)}
+          >
+            + Épico
+          </button>
         </div>
         <div className="epics-list">
           {epics.length === 0 ? (
@@ -1197,7 +1850,7 @@ export function BoardView() {
 
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={boardCollision}
         onDragStart={(event: DragStartEvent) => setDraggedCard(String(event.active.id))}
         onDragOver={(event: DragOverEvent) => {
           const overId = event.over ? String(event.over.id) : "";
@@ -1217,7 +1870,13 @@ export function BoardView() {
           if (!overId) return;
           const destination = getColumnFromOverId(overId, stories, activeId, (card) => card.boardColumnId);
           if (!destination) return;
-          moveCard.mutate({ boardId, cardId: activeId, dto: { columnId: destination } });
+          const movedStory = stories.find((story) => story.id === activeId);
+          moveCard.mutate({
+            boardId,
+            cardId: activeId,
+            dto: { columnId: destination },
+            parentId: movedStory?.parentId ?? null,
+          });
         }}
       >
         <div className="board">
@@ -1228,11 +1887,7 @@ export function BoardView() {
               stories={stories.filter((story) => story.boardColumnId === column.id)}
               isDropTarget={overColumnId === column.id && draggedCardId != null}
               onOpenStory={(story) => openStory(story.id)}
-              onCreateStory={(columnId) =>
-                createCard.mutate({
-                  dto: { boardId, type: "story", title: "Nova story", columnId, points: 1 },
-                })
-              }
+              onCreateStory={(columnId) => setCreateStoryCtx({ columnId, parentId: null })}
             />
           ))}
         </div>
@@ -1260,11 +1915,7 @@ export function BoardView() {
               stories={stories}
               onOpenStory={(storyId) => openStory(storyId)}
               onClose={closeTopModal}
-              onCreateStory={(columnId, parentId) =>
-                createCard.mutate({
-                  dto: { boardId, type: "story", title: "Nova story", columnId, parentId, points: 1 },
-                })
-              }
+              onCreateStory={(columnId, parentId) => setCreateStoryCtx({ columnId, parentId })}
             />
           ) : null}
 
@@ -1290,6 +1941,32 @@ export function BoardView() {
             />
           ) : null}
         </div>
+      ) : null}
+
+      {createEpicOpen ? (
+        <CreateEpicModal
+          boardId={boardId}
+          boardColumns={board?.columns ?? []}
+          onClose={() => setCreateEpicOpen(false)}
+          onCreated={(epicId) => {
+            setCreateEpicOpen(false);
+            openEpic(epicId);
+          }}
+        />
+      ) : null}
+
+      {createStoryCtx ? (
+        <CreateStoryModal
+          boardId={boardId}
+          boardColumns={board?.columns ?? []}
+          columnId={createStoryCtx.columnId}
+          parentId={createStoryCtx.parentId}
+          onClose={() => setCreateStoryCtx(null)}
+          onCreated={(storyId) => {
+            setCreateStoryCtx(null);
+            openStory(storyId);
+          }}
+        />
       ) : null}
     </div>
   );

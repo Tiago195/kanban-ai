@@ -13,6 +13,10 @@ export class LabelsService {
     return this.prisma.label.create({ data });
   }
 
+  update(id: string, data: { loopProfileId?: string | null; name?: string; color?: string }) {
+    return this.prisma.label.update({ where: { id }, data });
+  }
+
   remove(id: string) {
     return this.prisma.label.delete({ where: { id } });
   }

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { LabelsService } from './labels.service';
 
 @Controller('labels')
@@ -15,6 +15,11 @@ export class LabelsController {
     @Body() body: { boardId: string; name: string; color?: string; loopProfileId?: string },
   ) {
     return this.labels.create(body);
+  }
+
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() body: { loopProfileId?: string | null; name?: string; color?: string }) {
+    return this.labels.update(id, body);
   }
 
   @Delete(':id')

@@ -1,5 +1,7 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
 import { BoardsService } from './boards.service';
+import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
+import { setBoardModelSchema, type SetBoardModelDto } from './boards.schema';
 
 @Controller('boards')
 export class BoardsController {
@@ -13,5 +15,13 @@ export class BoardsController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.boards.findOne(id);
+  }
+
+  @Patch(':id/model')
+  setDefaultModel(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(setBoardModelSchema)) dto: SetBoardModelDto,
+  ) {
+    return this.boards.setDefaultModel(id, dto.defaultModel);
   }
 }

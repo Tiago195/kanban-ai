@@ -38,12 +38,14 @@ export class MockAgentRunner implements AgentRunner {
           detail: `Entendi o objetivo da task "${ctx.taskTitle}". Vou mexer em ${ctx.project} nos arquivos ${filesLabel}. Efeitos colaterais a cuidar: ${ctx.notes || 'validar regressões nos fluxos relacionados'}.`,
           summary: 'Analisei escopo, arquivos e efeitos colaterais.',
           nextStep: 'Implementar a mudança conforme a análise.',
+          affectedFlows: this.buildAffectedFlows(ctx),
         });
       case 'implementation':
         return this.result({
           detail: `Implementação em andamento. Alterei ${ctx.files[0] ?? 'os arquivos-alvo'} para atender ao próximo DOD. Cobertura de teste local ajustada. Próxima iteração continua até fechar os DODs restantes.`,
           summary: 'Implementei parte da mudança e marquei DOD.',
           nextStep: 'Continuar implementação até fechar todos os DODs.',
+          affectedFlows: this.buildAffectedFlows(ctx),
         });
       case 'validation':
         return this.result({
@@ -73,6 +75,7 @@ export class MockAgentRunner implements AgentRunner {
     summary: string;
     nextStep: string;
     done?: boolean;
+    affectedFlows?: { name: string; files: string[]; note?: string }[];
   }): Promise<AgentRunResult> {
     return Promise.resolve({
       detail: partial.detail,
@@ -80,6 +83,36 @@ export class MockAgentRunner implements AgentRunner {
       dodTouched: [],
       nextStep: partial.nextStep,
       done: partial.done ?? false,
+      ...(partial.affectedFlows ? { affectedFlows: partial.affectedFlows } : {}),
     });
+  }
+
+  /**
+   * Deriva a lista de fluxos afetados a partir do contexto da story.
+   * Se a story já tem fluxos declarados (flowNames), mapeia cada um para os
+   * arquivos disponíveis. Caso contrário, cria um único fluxo "main" com os
+   * arquivos do contexto (ou o título da task como fallback).
+   */
+  private buildAffectedFlows(
+    ctx: AgentRunContext,
+  ): { name: string; files: string[]; note?: string }[] {
+    // Garante que os arquivos nunca ficam vazios: flows+regression exige
+    // files.length > 0 em cada fluxo. Na primeira iteração (sem fluxos
+    // declarados ainda), usa o título da task como referência sintética.
+    const files = ctx.files.length > 0 ? ctx.files : [ctx.taskTitle || 'main'];
+    if (ctx.flowNames.length > 0) {
+      return ctx.flowNames.map((name) => ({
+        name,
+        files,
+        note: 'Fluxo identificado na análise',
+      }));
+    }
+    return [
+      {
+        name: files[0].split('/').pop()!.replace(/\.ts$/, ''),
+        files,
+        note: 'Fluxo derivado do contexto da task',
+      },
+    ];
   }
 }

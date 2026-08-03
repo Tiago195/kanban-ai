@@ -48,9 +48,10 @@ enum ValidationStrategy {
 // ─────────────────────────────────────────────────────────────
 
 model Board {
-  id        String   @id @default(uuid())
-  title     String
-  seq       Int      @default(0) // contador para chaves EP-/US-/TK-
+  id           String  @id @default(uuid())
+  title        String
+  seq          Int     @default(0) // contador para chaves EP-/US-/TK-
+  defaultModel String? // modelo default do quadro (raiz da cascata de heranca)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -96,6 +97,10 @@ model Card {
   points         Int? // 1,2,3,5,8,13 (só epic/story)
   blocked        Boolean @default(false)
   everInProgress Boolean @default(false)
+
+  // Modelo de AI para desenvolver este card. null = herda do pai
+  // (task -> story -> epic -> board.defaultModel).
+  model String?
 
   // Hierarquia: task -> story -> epic
   parentId String?

@@ -27,6 +27,7 @@ export type CliEvent =
       detail: string;
       summary: string;
       dodTouched: string[];
+      affectedFlows?: { name: string; files: string[]; note?: string }[];
       nextStep: string;
       done: boolean;
     };
@@ -110,6 +111,7 @@ export class CliAdapter {
         dodTouched: Array.isArray(obj.dodTouched)
           ? obj.dodTouched.map((d) => String(d))
           : [],
+        affectedFlows: parseAffectedFlows(obj.affectedFlows),
         nextStep: str(obj.nextStep),
         done: obj.done === true,
       };
@@ -121,4 +123,23 @@ export class CliAdapter {
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v : v == null ? '' : String(v);
+}
+
+/** Normaliza a lista de fluxos afetados reportada pela AI (tolerante a lixo). */
+function parseAffectedFlows(
+  v: unknown,
+): { name: string; files: string[]; note?: string }[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const flows = v
+    .map((f) => {
+      if (typeof f !== 'object' || f === null) return null;
+      const o = f as Record<string, unknown>;
+      const name = str(o.name).trim();
+      if (!name) return null;
+      const files = Array.isArray(o.files) ? o.files.map((x) => String(x)) : [];
+      const note = str(o.note);
+      return note ? { name, files, note } : { name, files };
+    })
+    .filter((f): f is { name: string; files: string[]; note?: string } => f !== null);
+  return flows.length > 0 ? flows : undefined;
 }

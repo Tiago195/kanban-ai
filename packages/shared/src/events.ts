@@ -16,6 +16,8 @@ export type EpicDerivedStatus = 'todo' | 'inprogress' | 'done';
 export interface CardMovedEvent {
   type: 'card.moved';
   cardId: string;
+  /** Id do card pai (story de uma task, epic de uma story) ou null. */
+  parentId: string | null;
   fromColumnId: string | null;
   toColumnId: string;
   /** true quando o move ocorreu no mini-kanban de tasks. */
@@ -26,6 +28,16 @@ export interface CardMovedEvent {
 export interface CardCreatedEvent {
   type: 'card.created';
   card: Card;
+}
+
+/** Um card (e seus descendentes) foi excluído. */
+export interface CardDeletedEvent {
+  type: 'card.deleted';
+  cardId: string;
+  /** Pai do card excluído (para a UI reagir no mini-kanban/epic). */
+  parentId: string | null;
+  /** Ids de todos os cards removidos, incluindo o próprio e descendentes. */
+  deletedIds: string[];
 }
 
 /** Campos de um card foram atualizados (título, descrição, points, aiContext). */
@@ -182,10 +194,26 @@ export interface PingEvent {
   ts: number;
 }
 
+/** Um comentário foi criado num card (ex.: resumo de story escrito no épico). */
+export interface CommentCreatedEvent {
+  type: 'comment.created';
+  cardId: string;
+  /** Id do card pai, se houver (para a UI reagir no mini-kanban/epic). */
+  parentId: string | null;
+}
+
+/** O modelo default do quadro mudou (afeta a cascata de herança). */
+export interface BoardUpdatedEvent {
+  type: 'board.updated';
+  boardId: string;
+  defaultModel: string | null;
+}
+
 /** União discriminada de todos os eventos do servidor. */
 export type ServerEvent =
   | CardMovedEvent
   | CardCreatedEvent
+  | CardDeletedEvent
   | CardUpdatedEvent
   | LabelAttachedEvent
   | LabelDetachedEvent
@@ -204,6 +232,8 @@ export type ServerEvent =
   | AgentChunkEvent
   | AgentQuestionEvent
   | AgentAnsweredEvent
+  | CommentCreatedEvent
+  | BoardUpdatedEvent
   | PingEvent;
 
 /** Nomes de eventos, úteis para type-guards e roteamento. */

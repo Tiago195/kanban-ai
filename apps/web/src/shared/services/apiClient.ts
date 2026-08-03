@@ -1,15 +1,18 @@
 import type {
+  Assignee,
   AttachAssigneeDto,
   AttachLabelDto,
   CreateCardDto,
   CreateDodItemDto,
   CreateFlowDto,
+  IterationPhase,
   MoveCardDto,
   UpdateCardDto,
   UpdateDodItemDto,
+  ValidationStrategy,
 } from "@kanban-ai/shared";
 
-import type { ApiBoard, ApiCardDetails, ApiCardSummary } from "@/shared/types";
+import type { ApiAgentModel, ApiBoard, ApiCardDetails, ApiCardSummary, ApiLabel, ApiLoopProfile } from "@/shared/types";
 
 const DEFAULT_BASE_URL = "http://localhost:3333";
 
@@ -66,6 +69,19 @@ export const apiClient = {
     return request<ApiBoard>(`/boards/${id}`);
   },
 
+  /** Lista os modelos de AI disponíveis e o default do quadro/CLI. */
+  getModels(): Promise<{ models: ApiAgentModel[]; default: string }> {
+    return request<{ models: ApiAgentModel[]; default: string }>("/agents/models");
+  },
+
+  /** Define o modelo default do quadro (null = usar o default do CLI). */
+  setBoardModel(id: string, defaultModel: string | null): Promise<ApiBoard> {
+    return request<ApiBoard>(`/boards/${id}/model`, {
+      method: "PATCH",
+      body: JSON.stringify({ defaultModel }),
+    });
+  },
+
   getCards(boardId: string): Promise<ApiCardSummary[]> {
     return request<ApiCardSummary[]>(`/cards?boardId=${encodeURIComponent(boardId)}`);
   },
@@ -92,6 +108,12 @@ export const apiClient = {
     return request<ApiCardSummary>(`/cards/${id}`, {
       method: "PATCH",
       body: JSON.stringify(dto),
+    });
+  },
+
+  deleteCard(id: string): Promise<{ deletedIds: string[] }> {
+    return request<{ deletedIds: string[] }>(`/cards/${id}`, {
+      method: "DELETE",
     });
   },
 
@@ -128,6 +150,30 @@ export const apiClient = {
     });
   },
 
+  // ── Labels globais do board ───────────────────────────────────────────────
+
+  getLabels(boardId: string): Promise<ApiLabel[]> {
+    return request<ApiLabel[]>(`/labels?boardId=${encodeURIComponent(boardId)}`);
+  },
+
+  createLabel(dto: {
+    boardId: string;
+    name: string;
+    color?: string;
+    loopProfileId?: string;
+  }): Promise<ApiLabel> {
+    return request<ApiLabel>(`/labels`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    });
+  },
+
+  deleteLabel(id: string): Promise<void> {
+    return request<void>(`/labels/${id}`, {
+      method: "DELETE",
+    });
+  },
+
   attachAssignee(cardId: string, dto: AttachAssigneeDto): Promise<{ id: string }> {
     return request<{ id: string }>(`/cards/${cardId}/assignees`, {
       method: "POST",
@@ -138,6 +184,79 @@ export const apiClient = {
   detachAssignee(cardId: string, assigneeId: string): Promise<void> {
     return request<void>(`/cards/${cardId}/assignees/${assigneeId}`, {
       method: "DELETE",
+    });
+  },
+
+  // ── Assignees globais (agents) ────────────────────────────────────────────
+
+  getAssignees(boardId: string): Promise<Assignee[]> {
+    return request<Assignee[]>(`/assignees?boardId=${encodeURIComponent(boardId)}`);
+  },
+
+  createAssignee(dto: { boardId: string; name: string; model?: string }): Promise<Assignee> {
+    return request<Assignee>(`/assignees`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    });
+  },
+
+  removeAssignee(id: string): Promise<void> {
+    return request<void>(`/assignees/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  // ── Loop profiles (perfis de loop das AIs) ────────────────────────────────
+
+  getLoopProfiles(boardId: string): Promise<ApiLoopProfile[]> {
+    return request<ApiLoopProfile[]>(`/loop-profiles?boardId=${encodeURIComponent(boardId)}`);
+  },
+
+  createLoopProfile(dto: {
+    boardId: string;
+    name: string;
+    description?: string;
+    phases?: IterationPhase[];
+    validation?: ValidationStrategy;
+    firstStep?: string;
+  }): Promise<ApiLoopProfile> {
+    return request<ApiLoopProfile>(`/loop-profiles`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    });
+  },
+
+  updateLoopProfile(
+    id: string,
+    dto: {
+      name?: string;
+      description?: string;
+      phases?: IterationPhase[];
+      validation?: ValidationStrategy;
+      firstStep?: string;
+    },
+  ): Promise<ApiLoopProfile> {
+    return request<ApiLoopProfile>(`/loop-profiles/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(dto),
+    });
+  },
+
+  deleteLoopProfile(id: string): Promise<{ deletedId: string; profileId: string }> {
+    return request<{ deletedId: string; profileId: string }>(`/loop-profiles/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  // ── Labels (mapa label → perfil de loop) ──────────────────────────────────
+
+  updateLabel(
+    id: string,
+    dto: { loopProfileId?: string | null; name?: string; color?: string },
+  ): Promise<ApiLabel> {
+    return request<ApiLabel>(`/labels/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(dto),
     });
   },
 

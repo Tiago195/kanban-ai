@@ -37,12 +37,15 @@ export class CopilotCliRunner implements AgentRunner {
   async run(input: AgentRunInput): Promise<AgentRunResult> {
     const plan = this.adapter.buildSpawnPlan(input.prompt);
     this.logger.log(
-      `spawn: ${plan.command} ${plan.args.join(' ')} (cwd=${input.cwd}, phase=${input.phase})`,
+      `spawn: ${plan.command} ${plan.args.join(' ')} (cwd=${input.cwd}, phase=${input.phase}, modelo=${input.model ?? '(default)'})`,
     );
 
     const child = spawn(plan.command, plan.args, {
       cwd: input.cwd || process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
+      // Modelo resolvido por-card injetado como COPILOT_MODEL — o adapter o
+      // respeita e força `--model <id>` explícito no Copilot CLI.
+      env: input.model ? { ...process.env, COPILOT_MODEL: input.model } : process.env,
     });
 
     return this.consume(child, input, plan.stdinPrompt);
@@ -191,8 +194,13 @@ export class CopilotCliRunner implements AgentRunner {
           prompt: event.prompt,
           options: event.options,
         });
-        // Escreve a resposta no stdin da MESMA sessão → a CLI retoma.
-        child.stdin.write(answer.endsWith('\n') ? answer : `${answer}\n`);
+        // Escreve a resposta no stdin da MESMA sessão → a CLI retoma (quando o
+        // runner é interativo). No modelo one-shot do Copilot CLI o processo já
+        // encerrou; o write é inofensivo (stdin drenado) e a resposta é
+        // reinjetada no prompt da PRÓXIMA iteração via handoff/lastro.
+        if (child.stdin.writable) {
+          child.stdin.write(answer.endsWith('\n') ? answer : `${answer}\n`);
+        }
         return;
       }
       case 'result':
@@ -200,6 +208,7 @@ export class CopilotCliRunner implements AgentRunner {
           detail: event.detail,
           summary: event.summary,
           dodTouched: event.dodTouched,
+          affectedFlows: event.affectedFlows,
           nextStep: event.nextStep,
           done: event.done,
         });

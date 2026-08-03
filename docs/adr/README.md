@@ -23,3 +23,4 @@ Registro das decisões de arquitetura da fundação. Formato leve
 | [0016](0016-copilot-cli-subprocess-adapter.md) | Copilot CLI real via subprocesso + CliAdapter JSONL configurável | Aceito |
 | [0017](0017-streaming-hitl-websocket.md) | Streaming + HITL via WebSocket (rejeição de TanStack AI/SSE) + buffer reativo | Aceito |
 | [0018](0018-awaiting-input-in-process.md) | Estado `awaiting-input` mantido in-process (sem migration) | Aceito |
+| [0019](0019-api-runs-on-host-not-docker.md) | API roda no HOST; só o Postgres fica em container (agent precisa ver o FS do host) | Aceito |

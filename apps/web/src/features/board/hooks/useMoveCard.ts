@@ -3,16 +3,24 @@ import type { MoveCardDto } from "@kanban-ai/shared";
 
 import { queryKeys } from "@/features/board/services/queryKeys";
 import { apiClient } from "@/shared/services/apiClient";
-import type { ApiBoard, ApiCardSummary } from "@/shared/types";
+import type { ApiBoard, ApiCardDetails, ApiCardSummary } from "@/shared/types";
 
 interface MoveCardVariables {
   boardId: string;
   cardId: string;
   dto: MoveCardDto;
+  /**
+   * Quando a task é movida no mini-kanban de uma story, este é o id da story
+   * pai. Usado para atualizar/invalidar o detalhe do pai (query `card(parentId)`),
+   * cujo array `children` alimenta o mini-kanban — sem isso o mini-kanban fica
+   * defasado até um F5.
+   */
+  parentId?: string | null;
 }
 
 interface MoveCardContext {
   previousCards?: ApiCardSummary[];
+  previousParent?: ApiCardDetails;
 }
 
 export function useMoveCard() {
@@ -20,7 +28,7 @@ export function useMoveCard() {
 
   return useMutation({
     mutationFn: ({ cardId, dto }: MoveCardVariables) => apiClient.moveCard(cardId, dto),
-    onMutate: async ({ boardId, cardId, dto }): Promise<MoveCardContext> => {
+    onMutate: async ({ boardId, cardId, dto, parentId }): Promise<MoveCardContext> => {
       const cardsKey = queryKeys.cards(boardId);
       const boardKey = queryKeys.board(boardId);
 
@@ -46,17 +54,49 @@ export function useMoveCard() {
         });
       }
 
-      return { previousCards };
+      // Atualização otimista do detalhe do pai (mini-kanban dentro da story).
+      let previousParent: ApiCardDetails | undefined;
+      if (parentId) {
+        const parentKey = queryKeys.card(parentId);
+        await queryClient.cancelQueries({ queryKey: parentKey });
+        previousParent = queryClient.getQueryData<ApiCardDetails>(parentKey);
+        if (previousParent) {
+          queryClient.setQueryData<ApiCardDetails>(parentKey, (current) => {
+            if (!current) return current;
+            return {
+              ...current,
+              children: current.children.map((child) =>
+                child.id === cardId
+                  ? {
+                      ...child,
+                      boardColumnId: destination?.isTaskColumn ? null : dto.columnId,
+                      taskColumnId: destination?.isTaskColumn ? dto.columnId : null,
+                      position: dto.position ?? child.position,
+                    }
+                  : child,
+              ),
+            };
+          });
+        }
+      }
+
+      return { previousCards, previousParent };
     },
     onError: (_error, variables, context) => {
       if (context?.previousCards) {
         queryClient.setQueryData(queryKeys.cards(variables.boardId), context.previousCards);
+      }
+      if (variables.parentId && context?.previousParent) {
+        queryClient.setQueryData(queryKeys.card(variables.parentId), context.previousParent);
       }
     },
     onSettled: (_data, _error, variables) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.cards(variables.boardId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.board(variables.boardId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.card(variables.cardId) });
+      if (variables.parentId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.card(variables.parentId) });
+      }
     },
   });
 }

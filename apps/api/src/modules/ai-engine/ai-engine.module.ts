@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { Orchestrator } from './orchestrator';
 import { AiEngineController } from './ai-engine.controller';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
@@ -35,7 +35,16 @@ import { WorkspaceService } from './workspaces/workspace.service';
         config: AppConfig,
         mock: MockAgentRunner,
         cli: CopilotCliRunner,
-      ): AgentRunner => (config.agent.runnerKind === 'copilot-cli' ? cli : mock),
+      ): AgentRunner => {
+        const active = config.agent.runnerKind === 'copilot-cli' ? cli : mock;
+        new Logger('AiEngineModule').log(
+          `AGENT_RUNNER ativo: ${config.agent.runnerKind} (${active.id})` +
+            (config.agent.runnerKind === 'copilot-cli'
+              ? ` — comando: ${config.agent.cliCommand} ${config.agent.cliArgs.join(' ')}`.trimEnd()
+              : ''),
+        );
+        return active;
+      },
     },
   ],
   exports: [Orchestrator],

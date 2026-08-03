@@ -277,7 +277,7 @@
     padding: 14px 16px;
     overflow-x: auto;
     overflow-y: hidden;
-    align-items: flex-start;
+    align-items: stretch;
   }
 
   /* SIDEBAR DE ÉPICOS */
@@ -485,10 +485,15 @@
     padding: 4px 8px 8px;
     overflow-y: auto;
     flex: 1;
-    min-height: 20px;
+    min-height: 80px;
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+  .card-list.is-over,
+  .task-list.is-over {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-radius: var(--radius);
   }
   .add-card-btn {
     border: none;
@@ -834,6 +839,23 @@
   .modal-section {
     margin-bottom: 18px;
   }
+  .danger-zone {
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .danger-zone .modal-section-title {
+    color: var(--danger);
+    width: 100%;
+    margin-bottom: 2px;
+  }
+  .danger-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
   .modal-section-title {
     font-size: 12px;
     font-weight: 800;
@@ -1050,7 +1072,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    min-height: 24px;
+    min-height: 60px;
     border-radius: 8px;
     transition: background 0.12s;
   }
@@ -1561,4 +1583,29 @@
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* toast global */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--text);
+  color: var(--bg);
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.2s,
+    transform 0.2s;
+  z-index: 200;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }

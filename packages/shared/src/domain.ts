@@ -105,6 +105,15 @@ export interface Assignee {
   model: string | null;
 }
 
+/**
+ * Modelo de AI disponivel para o login atual (catalogo exposto pelo backend
+ * em GET /agents/models). `id` e o identificador passado ao Copilot CLI.
+ */
+export interface AgentModel {
+  id: string;
+  label: string;
+}
+
 /** Perfil de loop: define fases e estratégia de validação por tipo de trabalho. */
 export interface LoopProfile {
   id: LoopProfileId;
@@ -135,6 +144,13 @@ export interface CardBase {
   parentId: string | null;
   blocked: boolean;
   everInProgress: boolean;
+  /** Modelo de AI escolhido explicitamente para este card. null = herda do pai. */
+  model: string | null;
+  /**
+   * Modelo efetivo apos resolver a cascata (task → story → epic → board).
+   * Sempre preenchido pelo backend para exibicao na UI.
+   */
+  resolvedModel: string | null;
   labelIds: string[];
   assigneeIds: string[];
   /** Definition of Done — único checklist do v1. */
@@ -204,6 +220,8 @@ export interface PendingQuestion {
 export interface BoardState {
   id: string;
   title: string;
+  /** Modelo de AI default do quadro — raiz da cascata de heranca. */
+  defaultModel: string | null;
   columns: Column[];
   taskColumns: Column[];
   cards: Record<string, Card>;

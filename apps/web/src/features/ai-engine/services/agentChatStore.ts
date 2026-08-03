@@ -18,6 +18,8 @@ import type {
 interface TaskChat {
   messages: AgentChatMessage[];
   pending: PendingQuestion | null;
+  /** #2: true enquanto o agent está processando (streaming ativo). */
+  streaming: boolean;
 }
 
 interface AgentChatState {
@@ -39,11 +41,13 @@ interface AgentChatState {
   setQuestion: (question: PendingQuestion) => void;
   /** Limpa a pergunta pendente ao ser respondida; registra a resposta. */
   clearQuestion: (taskId: string, answer?: string) => void;
+  /** #2: liga/desliga o indicador de "agente digitando" da task. */
+  setStreaming: (taskId: string, streaming: boolean) => void;
   /** Zera o transcript de uma task. */
   reset: (taskId: string) => void;
 }
 
-const emptyChat = (): TaskChat => ({ messages: [], pending: null });
+const emptyChat = (): TaskChat => ({ messages: [], pending: null, streaming: false });
 
 function makeId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -71,7 +75,7 @@ export const useAgentChatStore = create<AgentChatState>((set) => ({
         });
       }
 
-      return { byTask: { ...state.byTask, [taskId]: { ...chat, messages } } };
+      return { byTask: { ...state.byTask, [taskId]: { ...chat, messages, streaming: true } } };
     }),
 
   addMessage: (taskId, message) =>
@@ -100,7 +104,7 @@ export const useAgentChatStore = create<AgentChatState>((set) => ({
       return {
         byTask: {
           ...state.byTask,
-          [question.taskId]: { messages, pending: question },
+          [question.taskId]: { messages, pending: question, streaming: false },
         },
       };
     }),
@@ -120,7 +124,15 @@ export const useAgentChatStore = create<AgentChatState>((set) => ({
           ]
         : chat.messages;
       return {
-        byTask: { ...state.byTask, [taskId]: { messages, pending: null } },
+        byTask: { ...state.byTask, [taskId]: { messages, pending: null, streaming: false } },
+      };
+    }),
+
+  setStreaming: (taskId, streaming) =>
+    set((state) => {
+      const chat = state.byTask[taskId] ?? emptyChat();
+      return {
+        byTask: { ...state.byTask, [taskId]: { ...chat, streaming } },
       };
     }),
 

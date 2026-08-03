@@ -1,2 +1,2 @@
 export { LabelsPlaceholder } from "./components/LabelsPlaceholder";
-export { useCardLabels } from "./hooks/useCardLabels";
+export { useCardLabels, LABEL_PALETTE } from "./hooks/useCardLabels";

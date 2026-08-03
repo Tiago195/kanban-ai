@@ -79,6 +79,13 @@ export interface AgentRunResult {
   summary: string;
   /** DOD ids que a iteração considera concluídos. */
   dodTouched: string[];
+  /**
+   * Fluxos afetados que a AI declarou ter tocado nesta iteração. É a **própria
+   * AI** quem os registra (ela sabe onde mexeu) — o orchestrator persiste esta
+   * lista na story para alimentar a validação final. Opcional: iterações que
+   * ainda não sabem os fluxos devolvem `[]`/omitido.
+   */
+  affectedFlows?: { name: string; files: string[]; note?: string }[];
   /** O que a próxima iteração deve fazer. */
   nextStep: string;
   /** Sinaliza que o trabalho terminou (gate para validação final). */

@@ -19,6 +19,11 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
   const clientRef = useRef<WsClient | null>(null);
   const queryClient = useQueryClient();
 
+  // boardId muda quando o usuário troca de board — lemos via ref para NÃO
+  // recriar o socket (evita flap de conexão e perda de eventos).
+  const boardIdRef = useRef<string | null | undefined>(boardId);
+  boardIdRef.current = boardId;
+
   useEffect(() => {
     const client = new WsClient({
       url,
@@ -26,7 +31,7 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
       onClose: () => setStatus("closed"),
       onEvent: (event) => {
         setLastEvent(event);
-
+        const boardId = boardIdRef.current;
         // ── Streaming/HITL: buffer reativo, SEM invalidar cache (ADR-0017) ──
         // Estes eventos não dependem de boardId (chat vive em memória).
         if (event.type === "agent.chunk") {
@@ -54,12 +59,31 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
           return;
         }
 
+        // #2: fim de uma iteração → desliga o indicador "agente digitando" da
+        // task. (A próxima iteração religa no primeiro agent.chunk.) Feito antes
+        // do guard de boardId porque o chat vive em memória.
+        if (event.type === "iteration.appended") {
+          useAgentChatStore.getState().setStreaming(event.taskId, false);
+        }
+
         if (!boardId) return;
 
         if (event.type === "card.moved") {
           void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
           void queryClient.invalidateQueries({ queryKey: queryKeys.board(boardId) });
           void queryClient.invalidateQueries({ queryKey: queryKeys.card(event.cardId) });
+          if (event.parentId) {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.card(event.parentId) });
+          }
+          return;
+        }
+
+        if (event.type === "comment.created") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.card(event.cardId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
+          if (event.parentId) {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.card(event.parentId) });
+          }
           return;
         }
 
@@ -83,10 +107,33 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
         if (event.type === "card.created") {
           void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
           void queryClient.invalidateQueries({ queryKey: queryKeys.board(boardId) });
+          // Card filho (ex.: task) aparece em `children` do pai — invalida o pai
+          // para o mini-kanban do modal reagir.
+          if (event.card.parentId) {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.card(event.card.parentId) });
+          }
+          return;
+        }
+
+        if (event.type === "card.deleted") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.board(boardId) });
+          for (const id of event.deletedIds) {
+            queryClient.removeQueries({ queryKey: queryKeys.card(id) });
+          }
+          if (event.parentId) {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.card(event.parentId) });
+          }
           return;
         }
 
         if (event.type === "epic.status.derived") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
+          return;
+        }
+
+        if (event.type === "board.updated") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.board(boardId) });
           void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
           return;
         }
@@ -133,7 +180,7 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
       client.close();
       clientRef.current = null;
     };
-  }, [url, boardId, queryClient]);
+  }, [url, queryClient]);
 
   return { status, lastEvent };
 }

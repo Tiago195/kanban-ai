@@ -20,6 +20,9 @@ export class WsClient {
   private socket: WebSocket | null = null;
   private readonly url: string;
   private readonly handlers = new Map<ServerEventType, Set<EventHandler>>();
+  private shouldReconnect = true;
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly options: WsClientOptions = {}) {
     this.url = options.url ?? import.meta.env.VITE_WS_URL ?? DEFAULT_WS_URL;
@@ -27,13 +30,18 @@ export class WsClient {
 
   connect(): void {
     if (this.socket) return;
+    this.shouldReconnect = true;
     const socket = new WebSocket(this.url);
     this.socket = socket;
 
-    socket.addEventListener('open', () => this.options.onOpen?.());
+    socket.addEventListener('open', () => {
+      this.reconnectAttempts = 0;
+      this.options.onOpen?.();
+    });
     socket.addEventListener('close', () => {
       this.socket = null;
       this.options.onClose?.();
+      this.scheduleReconnect();
     });
     socket.addEventListener('error', (err) => this.options.onError?.(err));
     socket.addEventListener('message', (msg: MessageEvent<string>) => {
@@ -45,6 +53,17 @@ export class WsClient {
       }
       this.dispatch(event);
     });
+  }
+
+  /** Reconecta com backoff exponencial (cap 10s) enquanto `shouldReconnect`. */
+  private scheduleReconnect(): void {
+    if (!this.shouldReconnect || this.reconnectTimer) return;
+    const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 10_000);
+    this.reconnectAttempts += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.shouldReconnect) this.connect();
+    }, delay);
   }
 
   /** Registra um handler para um tipo específico de evento. Retorna um unsubscribe. */
@@ -65,7 +84,21 @@ export class WsClient {
   }
 
   close(): void {
-    this.socket?.close();
+    this.shouldReconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const socket = this.socket;
     this.socket = null;
+    if (!socket) return;
+    // Fechar um socket ainda em CONNECTING dispara o warning "closed before
+    // established". Adiamos o close até abrir; se já estiver abrindo/aberto,
+    // fechamos direto.
+    if (socket.readyState === WebSocket.CONNECTING) {
+      socket.addEventListener('open', () => socket.close(), { once: true });
+    } else {
+      socket.close();
+    }
   }
 }

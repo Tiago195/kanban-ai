@@ -4,4 +4,5 @@ export const queryKeys = {
   cards: (boardId: string) => ["cards", boardId] as const,
   card: (cardId: string) => ["card", cardId] as const,
   loopState: (storyId: string) => ["loopState", storyId] as const,
+  models: ["agentModels"] as const,
 };

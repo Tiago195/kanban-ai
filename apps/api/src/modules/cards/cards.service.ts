@@ -16,6 +16,7 @@ import type {
 import { deriveEpicStatus, type ColumnLike } from './cards.epic-status';
 import { mapIteration, type PrismaIterationRow } from './iteration.mapper';
 import { Orchestrator } from '../ai-engine/orchestrator';
+import { ModelsService } from '../models/models.service';
 
 /** Status derivado exposto na leitura, por epic. */
 export interface EpicStatusView {
@@ -34,14 +35,59 @@ export class CardsService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
     private readonly orchestrator: Orchestrator,
+    private readonly models: ModelsService,
   ) {}
 
   async findAll(boardId?: string) {
     const cards = await this.prisma.card.findMany({
       where: boardId ? { boardId } : undefined,
       orderBy: [{ type: 'asc' }, { position: 'asc' }],
+      include: {
+        labels: { select: { labelId: true } },
+        assignees: { select: { assigneeId: true } },
+      },
     });
-    return this.attachEpicStatus(cards);
+    const summaries = cards.map(({ labels, assignees, ...card }) => ({
+      ...card,
+      labelIds: labels.map((l) => l.labelId),
+      assigneeIds: assignees.map((a) => a.assigneeId),
+    }));
+    await this.attachResolvedModel(summaries, boardId);
+    return this.attachEpicStatus(summaries);
+  }
+
+  /**
+   * Anexa `resolvedModel` a cada card resolvendo a cascata em memória
+   * (card → parent → board.defaultModel → CLI default), sem N+1 no banco.
+   */
+  private async attachResolvedModel<
+    T extends { id: string; parentId: string | null; boardId: string; model: string | null },
+  >(cards: T[], boardId?: string): Promise<void> {
+    if (cards.length === 0) return;
+    const byId = new Map(cards.map((c) => [c.id, c]));
+
+    const boardIds = boardId ? [boardId] : [...new Set(cards.map((c) => c.boardId))];
+    const boards = await this.prisma.board.findMany({
+      where: { id: { in: boardIds } },
+      select: { id: true, defaultModel: true },
+    });
+    const boardDefault = new Map(boards.map((b) => [b.id, b.defaultModel]));
+    const cliDefault = this.models.defaultModelId();
+
+    const resolveFor = (card: T): string => {
+      let node: T | undefined = card;
+      const seen = new Set<string>();
+      while (node && !seen.has(node.id)) {
+        seen.add(node.id);
+        if (node.model) return node.model;
+        node = node.parentId ? byId.get(node.parentId) : undefined;
+      }
+      return boardDefault.get(card.boardId) ?? cliDefault;
+    };
+
+    for (const card of cards) {
+      (card as T & { resolvedModel: string }).resolvedModel = resolveFor(card);
+    }
   }
 
   async findOne(id: string) {
@@ -60,10 +106,47 @@ export class CardsService {
       },
     });
     if (!card) return card;
+    const resolvedModel = await this.resolveModel(card.id, card.parentId, card.boardId, card.model);
     return {
       ...card,
+      resolvedModel,
       iterations: card.iterations.map((it) => mapIteration(it as PrismaIterationRow)),
     };
+  }
+
+  /**
+   * Resolve o modelo efetivo de um card via herança em cascata:
+   * `card.model ?? parent.model (recursivo) ?? board.defaultModel ?? CLI default`.
+   */
+  async resolveModel(
+    cardId: string,
+    parentId: string | null,
+    boardId: string,
+    ownModel: string | null,
+  ): Promise<string> {
+    if (ownModel) return ownModel;
+
+    // Sobe a hierarquia (task → story → epic) procurando um model explícito.
+    let currentParentId = parentId;
+    const seen = new Set<string>([cardId]);
+    while (currentParentId && !seen.has(currentParentId)) {
+      seen.add(currentParentId);
+      const parent = await this.prisma.card.findUnique({
+        where: { id: currentParentId },
+        select: { model: true, parentId: true },
+      });
+      if (!parent) break;
+      if (parent.model) return parent.model;
+      currentParentId = parent.parentId;
+    }
+
+    const board = await this.prisma.board.findUnique({
+      where: { id: boardId },
+      select: { defaultModel: true },
+    });
+    if (board?.defaultModel) return board.defaultModel;
+
+    return this.models.defaultModelId();
   }
 
   /**
@@ -120,15 +203,26 @@ export class CardsService {
       const prefix = dto.type === 'epic' ? 'EP' : dto.type === 'story' ? 'US' : 'TK';
       await tx.board.update({ where: { id: board.id }, data: { seq } });
 
+      // #1: garantir que toda task nasça numa coluna do mini-kanban. Se o POST
+      // não informou columnId, cai na coluna de task "To Do".
+      let taskColumnId = dto.type === 'task' ? columnId : undefined;
+      if (dto.type === 'task' && !taskColumnId) {
+        const todo = await tx.column.findFirst({
+          where: { boardId: dto.boardId, isTaskColumn: true, title: 'To Do' },
+          select: { id: true },
+        });
+        taskColumnId = todo?.id;
+      }
+
       // Posição = fim da coluna alvo.
-      const position = columnId
-        ? await tx.card.count({
-            where:
-              dto.type === 'task'
-                ? { taskColumnId: columnId }
-                : { boardColumnId: columnId },
-          })
-        : 0;
+      const position =
+        dto.type === 'task'
+          ? taskColumnId
+            ? await tx.card.count({ where: { taskColumnId } })
+            : 0
+          : columnId
+            ? await tx.card.count({ where: { boardColumnId: columnId } })
+            : 0;
 
       return tx.card.create({
         data: {
@@ -141,7 +235,7 @@ export class CardsService {
           parentId: dto.parentId ?? null,
           position,
           ...(dto.type === 'task'
-            ? { taskColumnId: columnId }
+            ? { taskColumnId }
             : { boardColumnId: columnId }),
         },
       });
@@ -149,6 +243,47 @@ export class CardsService {
 
     this.realtime.broadcast({ type: 'card.created', card: card as never });
     return card;
+  }
+
+  /**
+   * Exclui um card e todos os seus descendentes (cascata pela relação
+   * `Hierarchy` no schema). Se o card excluído for uma story, recomputa o status
+   * do epic pai. Emite `card.deleted` com todos os ids removidos.
+   */
+  async remove(id: string) {
+    const card = await this.prisma.card.findUnique({ where: { id } });
+    if (!card) throw new NotFoundException('card inexistente');
+
+    // Coleta recursiva de descendentes (para informar a UI quais cards sumiram).
+    const deletedIds: string[] = [];
+    const collect = async (cardId: string) => {
+      deletedIds.push(cardId);
+      const children = await this.prisma.card.findMany({
+        where: { parentId: cardId },
+        select: { id: true },
+      });
+      for (const child of children) {
+        await collect(child.id);
+      }
+    };
+    await collect(id);
+
+    // A FK `parentId` tem onDelete: Cascade — apagar o card raiz remove a árvore.
+    await this.prisma.card.delete({ where: { id } });
+
+    this.realtime.broadcast({
+      type: 'card.deleted',
+      cardId: id,
+      parentId: card.parentId,
+      deletedIds,
+    });
+
+    // Story removida altera o status derivado do epic pai.
+    if (card.type === 'story' && card.parentId) {
+      await this.emitEpicStatus(card.parentId);
+    }
+
+    return { deletedIds };
   }
 
   /**
@@ -226,6 +361,7 @@ export class CardsService {
     this.realtime.broadcast({
       type: 'card.moved',
       cardId: id,
+      parentId: result.card.parentId ?? null,
       fromColumnId: result.fromColumnId,
       toColumnId: dto.columnId,
       isTaskBoard: result.isTaskBoard,
@@ -294,6 +430,7 @@ export class CardsService {
         ...(dto.aiSummary !== undefined ? { aiSummary: dto.aiSummary } : {}),
         ...(dto.aiProject !== undefined ? { aiProject: dto.aiProject } : {}),
         ...(dto.aiNotes !== undefined ? { aiNotes: dto.aiNotes } : {}),
+        ...(dto.model !== undefined ? { model: dto.model } : {}),
       },
     });
 

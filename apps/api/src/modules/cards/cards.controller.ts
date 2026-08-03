@@ -63,6 +63,11 @@ export class CardsController {
     return this.cards.update(id, dto);
   }
 
+  @Delete('cards/:id')
+  remove(@Param('id') id: string) {
+    return this.cards.remove(id);
+  }
+
   // ── DOD ──
   @Post('cards/:id/dod')
   addDod(
