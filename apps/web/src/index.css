@@ -1766,6 +1766,25 @@
   display: flex;
   flex-direction: row;
 }
+
+/* Sheet (shadcn/radix) da thread por story — deve ficar ACIMA do
+   .backlog-chat-overlay (z-index:60). O shadcn usa z-50 (=50) que ficaria
+   ATRÁS do overlay full-screen do backlog-chat, deixando o Sheet invisível.
+   Radix renderiza o Portal no <body>; elevamos overlay+content aqui. */
+.story-thread-overlay {
+  z-index: 120 !important;
+}
+.story-thread-content {
+  z-index: 121 !important;
+  width: 480px;
+  max-width: 480px;
+}
+@media (max-width: 560px) {
+  .story-thread-content {
+    width: 100%;
+    max-width: 100%;
+  }
+}
 .backlog-session-sidebar {
   width: 264px;
   flex-shrink: 0;

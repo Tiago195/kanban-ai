@@ -68,7 +68,8 @@ export function StoryThreadSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-[480px] sm:max-w-[480px] flex flex-col gap-0 p-0"
+        overlayClassName="story-thread-overlay"
+        className="story-thread-content w-[480px] sm:max-w-[480px] flex flex-col gap-0 p-0"
       >
         <SheetHeader className="border-b p-6">
           <div className="flex items-center gap-2">
