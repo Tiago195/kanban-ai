@@ -379,7 +379,18 @@ export class BacklogChatOrchestrator {
   private resolveFocusStory(
     channel: string,
     current: BacklogProposal | null,
-  ): { id: string; title: string; description?: string; points?: number; index: number } | undefined {
+  ):
+    | {
+        id: string;
+        title: string;
+        description?: string;
+        aiSummary?: string;
+        aiNotes?: string;
+        points?: number;
+        tasks?: { id: string; title: string }[];
+        index: number;
+      }
+    | undefined {
     const storyId = parseBacklogStoryChannel(channel);
     if (!storyId || !current) return undefined;
     const index = current.stories.findIndex((s) => s.id === storyId);
@@ -389,7 +400,10 @@ export class BacklogChatOrchestrator {
       id: story.id,
       title: story.title,
       description: story.description,
+      aiSummary: story.aiSummary,
+      aiNotes: story.aiNotes,
       points: story.points,
+      tasks: story.tasks,
       index,
     };
   }
@@ -406,9 +420,16 @@ export class BacklogChatOrchestrator {
     const nextVersion = (session.currentProposalVersion ?? 0) + 1;
     // A AI emite stories SEM id; o backend atribui um id estável (âncora das
     // threads story:<id>). Preserva ids que já venham preenchidos. Ver ADR-0023.
+    // Tasks rascunhadas também ganham id estável (viram cards type:task no apply).
     const stories: BacklogProposalStory[] = (proposal.stories ?? []).map((s) => ({
       ...s,
       id: s.id && s.id.length > 0 ? s.id : randomUUID(),
+      tasks: Array.isArray(s.tasks)
+        ? s.tasks.map((t) => ({
+            ...t,
+            id: t.id && t.id.length > 0 ? t.id : randomUUID(),
+          }))
+        : s.tasks,
     }));
     const normalized: BacklogProposal = {
       ...proposal,
@@ -514,6 +535,8 @@ export class BacklogChatOrchestrator {
         description: story.description ?? '',
         points: story.points,
         parentId: epic.id,
+        aiSummary: story.aiSummary,
+        aiNotes: story.aiNotes,
       });
       created.push({
         id: s.id,
@@ -522,6 +545,26 @@ export class BacklogChatOrchestrator {
         title: s.title,
         parentId: epic.id,
       });
+
+      // Tasks rascunhadas viram cards type:task filhos da story (caem em "To Do"
+      // automaticamente — ver CardsService.create). Task não tem pontos nem DoD:
+      // o refinamento e o DoD acontecem depois, no board. Ver ADR-0024.
+      for (const task of story.tasks ?? []) {
+        const t = await this.cards.create({
+          boardId: session.boardId,
+          type: 'task',
+          title: task.title,
+          description: '',
+          parentId: s.id,
+        });
+        created.push({
+          id: t.id,
+          key: t.key,
+          type: 'task',
+          title: t.title,
+          parentId: s.id,
+        });
+      }
     }
 
     await this.prisma.backlogChatSession.update({

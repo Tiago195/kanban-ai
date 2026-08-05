@@ -56,6 +56,14 @@ export function ProposalCard({
               {story.points != null ? (
                 <span className="proposal-story-points">{story.points}</span>
               ) : null}
+              {story.tasks && story.tasks.length > 0 ? (
+                <span
+                  className="proposal-story-tasks"
+                  title={`${story.tasks.length} tasks rascunhadas`}
+                >
+                  ☑ {story.tasks.length}
+                </span>
+              ) : null}
               {clickable ? (
                 <span className="proposal-story-open" aria-hidden="true">
                   💬

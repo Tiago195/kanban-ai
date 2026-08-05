@@ -42,7 +42,8 @@ export function BacklogChatView({
 }: BacklogChatViewProps) {
   const sessionId = routeSessionId;
   const queryClient = useQueryClient();
-  const [openStory, setOpenStory] = useState<BacklogProposalStory | null>(null);
+  const [openStorySnapshot, setOpenStorySnapshot] =
+    useState<BacklogProposalStory | null>(null);
 
   const createSession = useMutation({
     mutationFn: (bid: string) => apiClient.createBacklogSession(bid),
@@ -73,6 +74,14 @@ export function BacklogChatView({
   } = useBacklogChat(sessionId, boardId);
 
   const currentVersion = proposal?.version ?? null;
+
+  // A story exibida no Sheet é resolvida da proposta CORRENTE pelo id — assim
+  // patches (ex.: novas tasks) refletem em tempo real. Cai no snapshot só se a
+  // story ainda não existir na proposta corrente. Ver ADR-0024.
+  const openStory: BacklogProposalStory | null = openStorySnapshot
+    ? (proposal?.stories.find((s) => s.id === openStorySnapshot.id) ??
+      openStorySnapshot)
+    : null;
 
   const panelMessages: ChatPanelMessage[] = messages.map((m) => ({
     id: m.id,
@@ -159,7 +168,7 @@ export function BacklogChatView({
                     isCurrent={proposalMsg.proposal.version === currentVersion}
                     applying={isApplying}
                     onApply={apply}
-                    onOpenStory={setOpenStory}
+                    onOpenStory={setOpenStorySnapshot}
                   />
                 );
               }
@@ -175,7 +184,7 @@ export function BacklogChatView({
           story={openStory}
           open
           onOpenChange={(o) => {
-            if (!o) setOpenStory(null);
+            if (!o) setOpenStorySnapshot(null);
           }}
         />
       ) : null}

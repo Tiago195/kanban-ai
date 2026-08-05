@@ -88,8 +88,44 @@ export interface BacklogProposalStory {
    */
   id: string;
   title: string;
+  /** Resumo objetivo (2–5 linhas) do que a story entrega. */
   description?: string;
+  /**
+   * Contexto de AI da story — **mesmo campo do Card** (`Card.aiSummary`).
+   * Resumo/objetivo em linguagem natural que orienta a execução. Ao aplicar
+   * (`/apply`) vai direto para `aiSummary` do card. Ver ADR-0024.
+   */
+  aiSummary?: string;
+  /**
+   * Notas de AI da story — **mesmo campo do Card** (`Card.aiNotes`).
+   * Considerações técnicas, dependências, riscos ou pontos de atenção. NÃO é
+   * acceptance/DoR (proibidos no v1 — ADR-0007). Ao aplicar vai para `aiNotes`
+   * do card. Ver ADR-0024.
+   */
+  aiNotes?: string;
   points?: StoryPoints;
+  /**
+   * Rascunho de tasks (decomposição da story em passos acionáveis). **Opcional
+   * e sob demanda** — a proposta não gera tasks por padrão (backlog enxuto);
+   * o humano pode pedir "sugira tasks" na thread da story. Ao aprovar (`/apply`)
+   * cada task vira um **card `type:task`** filho da story (o MESMO conceito de
+   * task do board — não um modelo paralelo), na coluna "To Do". O DoD continua
+   * sendo o `DodItem` do card, criado no board após o apply (ADR-0007). Ver
+   * ADR-0024.
+   */
+  tasks?: BacklogProposalTask[];
+}
+
+/**
+ * Rascunho de uma task dentro de uma story da proposta. **Não é um novo modelo**
+ * — é só o rascunho que vira um card `type:task` (já existente) via `/apply`.
+ * `id` estável (como o da story) para suportar patch cirúrgico por índice.
+ * Task não tem story points (invariante do domínio).
+ */
+export interface BacklogProposalTask {
+  /** Id estável da task dentro da story; gerado/preservado ao persistir. */
+  id: string;
+  title: string;
 }
 
 /**
@@ -117,7 +153,10 @@ export interface BacklogProposal {
  *
  * `path` aponta para um campo editável: `/epic/title`, `/epic/description`,
  * `/epic/points`, `/stories/<i>/title`, `/stories/<i>/description`,
- * `/stories/<i>/points`. `add`/`remove` operam sobre `/stories/<i>`.
+ * `/stories/<i>/aiSummary`, `/stories/<i>/aiNotes`, `/stories/<i>/points`,
+ * `/stories/<i>/tasks` (array inteiro). `add`/`remove` operam sobre
+ * `/stories/<i>` e sobre `/stories/<i>/tasks/<j>` (`add` em
+ * `/stories/<i>/tasks/-`).
  */
 export interface BacklogPatchOp {
   op: 'replace' | 'add' | 'remove';
@@ -135,7 +174,7 @@ export interface BacklogProposalPatch {
 export interface BacklogAppliedCard {
   id: string;
   key: string;
-  type: 'epic' | 'story';
+  type: 'epic' | 'story' | 'task';
   title: string;
   parentId: string | null;
 }

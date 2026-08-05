@@ -268,6 +268,8 @@ export class CardsService {
           parentId: dto.parentId ?? null,
           position,
           ...(dto.loopType !== undefined ? { loopType: dto.loopType } : {}),
+          ...(dto.aiSummary !== undefined ? { aiSummary: dto.aiSummary } : {}),
+          ...(dto.aiNotes !== undefined ? { aiNotes: dto.aiNotes } : {}),
           ...(dto.type === 'task'
             ? { taskColumnId }
             : { boardColumnId: columnId }),

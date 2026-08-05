@@ -22,7 +22,16 @@ export interface BuildBacklogPromptInput {
   currentProposalJson?: string;
   /** Quando o turno vem de uma thread focada de uma story (channel story:<id>),
    *  traz a story em foco para restringir o escopo da IA. Ver ADR-0023. */
-  focusStory?: { id: string; title: string; description?: string; points?: number; index: number };
+  focusStory?: {
+    id: string;
+    title: string;
+    description?: string;
+    aiSummary?: string;
+    aiNotes?: string;
+    points?: number;
+    tasks?: { id: string; title: string }[];
+    index: number;
+  };
 }
 
 /**
@@ -57,6 +66,12 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
     const fs = input.focusStory;
     const pts = typeof fs.points === 'number' ? String(fs.points) : '(sem pontos)';
     const desc = fs.description && fs.description.trim().length > 0 ? fs.description : '(sem descrição)';
+    const summary = fs.aiSummary && fs.aiSummary.trim().length > 0 ? fs.aiSummary : '(sem contexto)';
+    const notes = fs.aiNotes && fs.aiNotes.trim().length > 0 ? fs.aiNotes : '(sem notas técnicas)';
+    const taskList =
+      fs.tasks && fs.tasks.length > 0
+        ? fs.tasks.map((t) => `"${t.title}"`).join(', ')
+        : '(nenhuma task rascunhada ainda)';
     lines.push('');
     lines.push('## ⚠️ Thread FOCADA em UMA story (escopo restrito)');
     lines.push(
@@ -68,13 +83,18 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
     lines.push(`- Índice na proposta: \`${fs.index}\` (use nos paths de patch: \`/stories/${fs.index}/...\`).`);
     lines.push(`- Título: "${fs.title}".`);
     lines.push(`- Descrição: ${desc}`);
+    lines.push(`- Contexto (aiSummary): ${summary}`);
+    lines.push(`- Notas técnicas (aiNotes): ${notes}`);
+    lines.push(`- Tasks rascunhadas: ${taskList}`);
     lines.push(`- Pontos: ${pts}.`);
     lines.push('');
     lines.push('Regras desta thread focada (NUNCA violar):');
     lines.push('- NÃO reestruture a proposta inteira a partir desta thread. Mantenha as mudanças escopadas a ESTA story.');
     lines.push(
       `- PREFIRA FORTEMENTE emitir um PATCH cirúrgico \`${BACKLOG_PATCH_MARKERS.open}\` mirando os paths ` +
-        `\`/stories/${fs.index}/title\`, \`/stories/${fs.index}/description\` e/ou \`/stories/${fs.index}/points\` — ` +
+        `\`/stories/${fs.index}/title\`, \`/stories/${fs.index}/description\`, \`/stories/${fs.index}/aiSummary\`, ` +
+        `\`/stories/${fs.index}/aiNotes\`, \`/stories/${fs.index}/points\` e/ou as tasks ` +
+        `(\`/stories/${fs.index}/tasks\`, \`/stories/${fs.index}/tasks/-\`, \`/stories/${fs.index}/tasks/<j>\`) — ` +
         'em vez de reemitir o KANBAN_BACKLOG completo.',
     );
     lines.push('- Você ainda pode emitir um KANBAN_QUESTION se precisar esclarecer algo sobre ESTA story.');
@@ -87,11 +107,11 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
   // ── Regras de domínio (invariantes da fundação) ────────────────────────────
   lines.push('');
   lines.push('## Regras de domínio (NUNCA violar)');
-  lines.push('- Hierarquia: um **Epic** agrupa **Stories**. Não proponha tasks (elas nascem depois, no loop de execução).');
-  lines.push(`- Story points ∈ {${pointsList}} (escala Fibonacci). Só Epic e Story têm pontos; use apenas esses valores.`);
-  lines.push('- NÃO existe "Definition of Ready" nem "acceptance criteria" no v1. O único artefato é o backlog. Não os proponha.');
+  lines.push('- Hierarquia: um **Epic** agrupa **Stories**; uma Story pode ter **Tasks** (as unidades de trabalho executável).');
+  lines.push(`- Story points ∈ {${pointsList}} (escala Fibonacci). Só Epic e Story têm pontos; **Tasks NÃO têm pontos**. Use apenas esses valores.`);
+  lines.push('- NÃO existe "Definition of Ready" nem "acceptance criteria" no v1. O único checklist é o **DoD (Definition of Done)**, e ele é montado DEPOIS, direto no board — **não** o proponha nem o descreva aqui (evita duplicação).');
   lines.push('- Mantenha o backlog **enxuto**: só as Stories realmente necessárias para a ideia. Prefira 2–6 Stories a uma lista inflada. O humano pode pedir para expandir depois.');
-  lines.push('- Títulos curtos e acionáveis; descrições em 1–3 linhas objetivas.');
+  lines.push('- Títulos curtos e acionáveis. **Descrições ricas**: 2–5 linhas explicando o VALOR e o comportamento esperado da story (não uma frase genérica).');
 
   // ── Fase de descoberta obrigatória ─────────────────────────────────────────
   lines.push('');
@@ -123,10 +143,16 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
   lines.push(BACKLOG_PROPOSAL_MARKERS.open);
   lines.push('{');
   lines.push('  "version": 1,');
-  lines.push('  "epic": { "title": "<título do épico>", "description": "<1–3 linhas>", "points": 8 },');
+  lines.push('  "epic": { "title": "<título do épico>", "description": "<2–4 linhas>", "points": 8 },');
   lines.push('  "stories": [');
-  lines.push('    { "title": "<story 1>", "description": "<1–3 linhas>", "points": 3 },');
-  lines.push('    { "title": "<story 2>", "description": "<1–3 linhas>", "points": 5 }');
+  lines.push('    {');
+  lines.push('      "title": "<story 1>",');
+  lines.push('      "description": "<2–5 linhas: o valor e o comportamento esperado>",');
+  lines.push('      "aiSummary": "<1–2 linhas: contexto/objetivo desta story para o agente executor>",');
+  lines.push('      "aiNotes": "<opcional: notas técnicas, dependências, pontos de atenção>",');
+  lines.push('      "points": 3,');
+  lines.push('      "tasks": [ { "title": "<task opcional 1>" }, { "title": "<task opcional 2>" } ]');
+  lines.push('    }');
   lines.push('  ],');
   lines.push('  "rationale": "<1 linha do porquê desta decomposição>"');
   lines.push('}');
@@ -134,8 +160,10 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
   lines.push('');
   lines.push('Regras da proposta:');
   lines.push(`- \`version\`: use 1 na primeira proposta.`);
-  lines.push(`- \`points\`: apenas valores Fibonacci ∈ {${pointsList}}. Omita se não souber estimar.`);
-  lines.push('- `stories`: enxuto. Cada story é uma fatia de valor entregável.');
+  lines.push(`- \`points\`: apenas valores Fibonacci ∈ {${pointsList}}. Omita se não souber estimar. **Tasks não têm pontos.**`);
+  lines.push('- `stories`: enxuto. Cada story é uma fatia de valor entregável, com descrição rica (2–5 linhas).');
+  lines.push('- `aiSummary` / `aiNotes`: opcionais mas recomendados — dão contexto ao agente que vai executar a story depois.');
+  lines.push('- `tasks`: **OPCIONAL**. Só rascunhe tasks se o humano pedir OU se a decomposição for óbvia e agregar valor. Task tem só `title` (sem pontos, sem DoD). Elas viram cards `type:task` filhos da story quando o backlog for aplicado; o refinamento real e o DoD acontecem no board. Se não fizer sentido, deixe `tasks` fora.');
   lines.push('- Não repita a proposta como texto solto fora do bloco — o bloco é a fonte da verdade.');
 
   // ── Fase de refinamento cirúrgico (só quando já há proposta) ────────────────
@@ -157,6 +185,8 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
     lines.push('  "ops": [');
     lines.push('    { "op": "replace", "path": "/epic/title", "value": "<novo título>" },');
     lines.push('    { "op": "replace", "path": "/stories/0/points", "value": 5 },');
+    lines.push('    { "op": "replace", "path": "/stories/0/aiNotes", "value": "<notas técnicas>" },');
+    lines.push('    { "op": "add", "path": "/stories/0/tasks/-", "value": { "title": "<nova task>" } },');
     lines.push('    { "op": "add", "path": "/stories/-", "value": { "title": "<nova story>", "points": 3 } },');
     lines.push('    { "op": "remove", "path": "/stories/2" }');
     lines.push('  ]');
@@ -165,8 +195,8 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
     lines.push('');
     lines.push('Regras do patch:');
     lines.push('- `baseVersion`: a versão da proposta corrente exibida acima.');
-    lines.push('- `path` válidos: `/epic/title`, `/epic/description`, `/epic/points`, `/stories/<i>/title`, `/stories/<i>/description`, `/stories/<i>/points`. Para adicionar/remover story: `add` em `/stories/-` (fim) e `remove` em `/stories/<i>`.');
-    lines.push(`- \`points\` só Fibonacci ∈ {${pointsList}}.`);
+    lines.push('- `path` válidos: `/epic/title`, `/epic/description`, `/epic/points`; por story: `/stories/<i>/title`, `/stories/<i>/description`, `/stories/<i>/aiSummary`, `/stories/<i>/aiNotes`, `/stories/<i>/points`. Para adicionar/remover story: `add` em `/stories/-` (fim) e `remove` em `/stories/<i>`. Para tasks de uma story: `replace` em `/stories/<i>/tasks` (array inteiro), `add` em `/stories/<i>/tasks/-` (fim) e `remove`/`replace` em `/stories/<i>/tasks/<j>`.');
+    lines.push(`- \`points\` só Fibonacci ∈ {${pointsList}}. Task tem só \`title\` (sem pontos).`);
     lines.push('- Só inclua ops para o que o humano pediu. NÃO toque em itens não solicitados.');
     lines.push('- Se o humano pedir uma mudança grande que reestrutura tudo, aí sim emita um KANBAN_BACKLOG novo com `version` incrementado.');
     if (input.focusStory) {
@@ -174,9 +204,10 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
       lines.push('');
       lines.push(
         `**Reforço (thread focada):** esta conversa trata só da story "${fs.title}" (índice \`${fs.index}\`). ` +
-          `Mire os ops nos paths \`/stories/${fs.index}/title\`, \`/stories/${fs.index}/description\` e/ou ` +
-          `\`/stories/${fs.index}/points\`. NÃO reestruture o backlog inteiro daqui; só amplie o escopo se o humano ` +
-          'pedir explicitamente algo que afete todo o backlog, e confirme antes.',
+          `Mire os ops nos paths \`/stories/${fs.index}/title\`, \`/stories/${fs.index}/description\`, ` +
+          `\`/stories/${fs.index}/aiSummary\`, \`/stories/${fs.index}/aiNotes\`, \`/stories/${fs.index}/points\` ` +
+          `e/ou as tasks (\`/stories/${fs.index}/tasks*\`). NÃO reestruture o backlog inteiro daqui; só amplie o escopo ` +
+          'se o humano pedir explicitamente algo que afete todo o backlog, e confirme antes.',
       );
     }
   }

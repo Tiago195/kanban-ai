@@ -28,3 +28,4 @@ Registro das decisões de arquitetura da fundação. Formato leve
 | [0021](0021-client-side-routing-with-react-router.md) | Roteamento client-side com react-router (URL própria p/ overlays; F5 preserva a conversa do backlog-chat) | Aceito |
 | [0022](0022-hitl-survives-restart-via-cli-session-id.md) | HITL sobrevive a restart via `--session-id` da Copilot CLI (reusa o UUID da sessão; sem migration) | Aceito |
 | [0023](0023-backlog-chat-story-threads.md) | Threads por story no chat de backlog (modelo Slack: uma sessão Copilot, transcripts por canal `main`/`story:<id>`) | Aceito |
+| [0024](0024-backlog-chat-rich-stories-and-draft-tasks.md) | Stories ricas (`aiSummary`/`aiNotes`) + tasks rascunhadas no backlog-chat, reusando o modelo do `Card` (sem duplicar Epic/Story/Task/DoD) | Aceito |

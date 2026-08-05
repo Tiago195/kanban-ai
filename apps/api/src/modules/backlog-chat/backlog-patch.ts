@@ -5,6 +5,7 @@ import type {
   BacklogProposal,
   BacklogProposalPatch,
   BacklogProposalStory,
+  BacklogProposalTask,
   StoryPoints,
 } from '@kanban-ai/shared';
 
@@ -68,7 +69,62 @@ function applyOp(
     return;
   }
 
-  const storyMatch = /^\/stories\/(\d+)(\/(title|description|points))?$/.exec(path);
+  // ── Tasks de uma story: add/remove/replace item + replace do array inteiro ──
+  const taskAddMatch = /^\/stories\/(\d+)\/tasks\/-$/.exec(path);
+  if (taskAddMatch) {
+    if (op.op !== 'add') {
+      throw new BadRequestException(`path ${path} só aceita op=add`);
+    }
+    const idx = Number(taskAddMatch[1]);
+    ensureStoryIndex(proposal, idx, path);
+    const story = proposal.stories[idx];
+    if (!story.tasks) story.tasks = [];
+    story.tasks.push(requireTask(op.value, path));
+    return;
+  }
+
+  const taskItemMatch = /^\/stories\/(\d+)\/tasks\/(\d+)$/.exec(path);
+  if (taskItemMatch) {
+    const sIdx = Number(taskItemMatch[1]);
+    const tIdx = Number(taskItemMatch[2]);
+    ensureStoryIndex(proposal, sIdx, path);
+    const story = proposal.stories[sIdx];
+    const tasks = story.tasks ?? [];
+    if (op.op === 'remove') {
+      ensureTaskIndex(tasks, tIdx, path);
+      tasks.splice(tIdx, 1);
+      story.tasks = tasks;
+      return;
+    }
+    if (op.op === 'replace') {
+      ensureTaskIndex(tasks, tIdx, path);
+      const existingId = tasks[tIdx].id; // preserva id estável da task
+      const replacement = requireTask(op.value, path);
+      tasks[tIdx] = { ...replacement, id: existingId ?? replacement.id };
+      story.tasks = tasks;
+      return;
+    }
+    if (op.op === 'add') {
+      tasks.splice(tIdx, 0, requireTask(op.value, path));
+      story.tasks = tasks;
+      return;
+    }
+  }
+
+  const tasksArrayMatch = /^\/stories\/(\d+)\/tasks$/.exec(path);
+  if (tasksArrayMatch) {
+    const idx = Number(tasksArrayMatch[1]);
+    ensureStoryIndex(proposal, idx, path);
+    if (op.op === 'remove') {
+      proposal.stories[idx].tasks = [];
+      return;
+    }
+    proposal.stories[idx].tasks = requireTaskArray(op.value, path);
+    return;
+  }
+
+  const storyMatch =
+    /^\/stories\/(\d+)(\/(title|description|aiSummary|aiNotes|points))?$/.exec(path);
   if (storyMatch) {
     const idx = Number(storyMatch[1]);
     const field = storyMatch[3];
@@ -101,6 +157,14 @@ function applyOp(
     }
     if (field === 'description') {
       story.description = requireString(op.value, path);
+      return;
+    }
+    if (field === 'aiSummary') {
+      story.aiSummary = requireString(op.value, path);
+      return;
+    }
+    if (field === 'aiNotes') {
+      story.aiNotes = requireString(op.value, path);
       return;
     }
     if (field === 'points') {
@@ -153,8 +217,47 @@ function requireStory(value: unknown, path: string): BacklogProposalStory {
   if (o.description !== undefined) {
     story.description = requireString(o.description, `${path}/description`);
   }
+  if (o.aiSummary !== undefined) {
+    story.aiSummary = requireString(o.aiSummary, `${path}/aiSummary`);
+  }
+  if (o.aiNotes !== undefined) {
+    story.aiNotes = requireString(o.aiNotes, `${path}/aiNotes`);
+  }
   if (o.points !== undefined) {
     story.points = requirePoints(o.points, `${path}/points`);
   }
+  if (o.tasks !== undefined) {
+    story.tasks = requireTaskArray(o.tasks, `${path}/tasks`);
+  }
   return story;
+}
+
+function requireTask(value: unknown, path: string): BacklogProposalTask {
+  if (typeof value !== 'object' || value === null) {
+    throw new BadRequestException(`valor de ${path} deve ser um objeto task`);
+  }
+  const o = value as Record<string, unknown>;
+  const title = requireString(o.title, `${path}/title`);
+  // Tasks são rascunhos; o backend atribui id estável ao adicionar.
+  const id = typeof o.id === 'string' && o.id.length > 0 ? o.id : randomUUID();
+  return { id, title };
+}
+
+function requireTaskArray(value: unknown, path: string): BacklogProposalTask[] {
+  if (!Array.isArray(value)) {
+    throw new BadRequestException(`valor de ${path} deve ser um array de tasks`);
+  }
+  return value.map((item, i) => requireTask(item, `${path}/${i}`));
+}
+
+function ensureTaskIndex(
+  tasks: BacklogProposalTask[],
+  idx: number,
+  path: string,
+): void {
+  if (!Number.isInteger(idx) || idx < 0 || idx >= tasks.length) {
+    throw new BadRequestException(
+      `índice de task fora do intervalo em ${path} (tasks: ${tasks.length})`,
+    );
+  }
 }

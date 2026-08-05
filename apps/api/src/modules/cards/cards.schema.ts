@@ -16,6 +16,8 @@ export const createCardSchema = z.object({
     .optional(),
   columnId: z.string().uuid().optional(),
   loopType: z.string().min(1).optional(),
+  aiSummary: z.string().optional(),
+  aiNotes: z.string().optional(),
 });
 
 export type CreateCardDto = z.infer<typeof createCardSchema>;

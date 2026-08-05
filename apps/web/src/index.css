@@ -1785,6 +1785,100 @@
     max-width: 100%;
   }
 }
+.story-thread-scroll {
+  display: flex;
+  flex-direction: column;
+}
+.story-thread-detail {
+  padding: 18px 20px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-bottom: 1px solid var(--border, #23262e);
+}
+.story-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.story-detail-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground, #8b90a0);
+}
+.story-detail-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--foreground, #e6e8ee);
+  white-space: pre-wrap;
+}
+.story-detail-empty {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted-foreground, #8b90a0);
+  font-style: italic;
+}
+.story-detail-tasks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.story-detail-suggest {
+  border: 1px solid var(--border, #2b2f3a);
+  background: transparent;
+  color: var(--foreground, #e6e8ee);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.story-detail-suggest:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--ring, #4b5563);
+}
+.story-detail-suggest:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.story-detail-task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.story-detail-task {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--foreground, #e6e8ee);
+  padding: 6px 10px;
+  border: 1px solid var(--border, #23262e);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.story-detail-task-badge {
+  color: var(--muted-foreground, #8b90a0);
+  flex-shrink: 0;
+}
+.story-thread-chat {
+  flex: 1;
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 8px 0;
+}
 .backlog-session-sidebar {
   width: 264px;
   flex-shrink: 0;
@@ -2039,6 +2133,18 @@
 .proposal-story-desc {
   margin: 6px 0 0;
   font-size: 12px;
+  color: var(--muted, #8b90a0);
+}
+.proposal-story-tasks {
+  font-size: 11px;
+  font-weight: 600;
+  height: 20px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 999px;
+  background: var(--surface-2, #171a24);
   color: var(--muted, #8b90a0);
 }
 .proposal-story-btn {

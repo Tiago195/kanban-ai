@@ -4,7 +4,6 @@ import { ChatPanel, AgentMessageBody, type ChatPanelMessage } from "@/features/a
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/shared/components/ui/sheet";
@@ -64,6 +63,17 @@ export function StoryThreadSheet({
     }
   };
 
+  const handleSuggestTasks = () => {
+    if (busy || !story) return;
+    // Pede à IA para decompor ESTA story em tasks. O prompt (thread focada) já
+    // instrui a preferir um PATCH cirúrgico em /stories/<i>/tasks, então a
+    // proposta reflete as tasks em tempo real (via backlog.proposal WS).
+    send(
+      `Decomponha esta história ("${story.title}") em tasks acionáveis (unidades de trabalho executável, ` +
+        `sem pontos e sem DoD). Atualize a proposta com um patch cirúrgico nas tasks desta história.`,
+    );
+  };
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -81,38 +91,93 @@ export function StoryThreadSheet({
               <span className="proposal-story-points">{story.points} pts</span>
             </div>
           ) : null}
-          <SheetDescription>
-            {story?.description
-              ? story.description
-              : "Converse sobre esta história; mudanças aqui refletem no plano em tempo real."}
-          </SheetDescription>
         </SheetHeader>
 
-        <div className="backlog-chat-body flex-1 min-h-0 p-4">
-          <ChatPanel
-            messages={panelMessages}
-            pending={pending ? { options: pending.options } : null}
-            thinking={streaming}
-            busy={busy}
-            inputMode="always"
-            placeholder={
-              pending ? "Responda ou escreva livremente…" : "Ajuste esta história com a IA…"
-            }
-            submitLabel="Enviar"
-            busyLabel="Enviando…"
-            emptyState="Converse sobre esta história; mudanças aqui refletem no plano em tempo real."
-            questionHint={
-              pending ? (
-                <div className="agent-chat-question-hint">
-                  <span className="agent-chat-question-icon">💬</span>
-                  A IA aguarda sua resposta para refinar esta história
-                </div>
-              ) : undefined
-            }
-            onSend={handleSend}
-            onQuickReply={(text) => (pending ? answer(text) : send(text))}
-            renderMessageBody={(msg) => <AgentMessageBody text={msg.text} />}
-          />
+        <div className="story-thread-scroll flex-1 min-h-0 overflow-y-auto">
+          <div className="story-thread-detail">
+            <section className="story-detail-section">
+              <h4 className="story-detail-label">Descrição</h4>
+              {story?.description && story.description.trim().length > 0 ? (
+                <p className="story-detail-text">{story.description}</p>
+              ) : (
+                <p className="story-detail-empty">
+                  Sem descrição ainda — peça à IA para detalhar esta história abaixo.
+                </p>
+              )}
+            </section>
+
+            {story?.aiSummary && story.aiSummary.trim().length > 0 ? (
+              <section className="story-detail-section">
+                <h4 className="story-detail-label">Contexto</h4>
+                <p className="story-detail-text">{story.aiSummary}</p>
+              </section>
+            ) : null}
+
+            {story?.aiNotes && story.aiNotes.trim().length > 0 ? (
+              <section className="story-detail-section">
+                <h4 className="story-detail-label">Notas técnicas</h4>
+                <p className="story-detail-text">{story.aiNotes}</p>
+              </section>
+            ) : null}
+
+            <section className="story-detail-section">
+              <div className="story-detail-tasks-head">
+                <h4 className="story-detail-label">
+                  Tasks{story?.tasks?.length ? ` (${story.tasks.length})` : ""}
+                </h4>
+                <button
+                  type="button"
+                  className="story-detail-suggest"
+                  disabled={busy}
+                  onClick={handleSuggestTasks}
+                >
+                  ✨ Sugerir tasks
+                </button>
+              </div>
+              {story?.tasks && story.tasks.length > 0 ? (
+                <ul className="story-detail-task-list">
+                  {story.tasks.map((t) => (
+                    <li key={t.id} className="story-detail-task">
+                      <span className="story-detail-task-badge">☑︎</span>
+                      {t.title}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="story-detail-empty">
+                  Nenhuma task rascunhada. As tasks viram cards no board ao aplicar o backlog;
+                  o DoD é montado depois, direto no board.
+                </p>
+              )}
+            </section>
+          </div>
+
+          <div className="backlog-chat-body story-thread-chat">
+            <ChatPanel
+              messages={panelMessages}
+              pending={pending ? { options: pending.options } : null}
+              thinking={streaming}
+              busy={busy}
+              inputMode="always"
+              placeholder={
+                pending ? "Responda ou escreva livremente…" : "Ajuste esta história com a IA…"
+              }
+              submitLabel="Enviar"
+              busyLabel="Enviando…"
+              emptyState="Converse sobre esta história; mudanças aqui refletem no plano em tempo real."
+              questionHint={
+                pending ? (
+                  <div className="agent-chat-question-hint">
+                    <span className="agent-chat-question-icon">💬</span>
+                    A IA aguarda sua resposta para refinar esta história
+                  </div>
+                ) : undefined
+              }
+              onSend={handleSend}
+              onQuickReply={(text) => (pending ? answer(text) : send(text))}
+              renderMessageBody={(msg) => <AgentMessageBody text={msg.text} />}
+            />
+          </div>
         </div>
       </SheetContent>
     </Sheet>
