@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type {
   BacklogChatMessage,
@@ -499,7 +499,9 @@ export class BacklogChatOrchestrator {
   ): Promise<{ cards: BacklogAppliedCard[] }> {
     const session = await this.ensureSession(sessionId);
     if (session.status === 'applied') {
-      throw new NotFoundException('sessão já aplicada');
+      // Estado inválido, não "recurso inexistente": a sessão existe, mas já foi
+      // materializada no board — reaplicar duplicaria épico/stories/tasks.
+      throw new ConflictException('sessão já aplicada');
     }
     const rev = await this.prisma.backlogProposalRevision.findUnique({
       where: { sessionId_version: { sessionId, version } },

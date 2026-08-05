@@ -2187,3 +2187,11 @@
   gap: 8px;
   margin-top: 12px;
 }
+.proposal-card-applied {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success, #4ade80);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

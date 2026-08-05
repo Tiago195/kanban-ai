@@ -8,6 +8,7 @@ import {
 } from "@kanban-ai/shared";
 
 import { apiClient } from "@/shared/services/apiClient";
+import { showToast } from "@/shared/services/toastStore";
 import { queryKeys } from "@/features/board/services";
 import {
   selectChannel,
@@ -136,6 +137,17 @@ export function useBacklogChat(
       if (boardId) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.board(boardId) });
+        // Atualiza a lista lateral (a sessão vira "applied" → ✅) e o status
+        // que a UI usa para desabilitar o botão de aprovar.
+        void queryClient.invalidateQueries({ queryKey: ["backlog-sessions", boardId] });
+      }
+      showToast("Backlog criado no board ✅");
+    },
+    onError: (err: Error) => {
+      showToast(err.message || "Falha ao aplicar o backlog");
+      // Se falhou por já estar aplicada, ressincroniza o status na UI.
+      if (boardId) {
+        void queryClient.invalidateQueries({ queryKey: ["backlog-sessions", boardId] });
       }
     },
   });

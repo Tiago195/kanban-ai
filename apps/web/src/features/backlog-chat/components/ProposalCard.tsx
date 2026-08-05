@@ -4,6 +4,8 @@ export interface ProposalCardProps {
   proposal: BacklogProposal;
   /** true na proposta corrente (habilita o botão de aprovar). */
   isCurrent: boolean;
+  /** true quando a sessão já foi materializada no board (não pode reaplicar). */
+  applied?: boolean;
   applying?: boolean;
   onApply?: () => void;
   /**
@@ -22,6 +24,7 @@ export interface ProposalCardProps {
 export function ProposalCard({
   proposal,
   isCurrent,
+  applied,
   applying,
   onApply,
   onOpenStory,
@@ -95,7 +98,9 @@ export function ProposalCard({
       ) : null}
 
       <div className="proposal-card-actions">
-        {isCurrent && onApply ? (
+        {applied ? (
+          <span className="proposal-card-applied">✅ Aplicado no board</span>
+        ) : isCurrent && onApply ? (
           <button
             type="button"
             className="btn btn-primary btn-sm"

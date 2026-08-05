@@ -49,7 +49,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
-    throw new Error(`API ${path} respondeu ${res.status}`);
+    // Tenta extrair a mensagem do backend (Nest devolve { message, statusCode }).
+    let serverMessage: string | undefined;
+    try {
+      const body = (await res.clone().json()) as { message?: string | string[] };
+      serverMessage = Array.isArray(body?.message) ? body.message.join(", ") : body?.message;
+    } catch {
+      // corpo não-JSON: ignora e cai no fallback abaixo
+    }
+    const err = new Error(serverMessage ?? `API ${path} respondeu ${res.status}`);
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
   }
 
   if (res.status === 204) {

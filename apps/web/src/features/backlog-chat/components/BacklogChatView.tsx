@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BacklogChatMessage, BacklogProposalStory } from "@kanban-ai/shared";
 
 import { ChatPanel, AgentMessageBody, type ChatPanelMessage } from "@/features/ai-engine";
@@ -74,6 +74,18 @@ export function BacklogChatView({
   } = useBacklogChat(sessionId, boardId);
 
   const currentVersion = proposal?.version ?? null;
+
+  // Status da sessão (compartilha a query com a SessionSidebar via mesma key).
+  // Usado para NÃO oferecer "Aprovar" numa sessão que já virou cards no board
+  // (reaplicar duplicaria épico/stories/tasks; o backend responde 409).
+  const { data: sessions = [] } = useQuery({
+    queryKey: ["backlog-sessions", boardId],
+    queryFn: () => apiClient.listBacklogSessions(boardId as string),
+    enabled: !!boardId,
+    refetchOnWindowFocus: false,
+  });
+  const alreadyApplied =
+    sessions.find((s) => s.id === sessionId)?.status === "applied";
 
   // A story exibida no Sheet é resolvida da proposta CORRENTE — assim patches
   // (ex.: novas tasks) refletem em tempo real, sem depender de F5. Casa primeiro
@@ -168,6 +180,7 @@ export function BacklogChatView({
                   <ProposalCard
                     proposal={proposalMsg.proposal}
                     isCurrent={proposalMsg.proposal.version === currentVersion}
+                    applied={alreadyApplied}
                     applying={isApplying}
                     onApply={apply}
                     onOpenStory={setOpenStorySnapshot}
