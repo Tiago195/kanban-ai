@@ -99,6 +99,20 @@ export const emptyChannel = (): ChannelChat => ({
   streaming: false,
 });
 
+/**
+ * Canal vazio com **referência estável** para os caminhos de LEITURA
+ * (selectors). Como o zustand compara o snapshot por `Object.is`, um selector
+ * que retornasse `emptyChannel()` (objeto novo) a cada render dispararia um loop
+ * infinito de re-render ("getSnapshot should be cached" → "Maximum update depth
+ * exceeded"). Retornamos sempre esta mesma instância congelada quando o canal
+ * ainda não existe. Escritas nunca mutam este objeto (fazem spread).
+ */
+const EMPTY_CHANNEL: ChannelChat = {
+  messages: [],
+  pending: null,
+  streaming: false,
+};
+
 /** Fábrica de uma sessão vazia (sem canais, sem proposta). */
 export const emptySession = (): SessionChat => ({
   byChannel: {},
@@ -111,7 +125,7 @@ function makeId(): string {
 
 /** Lê o estado de um canal específico, ou um canal vazio se ainda não existir. */
 function getChannel(session: SessionChat, channel: string): ChannelChat {
-  return session.byChannel[channel] ?? emptyChannel();
+  return session.byChannel[channel] ?? EMPTY_CHANNEL;
 }
 
 /** Substitui um canal dentro de uma sessão, retornando uma nova SessionChat. */
@@ -137,7 +151,7 @@ export function selectChannel(
   channel: string,
 ): ChannelChat {
   const session = bySession[sessionId];
-  return session ? getChannel(session, channel) : emptyChannel();
+  return session ? getChannel(session, channel) : EMPTY_CHANNEL;
 }
 
 export const useBacklogChatStore = create<BacklogChatState>((set) => ({
