@@ -75,11 +75,13 @@ export function BacklogChatView({
 
   const currentVersion = proposal?.version ?? null;
 
-  // A story exibida no Sheet é resolvida da proposta CORRENTE pelo id — assim
-  // patches (ex.: novas tasks) refletem em tempo real. Cai no snapshot só se a
-  // story ainda não existir na proposta corrente. Ver ADR-0024.
+  // A story exibida no Sheet é resolvida da proposta CORRENTE — assim patches
+  // (ex.: novas tasks) refletem em tempo real, sem depender de F5. Casa primeiro
+  // pelo id estável; se a IA reemitir a proposta com id novo, cai no título; por
+  // último usa o snapshot capturado no clique. Ver ADR-0024.
   const openStory: BacklogProposalStory | null = openStorySnapshot
     ? (proposal?.stories.find((s) => s.id === openStorySnapshot.id) ??
+      proposal?.stories.find((s) => s.title === openStorySnapshot.title) ??
       openStorySnapshot)
     : null;
 
