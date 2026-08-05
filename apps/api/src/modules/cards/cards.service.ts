@@ -247,14 +247,28 @@ export class CardsService {
         taskColumnId = todo?.id;
       }
 
+      // #2: garantir que toda STORY nasça numa coluna do board. Se o POST não
+      // informou columnId (ex.: apply do backlog-chat), cai em "Backlog" — do
+      // contrário a story fica com boardColumnId=null e não renderiza em nenhuma
+      // coluna do board. O EPIC segue SEM coluna: seu status é derivado das
+      // stories filhas (invariante de domínio), então nunca ocupa coluna.
+      let boardColumnId = dto.type === 'story' || dto.type === 'epic' ? columnId : undefined;
+      if (dto.type === 'story' && !boardColumnId) {
+        const backlog = await tx.column.findFirst({
+          where: { boardId: dto.boardId, isTaskColumn: false, title: 'Backlog' },
+          select: { id: true },
+        });
+        boardColumnId = backlog?.id;
+      }
+
       // Posição = fim da coluna alvo.
       const position =
         dto.type === 'task'
           ? taskColumnId
             ? await tx.card.count({ where: { taskColumnId } })
             : 0
-          : columnId
-            ? await tx.card.count({ where: { boardColumnId: columnId } })
+          : boardColumnId
+            ? await tx.card.count({ where: { boardColumnId } })
             : 0;
 
       return tx.card.create({
@@ -272,7 +286,7 @@ export class CardsService {
           ...(dto.aiNotes !== undefined ? { aiNotes: dto.aiNotes } : {}),
           ...(dto.type === 'task'
             ? { taskColumnId }
-            : { boardColumnId: columnId }),
+            : { boardColumnId }),
         },
       });
     });
