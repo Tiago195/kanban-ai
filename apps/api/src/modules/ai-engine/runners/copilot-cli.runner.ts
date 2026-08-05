@@ -45,7 +45,17 @@ export class CopilotCliRunner implements AgentRunner {
       stdio: ['pipe', 'pipe', 'pipe'],
       // Modelo resolvido por-card injetado como COPILOT_MODEL — o adapter o
       // respeita e força `--model <id>` explícito no Copilot CLI.
-      env: input.model ? { ...process.env, COPILOT_MODEL: input.model } : process.env,
+      // cliSessionId injetado como COPILOT_SESSION_ID — o adapter o traduz em
+      // `--session-id <id>`, dando memória e resiliência HITL a restart
+      // (retoma a sessão persistida em disco). Ver ADR-0022.
+      env:
+        input.model || input.cliSessionId
+          ? {
+              ...process.env,
+              ...(input.model ? { COPILOT_MODEL: input.model } : {}),
+              ...(input.cliSessionId ? { COPILOT_SESSION_ID: input.cliSessionId } : {}),
+            }
+          : process.env,
     });
 
     return this.consume(child, input, plan.stdinPrompt);
@@ -60,6 +70,11 @@ export class CopilotCliRunner implements AgentRunner {
       let result: AgentRunResult | null = null;
       let settled = false;
       let idleTimer: NodeJS.Timeout | null = null;
+      // Enquanto uma pergunta HITL está pendente (aguardando resposta humana), o
+      // idle timeout de stdout NÃO se aplica: o subprocesso one-shot já encerrou
+      // e o humano pode levar minutos para responder. O tempo de espera é
+      // governado pelo `hitlTimeoutMs` (em `waitForAnswer`), não por este timer.
+      let hitlPending = false;
       // Serializa o processamento das linhas para preservar ordem quando há
       // await (HITL bloqueia até a resposta chegar).
       let queue: Promise<void> = Promise.resolve();
@@ -96,6 +111,9 @@ export class CopilotCliRunner implements AgentRunner {
 
       const resetIdle = () => {
         if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = null;
+        // Suspenso durante HITL: não rearmar enquanto aguardamos resposta humana.
+        if (hitlPending) return;
         idleTimer = setTimeout(() => {
           kill();
           finish(() =>
@@ -107,6 +125,18 @@ export class CopilotCliRunner implements AgentRunner {
       };
       resetIdle();
 
+      // Handlers para a camada de evento pausar/retomar o idle timer ao redor da
+      // espera HITL (evita matar a iteração enquanto o humano decide).
+      const suspendIdle = () => {
+        hitlPending = true;
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = null;
+      };
+      const resumeIdle = () => {
+        hitlPending = false;
+        resetIdle();
+      };
+
       const rl = readline.createInterface({ input: child.stdout });
 
       rl.on('line', (line) => {
@@ -116,7 +146,7 @@ export class CopilotCliRunner implements AgentRunner {
         queue = queue.then(() =>
           this.handleEvent(event, input, child, (r) => {
             result = r;
-          }),
+          }, { suspendIdle, resumeIdle }),
         );
         // Uma falha no processamento (ex.: HITL abortado/substituído/timeout)
         // não pode virar unhandled rejection — encerra a iteração limpando o
@@ -178,6 +208,7 @@ export class CopilotCliRunner implements AgentRunner {
     input: AgentRunInput,
     child: ChildProcessWithoutNullStreams,
     setResult: (r: AgentRunResult) => void,
+    idle: { suspendIdle: () => void; resumeIdle: () => void },
   ): Promise<void> {
     switch (event.kind) {
       case 'thought':
@@ -189,17 +220,25 @@ export class CopilotCliRunner implements AgentRunner {
           this.logger.warn(`pergunta ignorada (sem onQuestion): ${event.prompt}`);
           return;
         }
-        const answer = await input.onQuestion({
-          id: event.id,
-          prompt: event.prompt,
-          options: event.options,
-        });
-        // Escreve a resposta no stdin da MESMA sessão → a CLI retoma (quando o
-        // runner é interativo). No modelo one-shot do Copilot CLI o processo já
-        // encerrou; o write é inofensivo (stdin drenado) e a resposta é
-        // reinjetada no prompt da PRÓXIMA iteração via handoff/lastro.
-        if (child.stdin.writable) {
-          child.stdin.write(answer.endsWith('\n') ? answer : `${answer}\n`);
+        // Suspende o idle timeout de stdout durante a espera HITL: o humano pode
+        // levar minutos e o subprocesso one-shot já encerrou. O `hitlTimeoutMs`
+        // (em waitForAnswer) é quem limita essa espera.
+        idle.suspendIdle();
+        try {
+          const answer = await input.onQuestion({
+            id: event.id,
+            prompt: event.prompt,
+            options: event.options,
+          });
+          // Escreve a resposta no stdin da MESMA sessão → a CLI retoma (quando o
+          // runner é interativo). No modelo one-shot do Copilot CLI o processo já
+          // encerrou; o write é inofensivo (stdin drenado) e a resposta é
+          // reinjetada no prompt da PRÓXIMA iteração via handoff/lastro.
+          if (child.stdin.writable) {
+            child.stdin.write(answer.endsWith('\n') ? answer : `${answer}\n`);
+          }
+        } finally {
+          idle.resumeIdle();
         }
         return;
       }
@@ -208,9 +247,11 @@ export class CopilotCliRunner implements AgentRunner {
           detail: event.detail,
           summary: event.summary,
           dodTouched: event.dodTouched,
+          proposedDod: event.proposedDod,
           affectedFlows: event.affectedFlows,
           nextStep: event.nextStep,
           done: event.done,
+          evidence: event.evidence,
         });
         return;
     }

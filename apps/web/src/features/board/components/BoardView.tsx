@@ -15,10 +15,12 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { cleanChatText } from "@kanban-ai/shared";
 import type { ExecState, StoryPoints } from "@kanban-ai/shared";
 
 import { useCardAssignees } from "@/features/assignees";
-import { useAgentChat, useAutoPlay, useLoopState, useStepLoop } from "@/features/ai-engine";
+import { ChatPanel, useAgentChat, useAutoPlay, useLoopState, useStepLoop } from "@/features/ai-engine";
+import type { ChatPanelMessage } from "@/features/ai-engine";
 import { useAgentChatStore } from "@/features/ai-engine/services/agentChatStore";
 import { useBoard, useCards, useCreateCard, useDeleteCard, useModels, useMoveCard, usePrimaryBoardId } from "@/features/board/hooks";
 import { useBoardUiStore } from "@/features/board/services";
@@ -1525,91 +1527,38 @@ function TaskLoopControls({ task, boardId }: { task: ApiCardDetails; boardId: st
 function TaskChat({ task }: { task: ApiCardDetails }) {
   const storyId = task.parentId;
   const { messages, pending, isAnswering, answer } = useAgentChat(task.id, storyId);
-  const [draft, setDraft] = useState("");
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, pending]);
-
-  const submit = () => {
-    const text = draft.trim();
-    if (!text || !pending) return;
-    answer(text);
-    setDraft("");
-  };
-
   const streaming = useAgentChatStore((s) => Boolean(s.byTask[task.id]?.streaming));
   const thinking = streaming && !pending;
+
+  // Mapeia o transcript do agente (domínio) para o shape genérico do ChatPanel,
+  // resolvendo phase meta e o rótulo de "pensando" aqui — o painel é agnóstico.
+  const panelMessages: ChatPanelMessage[] = messages.map((msg) => ({
+    id: msg.id,
+    role: msg.role,
+    text: msg.text,
+    kind: msg.kind === "thought" ? "pensando" : undefined,
+    phase: msg.phase ? PHASE_META[msg.phase] ?? null : null,
+  }));
+
+  const hasOptions = Boolean(pending?.options && pending.options.length > 0);
 
   return (
     <div className="modal-section">
       <div className="modal-section-title">💬 Conversa com o agente</div>
-      <div className="agent-chat">
-        <div className="agent-chat-scroll" ref={scrollRef}>
-          {messages.length === 0 ? (
-            <div className="agent-chat-empty">
-              Sem atividade ainda. Rode uma iteração para ver o agente pensar ao vivo.
-            </div>
-          ) : null}
-          {messages.map((msg) => {
-            const phaseMeta = msg.phase ? PHASE_META[msg.phase] : undefined;
-            return (
-              <div key={msg.id} className={"chat-bubble role-" + msg.role}>
-                <div className="chat-bubble-meta">
-                  <span className="chat-role">
-                    {msg.role === "ai" ? "🤖 Agente" : msg.role === "user" ? "🧑 Você" : "⚙️ Sistema"}
-                  </span>
-                  {msg.kind === "thought" ? <span className="chat-kind">pensando</span> : null}
-                  {phaseMeta ? (
-                    <span className="chat-phase">
-                      {phaseMeta.emoji} {phaseMeta.label}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="chat-bubble-text">{msg.text}</div>
-              </div>
-            );
-          })}
-          {thinking ? (
-            <div className="chat-typing" aria-live="polite">
-              <span className="dot" />
-              <span className="dot" />
-              <span className="dot" />
-              <span className="chat-typing-label">agente digitando…</span>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="agent-chat-input">
-          {pending ? (
-            <div className="agent-chat-question-hint">O agente aguarda sua resposta.</div>
-          ) : null}
-          <div className="agent-chat-input-row">
-            <input
-              className="chat-input"
-              value={draft}
-              placeholder={pending ? "Responda ao agente…" : "Disponível quando o agente perguntar"}
-              disabled={!pending || isAnswering}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  submit();
-                }
-              }}
-            />
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={submit}
-              disabled={!pending || isAnswering || draft.trim().length === 0}
-            >
-              {isAnswering ? "Enviando…" : "Responder"}
-            </button>
-          </div>
-        </div>
-      </div>
+      <ChatPanel
+        messages={panelMessages}
+        pending={pending ? { options: pending.options } : null}
+        thinking={thinking}
+        busy={isAnswering}
+        inputMode="when-pending"
+        submitLabel="Responder"
+        busyLabel="Enviando…"
+        emptyState="Sem atividade ainda. Rode uma iteração para ver o agente pensar ao vivo."
+        disabledPlaceholder="Disponível quando o agente perguntar"
+        placeholder={hasOptions ? "Escolha acima ou escreva sua resposta…" : "Responda ao agente…"}
+        onSend={answer}
+        onQuickReply={answer}
+      />
     </div>
   );
 }
@@ -1712,8 +1661,12 @@ function TaskModal({
                     <span className="iter-idx">#{iteration.index}</span>
                     <span className="iter-agent">{relativeTime(iteration.ts)}</span>
                   </div>
-                  {iteration.summary ? <div className="iter-summary">{iteration.summary}</div> : null}
-                  {iteration.detail ? <div className="iter-detail">{iteration.detail}</div> : null}
+                  {iteration.summary ? (
+                    <div className="iter-summary">{cleanChatText(iteration.summary)}</div>
+                  ) : null}
+                  {iteration.detail ? (
+                    <div className="iter-detail">{cleanChatText(iteration.detail)}</div>
+                  ) : null}
                 </div>
               );
             })}

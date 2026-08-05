@@ -39,6 +39,11 @@ export class MockAgentRunner implements AgentRunner {
           summary: 'Analisei escopo, arquivos e efeitos colaterais.',
           nextStep: 'Implementar a mudança conforme a análise.',
           affectedFlows: this.buildAffectedFlows(ctx),
+          proposedDod: [
+            `Implementação atende ao objetivo da task "${ctx.taskTitle}"`,
+            'Código compila (build) sem erros',
+            'Fluxos afetados validados sem regressão',
+          ],
         });
       case 'implementation':
         return this.result({
@@ -76,6 +81,7 @@ export class MockAgentRunner implements AgentRunner {
     nextStep: string;
     done?: boolean;
     affectedFlows?: { name: string; files: string[]; note?: string }[];
+    proposedDod?: string[];
   }): Promise<AgentRunResult> {
     return Promise.resolve({
       detail: partial.detail,
@@ -84,6 +90,7 @@ export class MockAgentRunner implements AgentRunner {
       nextStep: partial.nextStep,
       done: partial.done ?? false,
       ...(partial.affectedFlows ? { affectedFlows: partial.affectedFlows } : {}),
+      ...(partial.proposedDod ? { proposedDod: partial.proposedDod } : {}),
     });
   }
 

@@ -30,7 +30,12 @@ ai-engine/
   `running|idle|dead`. **Interface plugável** (ponto de extensão para BullMQ+Redis).
 - **`Orchestrator`**: `onStoryEnterInProgress(storyId)`, `stop(storyId, mode)`,
   `reconcileOnBoot()`.
-- **`ValidationRunner`**: valida os `affectedFlows` quando o DOD fecha.
+- **`ValidationRunner`**: valida os `affectedFlows` quando o DOD fecha. Além das
+  checagens estruturais, roda **validação empírica real** (#1) — executa os scripts
+  do projeto-alvo (`test`/`build`/`lint`) no worktree isolado (`cwd`) via `npm run`
+  e verifica (#7) que os arquivos declarados existem no worktree; qualquer falha
+  vira `problem` → task derivada. Depende de `WorkspaceService` + `APP_CONFIG`
+  (configs `AGENT_VALIDATION_*` / `AGENT_VERIFY_FLOW_FILES`).
 - **Loop profiles**: `resolveLoopProfile(labelProfileId)` com fallback `__default`.
 
 ## Invariantes (NUNCA violar)
@@ -51,9 +56,22 @@ ai-engine/
 
 ## Estado atual
 
-**Stub com contratos definidos.** `orchestrator.ts` tem TODOs para: `runIteration`,
-retomada pelo watchdog, gate de DOD → validação, e criação de task derivada. Ao
-implementar, remova os TODOs e mantenha este arquivo em dia.
+**Loop engine implementado** com validação empírica real. Melhorias recentes no
+contrato de iteração:
+
+- **Histórico completo (#3)**: `buildContext`/`buildPrompt` injetam TODAS as
+  iterações anteriores da task (detalhe completo só da última; demais resumidas).
+- **1 DOD por iteração (#4)**: o código trunca `dodTouched` para no máximo 1 id
+  (menor `position` do DOD); excedente é ignorado e logado.
+- **Verificação antes de `done` (#6)**: o prompt exige que a AI rode os checks e
+  preencha `evidence`. Novo campo `evidence?: string` no contrato de saída
+  (`AgentRunResult` / `KANBAN_RESULT` / coluna `Iteration.evidence`).
+- **Telemetria (#8)**: `Iteration` ganhou `durationMs`, `inputTokens`,
+  `outputTokens`, `outcome` (todos nullable, migration `iteration_telemetry`).
+  Endpoint `GET /cards/:id/loop/metrics` agrega métricas por story
+  (`Orchestrator.computeStoryMetrics`).
+
+Ao mudar esses contratos, mantenha este arquivo em dia.
 
 ## Como testar
 

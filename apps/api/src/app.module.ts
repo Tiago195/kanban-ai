@@ -11,6 +11,7 @@ import { LoopProfilesModule } from './modules/loop-profiles/loop-profiles.module
 import { AssigneesModule } from './modules/assignees/assignees.module';
 import { ModelsModule } from './modules/models/models.module';
 import { AiEngineModule } from './modules/ai-engine/ai-engine.module';
+import { BacklogChatModule } from './modules/backlog-chat/backlog-chat.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { AiEngineModule } from './modules/ai-engine/ai-engine.module';
     AssigneesModule,
     ModelsModule,
     AiEngineModule,
+    BacklogChatModule,
   ],
 })
 export class AppModule {}

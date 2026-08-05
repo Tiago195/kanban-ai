@@ -1,6 +1,6 @@
 # ADR-0018 — Estado `awaiting-input` mantido in-process (sem migration)
 
-**Status:** Aceito
+**Status:** Aceito (parcialmente superado por [ADR-0022](0022-hitl-survives-restart-via-cli-session-id.md) quanto à sobrevivência a restart)
 
 ## Contexto
 

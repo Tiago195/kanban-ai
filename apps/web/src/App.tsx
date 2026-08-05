@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Routes, Route, useNavigate, useParams } from "react-router-dom";
 
 import type { IterationPhase } from "@kanban-ai/shared";
 
@@ -18,6 +19,7 @@ import {
   useUpdateLoopProfile,
 } from "@/features/board";
 import { useRealtime } from "@/features/realtime";
+import { BacklogChatView } from "@/features/backlog-chat";
 import { Toast } from "@/shared/components/Toast";
 import { getHealth } from "@/shared/services/apiClient";
 import { showToast } from "@/shared/services/toastStore";
@@ -56,8 +58,7 @@ export default function App() {
   const filters = useBoardUiStore((state) => state.filters);
   const setFilters = useBoardUiStore((state) => state.setFilters);
 
-  const [agentsOpen, setAgentsOpen] = useState(false);
-  const [loopsOpen, setLoopsOpen] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     getHealth()
@@ -122,7 +123,7 @@ export default function App() {
             value={filters.q}
             onChange={(event) => setFilters({ q: event.target.value })}
           />
-          <select
+          {/* <select
             className="filter-select"
             aria-label="Filtrar por tipo"
             value={filters.type}
@@ -131,7 +132,7 @@ export default function App() {
             <option value="">Histórias e Tasks</option>
             <option value="story">Só Histórias</option>
             <option value="task">Só Tasks</option>
-          </select>
+          </select> */}
           <select
             className="filter-select"
             aria-label="Filtrar por label"
@@ -161,8 +162,16 @@ export default function App() {
           <button
             className="kb-btn kb-btn-ghost"
             type="button"
+            title="Criar épicos e histórias conversando com a IA"
+            onClick={() => navigate("/backlog-chat")}
+          >
+            ✨ Criar backlog
+          </button>
+          <button
+            className="kb-btn kb-btn-ghost"
+            type="button"
             title="Gerenciar agentes responsáveis"
-            onClick={() => setAgentsOpen(true)}
+            onClick={() => navigate("/agents")}
           >
             🤖 Agentes
           </button>
@@ -170,7 +179,7 @@ export default function App() {
             className="kb-btn kb-btn-ghost"
             type="button"
             title="Gerenciar perfis de loop das AIs"
-            onClick={() => setLoopsOpen(true)}
+            onClick={() => navigate("/loops")}
           >
             🔁 Loops
           </button>
@@ -242,11 +251,39 @@ export default function App() {
 
       <Toast />
 
-      {agentsOpen ? (
-        <AgentsModal boardId={boardId} onClose={() => setAgentsOpen(false)} />
-      ) : null}
-      {loopsOpen ? <LoopsModal boardId={boardId} onClose={() => setLoopsOpen(false)} /> : null}
+      <Routes>
+        <Route
+          path="/agents"
+          element={<AgentsModal boardId={boardId} onClose={() => navigate("/")} />}
+        />
+        <Route
+          path="/loops"
+          element={<LoopsModal boardId={boardId} onClose={() => navigate("/")} />}
+        />
+        <Route path="/backlog-chat" element={<BacklogChatRoute boardId={boardId} />} />
+        <Route path="/backlog-chat/:sessionId" element={<BacklogChatRoute boardId={boardId} />} />
+      </Routes>
     </div>
+  );
+}
+
+/**
+ * Ponte entre a rota e o `BacklogChatView`. Lê o `:sessionId` da URL (F5-safe:
+ * o histórico é reidratado do backend) e navega para a URL com id assim que a
+ * sessão é criada, de modo que o reload reabra a MESMA conversa.
+ */
+function BacklogChatRoute({ boardId }: { boardId: string | null }) {
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const navigate = useNavigate();
+  return (
+    <BacklogChatView
+      boardId={boardId}
+      routeSessionId={sessionId ?? null}
+      onSessionCreated={(id) => navigate(`/backlog-chat/${id}`, { replace: true })}
+      onSelectSession={(id) => navigate(`/backlog-chat/${id}`)}
+      onNewSession={() => navigate("/backlog-chat")}
+      onClose={() => navigate("/")}
+    />
   );
 }
 
@@ -257,6 +294,8 @@ function AgentsModal({ boardId, onClose }: { boardId: string | null; onClose: ()
   const modelsQuery = useModels();
   const setBoardModel = useSetBoardModel(boardId);
   const [name, setName] = useState("");
+  const [modelId, setModelId] = useState("");
+  const [instructions, setInstructions] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -267,10 +306,16 @@ function AgentsModal({ boardId, onClose }: { boardId: string | null; onClose: ()
     const trimmed = name.trim();
     if (!trimmed || createAssignee.isPending) return;
     createAssignee.mutate(
-      { name: trimmed },
+      {
+        name: trimmed,
+        model: modelId || undefined,
+        instructions: instructions.trim() || undefined,
+      },
       {
         onSuccess: () => {
           setName("");
+          setModelId("");
+          setInstructions("");
           showToast("Agente criado");
         },
         onError: () => showToast("Falha ao criar agente"),
@@ -336,9 +381,24 @@ function AgentsModal({ boardId, onClose }: { boardId: string | null; onClose: ()
                   <div
                     key={assignee.id}
                     className="field-row"
-                    style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}
+                    style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}
                   >
-                    <span>🤖 {assignee.name}</span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <span>🤖 {assignee.name}</span>
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                        🧠 {labelFor(assignee.model) === "—" ? "Default do quadro" : labelFor(assignee.model)}
+                      </span>
+                      {assignee.instructions ? (
+                        <span
+                          style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "pre-wrap" }}
+                          title={assignee.instructions}
+                        >
+                          📝 {assignee.instructions.length > 80
+                            ? `${assignee.instructions.slice(0, 80)}…`
+                            : assignee.instructions}
+                        </span>
+                      ) : null}
+                    </div>
                     <button
                       className="kb-btn kb-btn-danger kb-btn-sm"
                       onClick={() => {
@@ -356,7 +416,8 @@ function AgentsModal({ boardId, onClose }: { boardId: string | null; onClose: ()
               )}
             </div>
             <div className="modal-section">
-              <div className="field-row" style={{ gap: 8 }}>
+              <div className="modal-section-title">➕ Novo agente</div>
+              <div className="field-row" style={{ gap: 8, marginBottom: 8 }}>
                 <input
                   ref={inputRef}
                   className="card-title-input"
@@ -370,6 +431,30 @@ function AgentsModal({ boardId, onClose }: { boardId: string | null; onClose: ()
                     }
                   }}
                 />
+              </div>
+              <select
+                className="card-desc-input"
+                value={modelId}
+                disabled={modelsQuery.isLoading}
+                style={{ marginBottom: 8 }}
+                onChange={(event) => setModelId(event.target.value)}
+              >
+                <option value="">Usar default do quadro ({labelFor(effectiveDefault)})</option>
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <textarea
+                className="card-desc-input"
+                value={instructions}
+                placeholder="Instruções do agente (AGENTS.md): como ele deve agir, foco, regras…"
+                rows={4}
+                style={{ marginBottom: 8, resize: "vertical", fontFamily: "inherit" }}
+                onChange={(event) => setInstructions(event.target.value)}
+              />
+              <div className="field-row" style={{ justifyContent: "flex-end" }}>
                 <button
                   className="kb-btn kb-btn-primary"
                   onClick={submit}

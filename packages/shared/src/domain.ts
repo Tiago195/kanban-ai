@@ -103,6 +103,8 @@ export interface Assignee {
   name: string;
   /** Modelo/agent preferido para este assignee (ex.: 'opus', 'gpt'). */
   model: string | null;
+  /** "AGENTS.md" do agent: instruções/prompt de sistema que guiam o loop. */
+  instructions: string;
 }
 
 /**
@@ -193,8 +195,10 @@ export type AgentChatRole = 'ai' | 'user' | 'system';
 
 /**
  * Mensagem do transcript/chat de uma task. Acumula o streaming da AI, as
- * respostas do humano (HITL) e avisos de sistema. Vive num buffer reativo no
- * front (não é persistido como Iteration).
+ * respostas do humano (HITL) e avisos de sistema.
+ *
+ * É **persistida** no backend (model `AgentMessage`) e reidratada ao abrir a
+ * task; o buffer reativo do front (agentChatStore) é apenas o espelho ao vivo.
  */
 export interface AgentChatMessage {
   id: string;
@@ -204,6 +208,10 @@ export interface AgentChatMessage {
   /** Fase da iteração à qual a mensagem pertence, quando conhecida. */
   phase?: IterationPhase;
   text: string;
+  /** Vincula a pergunta (role=ai) e a resposta (role=user) do mesmo par HITL. */
+  questionId?: string;
+  /** Opções de resposta rápida da pergunta HITL (quick replies), quando houver. */
+  options?: string[];
   ts: number;
 }
 

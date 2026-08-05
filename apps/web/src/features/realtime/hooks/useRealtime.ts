@@ -4,6 +4,7 @@ import type { ServerEvent } from "@kanban-ai/shared";
 
 import { queryKeys } from "@/features/board/services";
 import { useAgentChatStore } from "@/features/ai-engine/services/agentChatStore";
+import { useBacklogChatStore } from "@/features/backlog-chat/services/backlogChatStore";
 import { WsClient } from "@/shared/services/wsClient";
 
 export type ConnectionStatus = "connecting" | "open" | "closed";
@@ -59,6 +60,41 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
           return;
         }
 
+        // ── Chat de backlog: buffer reativo próprio, SEM invalidar cache ──
+        // Eventos de canal (chunk/question/answered) carregam `channel`. A
+        // proposta é session-level (sem canal). Ver ADR-0023.
+        if (event.type === "backlog.chunk") {
+          useBacklogChatStore.getState().appendChunk({
+            sessionId: event.sessionId,
+            channel: event.channel,
+            kind: event.kind,
+            delta: event.delta,
+          });
+          return;
+        }
+
+        if (event.type === "backlog.question") {
+          useBacklogChatStore.getState().setQuestion({
+            sessionId: event.sessionId,
+            channel: event.channel,
+            questionId: event.questionId,
+            prompt: event.prompt,
+            options: event.options,
+            ts: Date.now(),
+          });
+          return;
+        }
+
+        if (event.type === "backlog.answered") {
+          useBacklogChatStore.getState().clearQuestion(event.sessionId, event.channel);
+          return;
+        }
+
+        if (event.type === "backlog.proposal") {
+          useBacklogChatStore.getState().setProposal(event.sessionId, event.proposal);
+          return;
+        }
+
         // #2: fim de uma iteração → desliga o indicador "agente digitando" da
         // task. (A próxima iteração religa no primeiro agent.chunk.) Feito antes
         // do guard de boardId porque o chat vive em memória.
@@ -91,6 +127,7 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
           [
             "card.updated",
             "dod.checked",
+            "dod.created",
             "label.attached",
             "label.detached",
             "assignee.attached",

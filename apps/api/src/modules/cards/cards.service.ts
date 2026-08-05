@@ -7,6 +7,8 @@ import type {
   AttachAssigneeDto,
   AttachLabelDto,
   CreateCardDto,
+  CreateCommentDto,
+  CreateDependencyDto,
   CreateDodItemDto,
   CreateFlowDto,
   MoveCardDto,
@@ -17,6 +19,7 @@ import { deriveEpicStatus, type ColumnLike } from './cards.epic-status';
 import { mapIteration, type PrismaIterationRow } from './iteration.mapper';
 import { Orchestrator } from '../ai-engine/orchestrator';
 import { ModelsService } from '../models/models.service';
+import { BUILTIN_LOOP_PROFILES } from '../ai-engine/loop-profiles/loop-profiles';
 
 /** Status derivado exposto na leitura, por epic. */
 export interface EpicStatusView {
@@ -180,6 +183,27 @@ export class CardsService {
   }
 
   /**
+   * Valida um `loopType` contra os profiles builtin e os LoopProfile custom do
+   * board. Lança BadRequestException listando os válidos quando não encontrado.
+   */
+  private async validateLoopType(boardId: string, loopType: string): Promise<void> {
+    if (BUILTIN_LOOP_PROFILES[loopType]) return;
+    const custom = await this.prisma.loopProfile.findUnique({
+      where: { boardId_profileId: { boardId, profileId: loopType } },
+    });
+    if (custom) return;
+    const builtinIds = Object.keys(BUILTIN_LOOP_PROFILES);
+    const customProfiles = await this.prisma.loopProfile.findMany({
+      where: { boardId },
+      select: { profileId: true },
+    });
+    const validIds = [...new Set([...builtinIds, ...customProfiles.map((p) => p.profileId)])];
+    throw new BadRequestException(
+      `loopType '${loopType}' inválido. Válidos: ${validIds.join(', ')}`,
+    );
+  }
+
+  /**
    * Cria um card aplicando as invariantes de domínio.
    * INVARIANTE: task só pode ser criada em coluna Backlog/To Do.
    */
@@ -193,6 +217,15 @@ export class CardsService {
           `Tasks só podem ser criadas em: ${TASK_CREATION_COLUMNS.join(', ')}`,
         );
       }
+    }
+
+    // INVARIANTE: task não tem story points (só story/epic os têm).
+    if (dto.type === 'task' && dto.points != null) {
+      throw new BadRequestException('task não tem story points; use points apenas em story/epic');
+    }
+
+    if (dto.loopType !== undefined) {
+      await this.validateLoopType(dto.boardId, dto.loopType);
     }
 
     const card = await this.prisma.$transaction(async (tx) => {
@@ -234,6 +267,7 @@ export class CardsService {
           points: dto.points ?? null,
           parentId: dto.parentId ?? null,
           position,
+          ...(dto.loopType !== undefined ? { loopType: dto.loopType } : {}),
           ...(dto.type === 'task'
             ? { taskColumnId }
             : { boardColumnId: columnId }),
@@ -295,6 +329,14 @@ export class CardsService {
     const result = await this.prisma.$transaction(async (tx) => {
       const card = await tx.card.findUnique({ where: { id } });
       if (!card) throw new NotFoundException('card inexistente');
+
+      // INVARIANTE: epic é derivado das stories filhas; ninguém o move
+      // diretamente (o front nem o renderiza em colunas arrastáveis).
+      if (card.type === 'epic') {
+        throw new BadRequestException(
+          'epic não pode ser movido: seu status é derivado das stories filhas',
+        );
+      }
 
       const toColumn = await tx.column.findUnique({ where: { id: dto.columnId } });
       if (!toColumn) throw new BadRequestException('coluna de destino inexistente');
@@ -420,6 +462,10 @@ export class CardsService {
       throw new BadRequestException('tasks não têm story points');
     }
 
+    if (dto.loopType !== undefined && dto.loopType !== null) {
+      await this.validateLoopType(card.boardId, dto.loopType);
+    }
+
     await this.prisma.card.update({
       where: { id },
       data: {
@@ -431,6 +477,7 @@ export class CardsService {
         ...(dto.aiProject !== undefined ? { aiProject: dto.aiProject } : {}),
         ...(dto.aiNotes !== undefined ? { aiNotes: dto.aiNotes } : {}),
         ...(dto.model !== undefined ? { model: dto.model } : {}),
+        ...(dto.loopType !== undefined ? { loopType: dto.loopType } : {}),
       },
     });
 
@@ -536,6 +583,82 @@ export class CardsService {
     if (!flow) throw new NotFoundException('flow inexistente');
     await this.prisma.affectedFlow.delete({ where: { id: flowId } });
     return this.emitFlowChanged(flow.cardId);
+  }
+
+  // ── Comments ─────────────────────────────────────────────────────────────────
+
+  /** Lista os comentários de um card (ordem cronológica). Read-only. */
+  async listComments(cardId: string) {
+    await this.assertCard(cardId);
+    return this.prisma.comment.findMany({
+      where: { cardId },
+      orderBy: { ts: 'asc' },
+    });
+  }
+
+  /**
+   * Cria um comentário num card (handoff/resumo). Emite `comment.created` para a
+   * UI reagir. `authorId` aponta um assignee (agent) ou null.
+   */
+  async addComment(cardId: string, dto: CreateCommentDto) {
+    const card = await this.assertCard(cardId);
+    const comment = await this.prisma.comment.create({
+      data: { cardId, text: dto.text, authorId: dto.authorId ?? null },
+    });
+    this.realtime.broadcast({
+      type: 'comment.created',
+      cardId,
+      parentId: card.parentId ?? null,
+    });
+    return comment;
+  }
+
+  // ── Task dependencies (grafo) ─────────────────────────────────────────────────
+
+  /**
+   * Cria uma aresta de dependência: a task do path (dependente) precisa que
+   * `dependsOnId` termine antes. Valida que ambos existem, são tasks, do mesmo
+   * board, e rejeita auto-dependência e ciclo direto (A→B e B→A).
+   */
+  async addDependency(cardId: string, dto: CreateDependencyDto) {
+    if (cardId === dto.dependsOnId) {
+      throw new BadRequestException('uma task não pode depender de si mesma');
+    }
+    const [dependent, dependsOn] = await Promise.all([
+      this.prisma.card.findUnique({ where: { id: cardId } }),
+      this.prisma.card.findUnique({ where: { id: dto.dependsOnId } }),
+    ]);
+    if (!dependent) throw new NotFoundException('task dependente inexistente');
+    if (!dependsOn) throw new NotFoundException('task de dependência inexistente');
+    if (dependent.type !== 'task' || dependsOn.type !== 'task') {
+      throw new BadRequestException('dependências só existem entre tasks');
+    }
+    if (dependent.boardId !== dependsOn.boardId) {
+      throw new BadRequestException('as tasks devem pertencer ao mesmo board');
+    }
+    const inverse = await this.prisma.taskDependency.findUnique({
+      where: { dependentId_dependsOnId: { dependentId: dto.dependsOnId, dependsOnId: cardId } },
+    });
+    if (inverse) {
+      throw new BadRequestException('dependência cíclica: a relação inversa já existe');
+    }
+
+    await this.prisma.taskDependency.upsert({
+      where: { dependentId_dependsOnId: { dependentId: cardId, dependsOnId: dto.dependsOnId } },
+      create: { dependentId: cardId, dependsOnId: dto.dependsOnId },
+      update: {},
+    });
+    return this.emitCardUpdated(cardId);
+  }
+
+  /** Remove uma aresta de dependência (idempotente). */
+  async removeDependency(cardId: string, dependsOnId: string) {
+    await this.prisma.taskDependency
+      .delete({
+        where: { dependentId_dependsOnId: { dependentId: cardId, dependsOnId } },
+      })
+      .catch(() => undefined);
+    return this.emitCardUpdated(cardId);
   }
 
   // ── helpers de emissão ───────────────────────────────────────────────────────

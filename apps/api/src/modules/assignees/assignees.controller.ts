@@ -11,7 +11,7 @@ export class AssigneesController {
   }
 
   @Post()
-  create(@Body() body: { boardId: string; name: string; model?: string }) {
+  create(@Body() body: { boardId: string; name: string; model?: string; instructions?: string }) {
     return this.assignees.create(body);
   }
 

@@ -1,4 +1,5 @@
-import { useMutation } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type { AgentChatMessage, PendingQuestion } from "@kanban-ai/shared";
 
 import { apiClient } from "@/shared/services/apiClient";
@@ -23,6 +24,20 @@ export interface UseAgentChatResult {
 export function useAgentChat(taskId: string | null, storyId: string | null): UseAgentChatResult {
   const chat = useAgentChatStore((s) => (taskId ? s.byTask[taskId] : undefined));
   const clearQuestion = useAgentChatStore((s) => s.clearQuestion);
+  const hydrate = useAgentChatStore((s) => s.hydrate);
+
+  // Reidrata o transcript persistido ao abrir a task. O store só semeia se o
+  // buffer ainda estiver vazio, então chunks ao vivo têm precedência.
+  const { data: history } = useQuery({
+    queryKey: ["agent-chat", taskId],
+    queryFn: () => apiClient.getAgentChatHistory(taskId as string),
+    enabled: Boolean(taskId),
+    staleTime: Infinity,
+  });
+
+  useEffect(() => {
+    if (taskId && history) hydrate(taskId, history);
+  }, [taskId, history, hydrate]);
 
   const answerMutation = useMutation({
     mutationFn: (text: string) => {

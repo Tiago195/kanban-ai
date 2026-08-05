@@ -10,8 +10,15 @@ export class AssigneesService {
     return this.prisma.assignee.findMany({ where: boardId ? { boardId } : undefined });
   }
 
-  create(data: { boardId: string; name: string; model?: string }) {
-    return this.prisma.assignee.create({ data });
+  create(data: { boardId: string; name: string; model?: string; instructions?: string }) {
+    return this.prisma.assignee.create({
+      data: {
+        boardId: data.boardId,
+        name: data.name,
+        model: data.model,
+        instructions: data.instructions ?? '',
+      },
+    });
   }
 
   remove(id: string) {

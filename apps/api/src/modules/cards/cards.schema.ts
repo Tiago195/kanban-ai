@@ -15,6 +15,7 @@ export const createCardSchema = z.object({
     })
     .optional(),
   columnId: z.string().uuid().optional(),
+  loopType: z.string().min(1).optional(),
 });
 
 export type CreateCardDto = z.infer<typeof createCardSchema>;
@@ -44,6 +45,7 @@ export const updateCardSchema = z
     aiProject: z.string().optional(),
     aiNotes: z.string().optional(),
     model: z.string().nullable().optional(),
+    loopType: z.string().min(1).nullable().optional(),
   })
   .refine((o) => Object.keys(o).length > 0, { message: 'nenhum campo para atualizar' });
 
@@ -88,3 +90,25 @@ export const createFlowSchema = z.object({
 });
 
 export type CreateFlowDto = z.infer<typeof createFlowSchema>;
+
+/**
+ * Schema de criação de comentário num card. `authorId` é opcional: quando um
+ * assignee (agent) deixa um handoff/resumo, aponta o id; humano/AI externa
+ * pode omitir (null).
+ */
+export const createCommentSchema = z.object({
+  text: z.string().min(1),
+  authorId: z.string().uuid().nullable().optional(),
+});
+
+export type CreateCommentDto = z.infer<typeof createCommentSchema>;
+
+/**
+ * Schema de criação de dependência entre tasks. O card do path é o dependente
+ * (o que precisa esperar); `dependsOnId` é a task que deve terminar antes.
+ */
+export const createDependencySchema = z.object({
+  dependsOnId: z.string().uuid(),
+});
+
+export type CreateDependencyDto = z.infer<typeof createDependencySchema>;

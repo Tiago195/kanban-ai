@@ -6,6 +6,7 @@ import {
   Param,
   Post,
 } from '@nestjs/common';
+import type { AgentChatMessage } from '@kanban-ai/shared';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
 import { Orchestrator } from './orchestrator';
@@ -61,6 +62,13 @@ export class AiEngineController {
     return this.orchestrator.loopState(id);
   }
 
+  /** #8: métricas de qualidade do loop de uma story (agregadas sobre as tasks). */
+  @Get(':id/loop/metrics')
+  async metrics(@Param('id') id: string) {
+    await this.ensureStory(id);
+    return this.orchestrator.computeStoryMetrics(id);
+  }
+
   /**
    * HITL: responde à pergunta pendente de uma story (o id é o da STORY). A
    * resposta é encaminhada ao subprocesso via stdin, retomando a iteração.
@@ -71,11 +79,37 @@ export class AiEngineController {
     @Body(new ZodValidationPipe(answerSchema)) dto: AnswerDto,
   ): Promise<{ accepted: boolean }> {
     await this.ensureStory(id);
-    const accepted = this.orchestrator.answerQuestion(id, dto.questionId, dto.answer);
+    const accepted = await this.orchestrator.answerQuestion(id, dto.questionId, dto.answer);
     if (!accepted) {
       throw new NotFoundException('nenhuma pergunta pendente para essa story/questionId');
     }
     return { accepted };
+  }
+
+  /**
+   * Histórico persistido do chat de uma TASK (id = taskId). Reidrata o
+   * transcript ao abrir a task, mesclando depois com os chunks ao vivo (WS).
+   * Ordenado por `ts` ascendente para render cronológico direto.
+   */
+  @Get(':id/chat')
+  async chat(@Param('id') id: string): Promise<AgentChatMessage[]> {
+    await this.ensureTask(id);
+    const rows = await this.prisma.agentMessage.findMany({
+      where: { cardId: id },
+      orderBy: { ts: 'asc' },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      role: r.role as AgentChatMessage['role'],
+      kind: (r.kind ?? undefined) as AgentChatMessage['kind'],
+      phase: (r.phase ?? undefined) as AgentChatMessage['phase'],
+      text: r.text,
+      questionId: r.questionId ?? undefined,
+      options: Array.isArray(r.options)
+        ? (r.options as unknown[]).map((o) => String(o))
+        : undefined,
+      ts: r.ts.getTime(),
+    }));
   }
 
   private async ensureStory(id: string): Promise<void> {
@@ -86,6 +120,17 @@ export class AiEngineController {
     if (!card) throw new NotFoundException('card inexistente');
     if (card.type !== 'story') {
       throw new NotFoundException('o loop opera sobre stories');
+    }
+  }
+
+  private async ensureTask(id: string): Promise<void> {
+    const card = await this.prisma.card.findUnique({
+      where: { id },
+      select: { type: true },
+    });
+    if (!card) throw new NotFoundException('card inexistente');
+    if (card.type !== 'task') {
+      throw new NotFoundException('o chat opera sobre tasks');
     }
   }
 }

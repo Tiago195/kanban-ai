@@ -9,7 +9,7 @@ export function useCreateAssignee(boardId: string | null) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (dto: { name: string; model?: string }) =>
+    mutationFn: (dto: { name: string; model?: string; instructions?: string }) =>
       apiClient.createAssignee({ boardId: boardId as string, ...dto }),
     onSuccess: () => {
       if (!boardId) return;

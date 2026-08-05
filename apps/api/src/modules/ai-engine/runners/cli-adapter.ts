@@ -27,9 +27,13 @@ export type CliEvent =
       detail: string;
       summary: string;
       dodTouched: string[];
+      /** DOD proposto pela AI na fase de análise (opcional). */
+      proposedDod?: string[];
       affectedFlows?: { name: string; files: string[]; note?: string }[];
       nextStep: string;
       done: boolean;
+      /** #6: evidência de verificação do próprio trabalho (opcional). */
+      evidence?: string;
     };
 
 /** Como o processo deve ser spawnado. */
@@ -111,9 +115,13 @@ export class CliAdapter {
         dodTouched: Array.isArray(obj.dodTouched)
           ? obj.dodTouched.map((d) => String(d))
           : [],
+        proposedDod: Array.isArray(obj.proposedDod)
+          ? obj.proposedDod.map((d) => String(d)).filter((s) => s.trim().length > 0)
+          : undefined,
         affectedFlows: parseAffectedFlows(obj.affectedFlows),
         nextStep: str(obj.nextStep),
         done: obj.done === true,
+        evidence: str(obj.evidence) || undefined,
       };
     }
     // kind ausente/desconhecido → tratar como pensamento com o texto disponível.

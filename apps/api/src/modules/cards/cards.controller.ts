@@ -15,6 +15,8 @@ import {
   attachAssigneeSchema,
   attachLabelSchema,
   createCardSchema,
+  createCommentSchema,
+  createDependencySchema,
   createDodItemSchema,
   createFlowSchema,
   moveCardSchema,
@@ -23,6 +25,8 @@ import {
   type AttachAssigneeDto,
   type AttachLabelDto,
   type CreateCardDto,
+  type CreateCommentDto,
+  type CreateDependencyDto,
   type CreateDodItemDto,
   type CreateFlowDto,
   type MoveCardDto,
@@ -130,5 +134,33 @@ export class CardsController {
   @Delete('flows/:flowId')
   removeFlow(@Param('flowId') flowId: string) {
     return this.cards.removeFlow(flowId);
+  }
+
+  // ── Comments ──
+  @Get('cards/:id/comments')
+  listComments(@Param('id') id: string) {
+    return this.cards.listComments(id);
+  }
+
+  @Post('cards/:id/comments')
+  addComment(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(createCommentSchema)) dto: CreateCommentDto,
+  ) {
+    return this.cards.addComment(id, dto);
+  }
+
+  // ── Task dependencies ──
+  @Post('cards/:id/dependencies')
+  addDependency(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(createDependencySchema)) dto: CreateDependencyDto,
+  ) {
+    return this.cards.addDependency(id, dto);
+  }
+
+  @Delete('cards/:id/dependencies/:dependsOnId')
+  removeDependency(@Param('id') id: string, @Param('dependsOnId') dependsOnId: string) {
+    return this.cards.removeDependency(id, dependsOnId);
   }
 }

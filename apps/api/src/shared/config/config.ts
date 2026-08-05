@@ -23,6 +23,14 @@ export interface AppConfig {
     hitlTimeoutMs: number;
     /** Timeout de inatividade de stdout do subprocesso. */
     streamIdleTimeoutMs: number;
+    /** #1: habilita validação empírica (rodar scripts do projeto no worktree). */
+    validationEnabled: boolean;
+    /** #1: timeout (ms) por script de validação rodado no worktree. */
+    validationTimeoutMs: number;
+    /** #1: override opcional dos scripts a rodar (default: auto-detect test/build/lint). */
+    validationScripts: string[];
+    /** #7: verifica se os arquivos declarados em affectedFlows existem no worktree. */
+    verifyFlowFiles: boolean;
   };
 }
 
@@ -48,6 +56,13 @@ export function loadConfig(): AppConfig {
       promptMode: process.env.AGENT_CLI_PROMPT_MODE === 'arg' ? 'arg' : 'stdin',
       hitlTimeoutMs: num(process.env.AGENT_HITL_TIMEOUT_MS, 600_000),
       streamIdleTimeoutMs: num(process.env.AGENT_STREAM_IDLE_TIMEOUT_MS, 120_000),
+      validationEnabled: process.env.AGENT_VALIDATION_ENABLED !== 'false',
+      validationTimeoutMs: num(process.env.AGENT_VALIDATION_TIMEOUT_MS, 300_000),
+      validationScripts: (process.env.AGENT_VALIDATION_SCRIPTS ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+      verifyFlowFiles: process.env.AGENT_VERIFY_FLOW_FILES !== 'false',
     },
   };
 }

@@ -9,6 +9,19 @@ type CommandResult = {
   stderr: string;
 };
 
+/** #1: resultado de um script de validação rodado no worktree. */
+export interface ProjectCheckResult {
+  /** nome do script npm (test/build/lint). */
+  name: string;
+  /** o script existia no package.json e foi executado? */
+  ran: boolean;
+  /** passou? (scripts inexistentes contam como `passed` para não bloquear). */
+  passed: boolean;
+  exitCode: number | null;
+  /** stdout+stderr combinados (truncados pelo consumidor). */
+  output: string;
+}
+
 /** Erro de configuração do projeto-alvo (ex.: aiProject ausente ou inválido). */
 export class TargetProjectError extends Error {}
 
@@ -144,6 +157,74 @@ export class WorkspaceService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * #1: roda os scripts de validação disponíveis no worktree (auto-detect a
+   * partir dos `scripts` do package.json) e retorna o resultado de cada um.
+   * Nunca roda `install`; só scripts já resolvíveis. Sem shell (execFile).
+   */
+  async runProjectChecks(
+    worktreePath: string,
+    wanted: string[],
+  ): Promise<ProjectCheckResult[]> {
+    const scripts = await this.readPackageScripts(worktreePath);
+    const results: ProjectCheckResult[] = [];
+    for (const name of wanted) {
+      if (!scripts.has(name)) {
+        results.push({ name, ran: false, passed: true, exitCode: null, output: '' });
+        continue;
+      }
+      results.push(await this.runNpmScript(worktreePath, name));
+    }
+    return results;
+  }
+
+  /**
+   * #7: true se `relPath` existe DENTRO do worktree. Rejeita paths que tentam
+   * escapar do worktree (via `..` ou path absoluto) por segurança.
+   */
+  async fileExistsInWorktree(worktreePath: string, relPath: string): Promise<boolean> {
+    const base = path.resolve(worktreePath);
+    const resolved = path.resolve(base, relPath);
+    const rel = path.relative(base, resolved);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    return this.pathExists(resolved);
+  }
+
+  /** Lê os nomes de scripts do package.json do worktree (vazio se ausente). */
+  private async readPackageScripts(worktreePath: string): Promise<Set<string>> {
+    try {
+      const raw = await fs.readFile(path.join(worktreePath, 'package.json'), 'utf8');
+      const pkg = JSON.parse(raw) as { scripts?: Record<string, unknown> };
+      return new Set(Object.keys(pkg.scripts ?? {}));
+    } catch {
+      return new Set();
+    }
+  }
+
+  /** Roda `npm run <name>` no worktree com timeout; captura saída e exit code. */
+  private runNpmScript(worktreePath: string, name: string): Promise<ProjectCheckResult> {
+    const timeout = this.config.agent.validationTimeoutMs;
+    return new Promise<ProjectCheckResult>((resolve) => {
+      execFile(
+        'npm',
+        ['run', name, '--silent'],
+        { cwd: worktreePath, encoding: 'utf8', timeout, maxBuffer: 10 * 1024 * 1024 },
+        (error, stdout, stderr) => {
+          const output = `${stdout ?? ''}${stderr ?? ''}`.trim();
+          if (error) {
+            const exitCode =
+              typeof (error as { code?: unknown }).code === 'number'
+                ? (error as { code: number }).code
+                : null;
+            resolve({ name, ran: true, passed: false, exitCode, output });
+            return;
+          }
+          resolve({ name, ran: true, passed: true, exitCode: 0, output });
+        },
+      );
+    });
   }
 
   async cleanupWorktree(key: string): Promise<void> {

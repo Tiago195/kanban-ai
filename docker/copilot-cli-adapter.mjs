@@ -107,6 +107,15 @@ async function main() {
   const args = ['-p', prompt, '--allow-all', '--no-color'];
   if (MODEL) args.push('--model', MODEL);
 
+  // Session-id: quando o chamador passa COPILOT_SESSION_ID, usamos `--session-id`
+  // para que a MESMA sessão do Copilot seja retomada a cada turno. Isso dá
+  // memória conversacional real ao CLI E — crucial — faz o HITL SOBREVIVER a um
+  // restart da API: a sessão do Copilot é persistida em disco (~/.copilot), então
+  // o próximo turno resume o contexto mesmo que o processo da API tenha morrido
+  // enquanto aguardava a resposta humana.
+  const SESSION_ID = process.env.COPILOT_SESSION_ID || '';
+  if (SESSION_ID) args.push('--session-id', SESSION_ID);
+
   // Se COPILOT_BIN aponta para um script JS (ex.: o index.js do pacote montado
   // read-only), invoca via `node`; caso contrário, executa o binário direto.
   let cmd = COPILOT_BIN;
@@ -133,13 +142,42 @@ async function main() {
   heartbeat.unref?.();
 
   child.stdout.setEncoding('utf8');
+  // Filtro de streaming: os blocos de controle <<<KANBAN_QUESTION>>> e
+  // <<<KANBAN_RESULT>>> são um canal ESTRUTURADO (parseado no `close`), NÃO
+  // conteúdo para o humano. Se emitíssemos suas linhas como `output`, o
+  // transcript (persistido e reidratado no F5) mostraria o JSON/marcadores
+  // crus e quebrados por chunk. Aqui suprimimos tudo entre o marcador de
+  // abertura e o de fechamento. Buffer de linha para lidar com marcadores
+  // partidos entre chunks de stdout.
+  let lineBuf = '';
+  let insideControlBlock = false;
+  const OPEN_RE = /<<<KANBAN_(QUESTION|RESULT|BACKLOG_PATCH|BACKLOG)>>>/;
+  const CLOSE_RE = /<<<END_KANBAN_(QUESTION|RESULT|BACKLOG_PATCH|BACKLOG)>>>/;
+  const emitOutputLine = (raw) => {
+    const t = raw.trimEnd();
+    if (t.length === 0) return;
+    if (insideControlBlock) {
+      // Continua suprimindo até encontrar o fechamento (na mesma linha ou depois).
+      if (CLOSE_RE.test(t)) insideControlBlock = false;
+      return;
+    }
+    if (OPEN_RE.test(t)) {
+      // Emite só o texto ANTES do marcador de abertura (o preâmbulo do humano).
+      const before = t.split(OPEN_RE)[0].trimEnd();
+      if (before.length > 0) emit({ kind: 'output', text: before });
+      // Se o bloco abre e fecha na mesma linha, não entra em modo supressão.
+      insideControlBlock = !CLOSE_RE.test(t);
+      return;
+    }
+    emit({ kind: 'output', text: t });
+  };
   child.stdout.on('data', (d) => {
     out += d;
-    // Stream incremental: cada linha vira um `output`.
-    for (const line of String(d).split('\n')) {
-      const t = line.trimEnd();
-      if (t.length > 0) emit({ kind: 'output', text: t });
-    }
+    lineBuf += String(d);
+    const parts = lineBuf.split('\n');
+    // A última parte pode ser uma linha incompleta — guarda para o próximo chunk.
+    lineBuf = parts.pop() ?? '';
+    for (const line of parts) emitOutputLine(line);
   });
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (d) => {
@@ -161,7 +199,29 @@ async function main() {
 
   child.on('close', (code) => {
     clearInterval(heartbeat);
+    // Flush da última linha incompleta do buffer de streaming (respeitando o
+    // filtro de blocos de controle).
+    if (lineBuf.length > 0) {
+      emitOutputLine(lineBuf);
+      lineBuf = '';
+    }
     const text = out.trim();
+
+    // Ecossistema "Chat de criação de Épicos/Histórias": se a AI emitiu um
+    // bloco KANBAN_BACKLOG (proposta) ou KANBAN_BACKLOG_PATCH (refinamento
+    // cirúrgico), emitimos o evento estruturado correspondente. Nesses casos o
+    // turno de backlog não usa `result` (o BacklogCliRunner consome proposal/
+    // patch/question) — então retornamos sem emitir result.
+    const patch = extractKanbanBacklogPatch(text);
+    if (patch) {
+      emit({ kind: 'patch', patch });
+      return;
+    }
+    const proposal = extractKanbanBacklog(text);
+    if (proposal) {
+      emit({ kind: 'proposal', proposal });
+      return;
+    }
 
     // #6: canal ESTRUTURADO de HITL. Se a AI emitiu um bloco KANBAN_QUESTION,
     // ela precisa de decisão humana ANTES de continuar. Emitimos o evento
@@ -267,6 +327,54 @@ function extractKanbanQuestion(text) {
     const prompt = typeof obj.prompt === 'string' ? obj.prompt.trim() : '';
     if (!prompt) return null;
     return { prompt, options: Array.isArray(obj.options) ? obj.options : undefined };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extrai o bloco de PROPOSTA de backlog (Epic + Stories):
+ *
+ *   <<<KANBAN_BACKLOG>>>
+ *   { "version": 1, "epic": {...}, "stories": [...], "rationale": "..." }
+ *   <<<END_KANBAN_BACKLOG>>>
+ *
+ * Retorna o objeto proposta ou null.
+ */
+function extractKanbanBacklog(text) {
+  const m = text.match(/<<<KANBAN_BACKLOG>>>([\s\S]*?)<<<END_KANBAN_BACKLOG>>>/);
+  if (!m) return null;
+  let body = m[1].trim();
+  body = body.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  try {
+    const obj = JSON.parse(body);
+    if (!obj || typeof obj !== 'object' || !obj.epic) return null;
+    return obj;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extrai o bloco de PATCH cirúrgico de backlog:
+ *
+ *   <<<KANBAN_BACKLOG_PATCH>>>
+ *   { "baseVersion": 1, "ops": [...] }
+ *   <<<END_KANBAN_BACKLOG_PATCH>>>
+ *
+ * Retorna o objeto patch ou null.
+ */
+function extractKanbanBacklogPatch(text) {
+  const m = text.match(
+    /<<<KANBAN_BACKLOG_PATCH>>>([\s\S]*?)<<<END_KANBAN_BACKLOG_PATCH>>>/,
+  );
+  if (!m) return null;
+  let body = m[1].trim();
+  body = body.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  try {
+    const obj = JSON.parse(body);
+    if (!obj || typeof obj !== 'object' || !Array.isArray(obj.ops)) return null;
+    return obj;
   } catch {
     return null;
   }

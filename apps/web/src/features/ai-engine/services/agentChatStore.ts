@@ -43,6 +43,13 @@ interface AgentChatState {
   clearQuestion: (taskId: string, answer?: string) => void;
   /** #2: liga/desliga o indicador de "agente digitando" da task. */
   setStreaming: (taskId: string, streaming: boolean) => void;
+  /**
+   * Reidrata o transcript de uma task a partir do histórico persistido. Só
+   * semeia se o buffer em memória ainda não tem mensagens (evita sobrescrever
+   * chunks ao vivo que chegaram antes do fetch). Deriva `pending` da última
+   * pergunta (role=ai com questionId) sem resposta correspondente.
+   */
+  hydrate: (taskId: string, history: AgentChatMessage[]) => void;
   /** Zera o transcript de uma task. */
   reset: (taskId: string) => void;
 }
@@ -133,6 +140,36 @@ export const useAgentChatStore = create<AgentChatState>((set) => ({
       const chat = state.byTask[taskId] ?? emptyChat();
       return {
         byTask: { ...state.byTask, [taskId]: { ...chat, streaming } },
+      };
+    }),
+
+  hydrate: (taskId, history) =>
+    set((state) => {
+      const existing = state.byTask[taskId];
+      // Não sobrescreve um buffer que já recebeu atividade ao vivo.
+      if (existing && existing.messages.length > 0) return state;
+
+      const answeredQuestionIds = new Set(
+        history.filter((m) => m.role === "user" && m.questionId).map((m) => m.questionId),
+      );
+      let pending: PendingQuestion | null = null;
+      for (const m of history) {
+        if (m.role === "ai" && m.questionId && !answeredQuestionIds.has(m.questionId)) {
+          pending = {
+            taskId,
+            questionId: m.questionId,
+            prompt: m.text,
+            options: m.options,
+            ts: m.ts,
+          };
+        }
+      }
+
+      return {
+        byTask: {
+          ...state.byTask,
+          [taskId]: { messages: history, pending, streaming: false },
+        },
       };
     }),
 

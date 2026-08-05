@@ -8,6 +8,7 @@
 
 import type { AgentSessionState, ExecState } from './enums';
 import type { AffectedFlow, Card, Iteration } from './domain';
+import type { BacklogProposal } from './backlog-chat';
 
 /** Status derivado de um epic a partir das stories filhas. */
 export type EpicDerivedStatus = 'todo' | 'inprogress' | 'done';
@@ -109,6 +110,18 @@ export interface DodCheckedEvent {
   done: boolean;
 }
 
+/**
+ * O DOD de uma task foi criado/populado (ex.: na fase de análise do loop, quando
+ * a task ainda não tinha checklist). A UI deve recarregar o card para exibir os
+ * novos itens.
+ */
+export interface DodCreatedEvent {
+  type: 'dod.created';
+  cardId: string;
+  /** Quantidade de itens criados nesta operação. */
+  count: number;
+}
+
 /** Uma nova iteração foi anexada ao diário de uma task. */
 export interface IterationAppendedEvent {
   type: 'iteration.appended';
@@ -188,6 +201,50 @@ export interface AgentAnsweredEvent {
   questionId: string;
 }
 
+/**
+ * Chunk incremental do chat de backlog (descoberta/redação da proposta).
+ * Espelha `agent.chunk`, mas keyed por sessão de conversa.
+ */
+export interface BacklogChunkEvent {
+  type: 'backlog.chunk';
+  sessionId: string;
+  /** Canal (thread) alvo: `main` ou `story:<id>`. Ver ADR-0023. */
+  channel: string;
+  role: 'ai' | 'system';
+  kind?: 'thought' | 'output';
+  delta: string;
+}
+
+/** A AI fez uma pergunta de refinamento (descoberta) e aguarda resposta. */
+export interface BacklogQuestionEvent {
+  type: 'backlog.question';
+  sessionId: string;
+  /** Canal (thread) onde a pergunta foi feita. Ver ADR-0023. */
+  channel: string;
+  questionId: string;
+  prompt: string;
+  options?: string[];
+}
+
+/** A pergunta de refinamento foi respondida — a conversa retoma. */
+export interface BacklogAnsweredEvent {
+  type: 'backlog.answered';
+  sessionId: string;
+  /** Canal (thread) da pergunta respondida. Ver ADR-0023. */
+  channel: string;
+  questionId: string;
+}
+
+/**
+ * A AI emitiu (ou atualizou via patch) a proposta de backlog. Carrega a versão
+ * corrente completa; o front renderiza/atualiza o cartão de proposta in-place.
+ */
+export interface BacklogProposalEvent {
+  type: 'backlog.proposal';
+  sessionId: string;
+  proposal: BacklogProposal;
+}
+
 /** Keep-alive. */
 export interface PingEvent {
   type: 'ping';
@@ -223,6 +280,7 @@ export type ServerEvent =
   | EpicStatusDerivedEvent
   | TaskStateChangedEvent
   | DodCheckedEvent
+  | DodCreatedEvent
   | IterationAppendedEvent
   | StoryEnteredInProgressEvent
   | TaskDerivedEvent
@@ -232,6 +290,10 @@ export type ServerEvent =
   | AgentChunkEvent
   | AgentQuestionEvent
   | AgentAnsweredEvent
+  | BacklogChunkEvent
+  | BacklogQuestionEvent
+  | BacklogAnsweredEvent
+  | BacklogProposalEvent
   | CommentCreatedEvent
   | BoardUpdatedEvent
   | PingEvent;

@@ -24,3 +24,7 @@ Registro das decisões de arquitetura da fundação. Formato leve
 | [0017](0017-streaming-hitl-websocket.md) | Streaming + HITL via WebSocket (rejeição de TanStack AI/SSE) + buffer reativo | Aceito |
 | [0018](0018-awaiting-input-in-process.md) | Estado `awaiting-input` mantido in-process (sem migration) | Aceito |
 | [0019](0019-api-runs-on-host-not-docker.md) | API roda no HOST; só o Postgres fica em container (agent precisa ver o FS do host) | Aceito |
+| [0020](0020-mcp-server-second-control-plane.md) | MCP Server como segundo plano de controle (agent externo opera o board via `apps/mcp`) | Aceito |
+| [0021](0021-client-side-routing-with-react-router.md) | Roteamento client-side com react-router (URL própria p/ overlays; F5 preserva a conversa do backlog-chat) | Aceito |
+| [0022](0022-hitl-survives-restart-via-cli-session-id.md) | HITL sobrevive a restart via `--session-id` da Copilot CLI (reusa o UUID da sessão; sem migration) | Aceito |
+| [0023](0023-backlog-chat-story-threads.md) | Threads por story no chat de backlog (modelo Slack: uma sessão Copilot, transcripts por canal `main`/`story:<id>`) | Aceito |

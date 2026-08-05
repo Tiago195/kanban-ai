@@ -30,6 +30,7 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': new URL('./src', import.meta.url).pathname,
+        '@kanban-ai/shared': new URL('../../packages/shared/src/index.ts', import.meta.url).pathname,
       },
     },
   };

@@ -1,7 +1,12 @@
 import type {
+  AgentChatMessage,
   Assignee,
   AttachAssigneeDto,
   AttachLabelDto,
+  BacklogAppliedCard,
+  BacklogChatMessage,
+  BacklogChatSessionSummary,
+  BacklogProposal,
   CreateCardDto,
   CreateDodItemDto,
   CreateFlowDto,
@@ -11,6 +16,7 @@ import type {
   UpdateDodItemDto,
   ValidationStrategy,
 } from "@kanban-ai/shared";
+import { BACKLOG_MAIN_CHANNEL } from "@kanban-ai/shared";
 
 import type { ApiAgentModel, ApiBoard, ApiCardDetails, ApiCardSummary, ApiLabel, ApiLoopProfile } from "@/shared/types";
 
@@ -193,7 +199,12 @@ export const apiClient = {
     return request<Assignee[]>(`/assignees?boardId=${encodeURIComponent(boardId)}`);
   },
 
-  createAssignee(dto: { boardId: string; name: string; model?: string }): Promise<Assignee> {
+  createAssignee(dto: {
+    boardId: string;
+    name: string;
+    model?: string;
+    instructions?: string;
+  }): Promise<Assignee> {
     return request<Assignee>(`/assignees`, {
       method: "POST",
       body: JSON.stringify(dto),
@@ -304,6 +315,80 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify({ questionId, answer }),
     });
+  },
+
+  /** Histórico persistido do chat de uma task (transcript + HITL). */
+  getAgentChatHistory(taskId: string): Promise<AgentChatMessage[]> {
+    return request<AgentChatMessage[]>(`/cards/${taskId}/chat`);
+  },
+
+  // ── Chat de criação de Épicos/Histórias (backlog-chat) ────────────────────
+
+  /** Cria uma sessão de chat de backlog para um board. */
+  createBacklogSession(boardId: string): Promise<{ id: string; title: string }> {
+    return request<{ id: string; title: string }>(`/backlog-chat/sessions`, {
+      method: "POST",
+      body: JSON.stringify({ boardId }),
+    });
+  },
+
+  /** Lista as sessões (não vazias) de um board para o seletor de conversas. */
+  listBacklogSessions(boardId: string): Promise<BacklogChatSessionSummary[]> {
+    return request<BacklogChatSessionSummary[]>(
+      `/backlog-chat/sessions?boardId=${encodeURIComponent(boardId)}`,
+    );
+  },
+
+  /** Transcript persistido da sessão (reidrata o chat no F5). */
+  getBacklogMessages(sessionId: string): Promise<BacklogChatMessage[]> {
+    return request<BacklogChatMessage[]>(`/backlog-chat/sessions/${sessionId}/messages`);
+  },
+
+  /**
+   * Envia uma mensagem do humano; dispara um turno da AI. O turno é roteado para
+   * o canal (thread) informado — `main` por padrão. Ver ADR-0023.
+   */
+  sendBacklogMessage(
+    sessionId: string,
+    text: string,
+    channel: string = BACKLOG_MAIN_CHANNEL,
+  ): Promise<{ ok: true }> {
+    return request<{ ok: true }>(`/backlog-chat/sessions/${sessionId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ text, channel }),
+    });
+  },
+
+  /**
+   * Responde a uma pergunta de descoberta pendente (HITL) no canal informado
+   * (`main` por padrão). Ver ADR-0023.
+   */
+  answerBacklogQuestion(
+    sessionId: string,
+    questionId: string,
+    answer: string,
+    channel: string = BACKLOG_MAIN_CHANNEL,
+  ): Promise<{ accepted: boolean }> {
+    return request<{ accepted: boolean }>(`/backlog-chat/sessions/${sessionId}/answer`, {
+      method: "POST",
+      body: JSON.stringify({ questionId, answer, channel }),
+    });
+  },
+
+  /** Proposta corrente (maior versão), ou null se ainda em descoberta. */
+  getBacklogProposal(sessionId: string): Promise<BacklogProposal | null> {
+    return request<BacklogProposal | null>(`/backlog-chat/sessions/${sessionId}/proposal`);
+  },
+
+  /** Aprova e materializa a proposta: cria Epic + Stories no board. */
+  applyBacklog(sessionId: string, version: number): Promise<{ cards: BacklogAppliedCard[] }> {
+    return request<{ cards: BacklogAppliedCard[] }>(
+      `/backlog-chat/sessions/${sessionId}/apply`,
+      {
+        method: "POST",
+        body: JSON.stringify({ version }),
+      },
+    );
   },
 };
 

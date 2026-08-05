@@ -38,9 +38,9 @@ enum IterationPhase {
 }
 
 enum ValidationStrategy {
-  flows_regression   // flows+regression
+  flows_regression // flows+regression
   bug_gone_regression // bug-gone+regression
-  regression_only    // regression-only
+  regression_only // regression-only
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -48,18 +48,19 @@ enum ValidationStrategy {
 // ─────────────────────────────────────────────────────────────
 
 model Board {
-  id           String  @id @default(uuid())
+  id           String   @id @default(uuid())
   title        String
-  seq          Int     @default(0) // contador para chaves EP-/US-/TK-
+  seq          Int      @default(0) // contador para chaves EP-/US-/TK-
   defaultModel String? // modelo default do quadro (raiz da cascata de heranca)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  columns      Column[]
-  cards        Card[]
-  labels       Label[]
-  assignees    Assignee[]
-  loopProfiles LoopProfile[]
+  columns             Column[]
+  cards               Card[]
+  labels              Label[]
+  assignees           Assignee[]
+  loopProfiles        LoopProfile[]
+  backlogChatSessions BacklogChatSession[]
 }
 
 // Colunas do board principal (stories) e do mini-kanban (tasks).
@@ -123,7 +124,7 @@ model Card {
   aiNotes   String? // aiContext.notes
 
   // ── Campos específicos de TASK ──
-  loopType  String?    // id do loop profile (feature|bug|refactor|__default) ou custom
+  loopType  String? // id do loop profile (feature|bug|refactor|__default) ou custom
   execState ExecState? @default(idle)
 
   // Task derivada de uma falha de validação
@@ -132,8 +133,8 @@ model Card {
   derived       Card[]  @relation("Derivation")
 
   // Dependências entre tasks (grafo)
-  dependsOn   TaskDependency[] @relation("Dependent")
-  dependents  TaskDependency[] @relation("Dependency")
+  dependsOn  TaskDependency[] @relation("Dependent")
+  dependents TaskDependency[] @relation("Dependency")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -144,6 +145,7 @@ model Card {
   activities    Activity[]
   affectedFlows AffectedFlow[]
   iterations    Iteration[]
+  agentMessages AgentMessage[]
   labels        CardLabel[]
   assignees     CardAssignee[]
 
@@ -240,13 +242,116 @@ model Iteration {
   // ids de DOD marcados nesta iteração
   dodTouched String[]
 
+  // #6: evidência de verificação do próprio trabalho (ex.: "npm test: 12 passed").
+  evidence String @default("")
+
+  // #8: telemetria de qualidade (todos nullable — sem backfill).
+  durationMs   Int? // duração da iteração
+  inputTokens  Int? // tokens de entrada (quando o runner reportar)
+  outputTokens Int? // tokens de saída (quando o runner reportar)
+  outcome      String? // 'ok' | 'derived' | 'failed' | 'awaiting-input'
+
   @@unique([cardId, index])
   @@index([cardId])
 }
 
+// Transcript persistido do chat do agent (streaming + HITL). Espelha
+// AgentChatMessage de @kanban-ai/shared. Diferente de Iteration (registro
+// minucioso lido pela próxima iteração), aqui vive a CONVERSA: chunks
+// consolidados da AI, a pergunta HITL e a RESPOSTA do humano — para reidratar
+// o chat ao reabrir a task, sem depender do buffer em memória do front.
+model AgentMessage {
+  id     String @id @default(uuid())
+  cardId String // sempre uma task
+  card   Card   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  role  String // 'ai' | 'user' | 'system'
+  kind  String? // 'thought' | 'output' (só para role=ai de streaming)
+  phase IterationPhase? // fase da iteração, quando conhecida
+
+  text String
+
+  // Vincula pergunta (role=ai) e resposta (role=user) do mesmo par HITL.
+  questionId String?
+
+  // Opções de resposta rápida (quick replies) da pergunta HITL, quando houver.
+  // Preservadas para reidratar os chips clicáveis após F5/reabertura.
+  options Json?
+
+  ts DateTime @default(now())
+
+  @@index([cardId])
+}
+
 // ─────────────────────────────────────────────────────────────
-// Labels & Assignees (agents)
+// Backlog Chat (ecossistema de criação de Épicos/Histórias)
 // ─────────────────────────────────────────────────────────────
+
+// Uma conversa de criação de backlog, ancorada num board (onde os cards
+// aprovados vão nascer). Não cria cards por si — só quando o humano aprova.
+model BacklogChatSession {
+  id      String @id @default(uuid())
+  boardId String
+  board   Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  title  String @default("Novo backlog")
+  status String @default("open") // open | applied | archived
+
+  // Versão da proposta corrente (maior BacklogProposalRevision.version); null
+  // enquanto a AI ainda está na fase de descoberta (sem proposta).
+  currentProposalVersion Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages  BacklogChatMessage[]
+  revisions BacklogProposalRevision[]
+
+  @@index([boardId])
+}
+
+// Turno persistido do transcript (espelha AgentMessage, mas keyed por sessão).
+model BacklogChatMessage {
+  id        String             @id @default(uuid())
+  sessionId String
+  session   BacklogChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  role String // 'ai' | 'user' | 'system'
+  kind String? // 'thought' | 'output' | 'proposal'
+
+  // Canal (thread) do transcript: 'main' (geral) ou 'story:<storyId>'. Ver ADR-0023.
+  channel String @default("main")
+
+  text String
+
+  // Par pergunta↔resposta do refinamento (HITL de descoberta).
+  questionId String?
+  // Quick replies da pergunta, para reidratar os chips após F5.
+  options    Json?
+  // Snapshot da proposta quando kind='proposal' (BacklogProposal).
+  proposal   Json?
+
+  ts DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([sessionId, channel])
+}
+
+// Histórico versionado da proposta. Cada patch cirúrgico gera uma nova versão;
+// a proposta corrente é a de maior `version`. `/apply` materializa a aprovada.
+model BacklogProposalRevision {
+  id        String             @id @default(uuid())
+  sessionId String
+  session   BacklogChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  version  Int
+  proposal Json // snapshot completo do BacklogProposal nesta versão
+
+  createdAt DateTime @default(now())
+
+  @@unique([sessionId, version])
+  @@index([sessionId])
+}
 
 model Label {
   id            String  @id @default(uuid())
@@ -263,11 +368,12 @@ model Label {
 
 // Assignee = agent autônomo (não humano).
 model Assignee {
-  id      String  @id @default(uuid())
-  boardId String
-  board   Board   @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  name    String
-  model   String? // modelo/agent preferido (opus, gpt, ...)
+  id           String  @id @default(uuid())
+  boardId      String
+  board        Board   @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  name         String
+  model        String? // modelo/agent preferido (opus, gpt, ...)
+  instructions String  @default("") // "AGENTS.md" do agent: prompt/system instructions
 
   cards CardAssignee[]
 
@@ -276,16 +382,16 @@ model Assignee {
 
 // Perfil de loop (feature|bug|refactor|__default) — comportamento do agent por label.
 model LoopProfile {
-  id         String             @id @default(uuid())
-  boardId    String
-  board      Board              @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  profileId  String // 'feature' | 'bug' | 'refactor' | '__default' | custom
-  name       String
-  builtin    Boolean            @default(false)
+  id          String             @id @default(uuid())
+  boardId     String
+  board       Board              @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  profileId   String // 'feature' | 'bug' | 'refactor' | '__default' | custom
+  name        String
+  builtin     Boolean            @default(false)
   description String             @default("")
-  phases     IterationPhase[]
-  validation ValidationStrategy
-  firstStep  String             @default("")
+  phases      IterationPhase[]
+  validation  ValidationStrategy
+  firstStep   String             @default("")
 
   @@unique([boardId, profileId])
   @@index([boardId])

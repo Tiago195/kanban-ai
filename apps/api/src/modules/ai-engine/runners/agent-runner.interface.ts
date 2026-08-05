@@ -59,6 +59,15 @@ export interface AgentRunInput {
   /** Cancelamento cooperativo (stop hard/abort). */
   signal?: AbortSignal;
   /**
+   * Id de sessão da Copilot CLI (`--session-id`). Injetado como
+   * `COPILOT_SESSION_ID` no env do subprocesso pelo runner real. Dá **memória
+   * conversacional** entre invocações one-shot e torna o HITL **resiliente a
+   * restart** da API: o turno que retoma após a resposta humana resume a MESMA
+   * sessão persistida em `~/.copilot/session-state/<id>/`. Reusamos o `taskId`
+   * (UUID) como id. Ver ADR-0022. O runner mock ignora este campo.
+   */
+  cliSessionId?: string;
+  /**
    * Callback de streaming: chamado a cada chunk de stdout produzido pelo runner.
    * O mock emite alguns chunks fake; a CLI real emite conforme o parser.
    */
@@ -80,6 +89,13 @@ export interface AgentRunResult {
   /** DOD ids que a iteração considera concluídos. */
   dodTouched: string[];
   /**
+   * DOD proposto pela AI na fase de ANÁLISE. Quando a task ainda não tem
+   * checklist, o orchestrator cria os `DodItem`s a partir desta lista (um item
+   * por string, na ordem). Ignorado se a task já tiver DOD. É assim que o DOD
+   * nasce no fluxo com AI real (no artifact ele já vinha pré-populado).
+   */
+  proposedDod?: string[];
+  /**
    * Fluxos afetados que a AI declarou ter tocado nesta iteração. É a **própria
    * AI** quem os registra (ela sabe onde mexeu) — o orchestrator persiste esta
    * lista na story para alimentar a validação final. Opcional: iterações que
@@ -90,6 +106,12 @@ export interface AgentRunResult {
   nextStep: string;
   /** Sinaliza que o trabalho terminou (gate para validação final). */
   done: boolean;
+  /**
+   * #6: evidência de que a AI verificou o próprio trabalho antes de `done`
+   * (ex.: "npm test: 12 passed"). Opcional e tolerante à ausência; persistido
+   * junto do `detail` da iteração para rastreabilidade.
+   */
+  evidence?: string;
 }
 
 /** Interface plugável do runner. */

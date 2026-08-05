@@ -26,6 +26,34 @@ import {
 } from './loop-helpers';
 
 /**
+ * #8: métricas agregadas do loop de uma story. Retornadas por
+ * `Orchestrator.computeStoryMetrics` e expostas via
+ * `GET /cards/:id/loop/metrics`.
+ */
+export interface LoopMetrics {
+  storyId: string;
+  taskCount: number;
+  iterationCount: number;
+  /** Média de iterações por task (proxy de esforço). */
+  avgIterationsPerTask: number;
+  /** Fração de iterações que derivaram uma task de correção (validação falhou). */
+  derivedTaskRate: number;
+  /** Fração de iterações com desfecho `ok`. */
+  okIterationRate: number;
+  /** Duração média por iteração (ms), quando instrumentada. */
+  avgDurationMs: number | null;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  perTask: {
+    taskId: string;
+    key: string;
+    title: string;
+    execState: string;
+    iterations: number;
+  }[];
+}
+
+/**
  * Núcleo do loop engine. Orquestra o ciclo de vida das sessões de agent e o
  * loop de iterações de cada task, portando a lógica do artifact de referência
  * (docs/reference/kanban.html, linhas ~993–1101) para o backend: persiste
@@ -113,6 +141,7 @@ export class Orchestrator implements OnModuleInit {
    * e DOD, e emite os eventos WS. Retorna true se rodou algo.
    */
   async runIteration(taskId: string): Promise<boolean> {
+    const iterationStartedAt = Date.now();
     const task = await this.loadTask(taskId);
     if (!task || task.execState === 'done') return false;
 
@@ -136,15 +165,25 @@ export class Orchestrator implements OnModuleInit {
     const profile = resolveLoopProfile(raw?.loopType);
     const phase = nextPhaseFor(task, profile);
     const agentId = raw?.assignees[0]?.assigneeId ?? null;
+    // Agent responsável (assignee): carrega modelo e instruções ("AGENTS.md" do
+    // agent) para especializar esta iteração. Um agent = um modelo + um prompt.
+    const agent = agentId
+      ? await this.prisma.assignee.findUnique({
+          where: { id: agentId },
+          select: { model: true, instructions: true },
+        })
+      : null;
     const context = await this.buildContext(taskId, raw?.title ?? '(task)');
     const storyId = context.storyId ?? taskId;
 
-    // Modelo de AI resolvido em cascata: task → parents → board.defaultModel →
-    // default global. Injetado no spawn via env COPILOT_MODEL pelo runner.
+    // Modelo de AI resolvido em cascata: task → parents → agent responsável →
+    // board.defaultModel → default global. Injetado no spawn via env
+    // COPILOT_MODEL pelo runner.
     const resolvedModel = await this.resolveCardModel(
       raw?.model ?? null,
       raw?.parentId ?? null,
       raw?.boardId ?? null,
+      agent?.model ?? null,
     );
 
     // b6: contexto do runner (só os campos do AgentRunContext; os demais são
@@ -196,25 +235,68 @@ export class Orchestrator implements OnModuleInit {
     // encerrou; a resposta humana vira contexto do próximo prompt).
     let hitlExchange: { prompt: string; answer: string } | null = null;
 
+    // Buffer de consolidação do transcript (espelha agentChatStore no front):
+    // chunks consecutivos do mesmo `kind` viram UMA AgentMessage, para não
+    // gravar uma linha por token. Faz flush ao trocar de kind, ao surgir uma
+    // pergunta HITL e ao terminar a iteração.
+    let chunkBuffer: { kind: 'thought' | 'output'; text: string } | null = null;
+    const flushChunkBuffer = async (): Promise<void> => {
+      if (!chunkBuffer || chunkBuffer.text.length === 0) {
+        chunkBuffer = null;
+        return;
+      }
+      const buffered = chunkBuffer;
+      chunkBuffer = null;
+      await this.prisma.agentMessage.create({
+        data: {
+          cardId: taskId,
+          role: 'ai',
+          kind: buffered.kind,
+          phase,
+          text: buffered.text,
+        },
+      });
+    };
+
     const runResult = await this.runner.run({
       cwd,
       model: resolvedModel,
       phase,
-      prompt: this.buildPrompt(phase, profile, context),
+      // cliSessionId = taskId (UUID). Dá memória conversacional entre iterações
+      // one-shot e torna o HITL resiliente a restart: o turno que retoma após a
+      // resposta humana resume a MESMA sessão do Copilot. Ver ADR-0022.
+      cliSessionId: taskId,
+      prompt: this.buildPrompt(phase, profile, context, agent?.instructions ?? ''),
       context: runnerContext,
       signal,
-      // b6: repassa cada chunk de streaming para o WS (buffer reativo no front).
-      onChunk: (chunk) =>
+      // b6: repassa cada chunk de streaming para o WS (buffer reativo no front)
+      // e acumula no buffer de consolidação para persistir o transcript.
+      onChunk: (chunk) => {
         this.realtime.broadcast({
           type: 'agent.chunk',
           taskId,
           storyId,
           kind: chunk.kind,
           delta: chunk.delta,
-        }),
+        });
+        // Acumula no buffer; ao trocar de kind, faz flush do anterior (fire-and
+        // -forget: a ordem é preservada porque cada create é curto e o flush
+        // final aguarda a persistência antes de encerrar a iteração).
+        if (chunkBuffer && chunkBuffer.kind !== chunk.kind) {
+          void flushChunkBuffer();
+        }
+        if (!chunkBuffer) {
+          chunkBuffer = { kind: chunk.kind, text: chunk.delta };
+        } else {
+          chunkBuffer.text += chunk.delta;
+        }
+      },
       // b6: HITL — emite agent.question, entra em awaiting-input e aguarda resposta.
       onQuestion: async (question) => {
         const questionId = question.id || randomUUID();
+        // Flush do raciocínio acumulado antes da pergunta, para o transcript
+        // manter a ordem: pensamento → pergunta → resposta.
+        await flushChunkBuffer();
         this.realtime.broadcast({
           type: 'agent.question',
           taskId,
@@ -222,6 +304,17 @@ export class Orchestrator implements OnModuleInit {
           questionId,
           prompt: question.prompt,
           options: question.options,
+        });
+        // Persiste a PERGUNTA (role=ai) amarrada por questionId, com as
+        // opções de resposta rápida (para reidratar os chips após F5).
+        await this.prisma.agentMessage.create({
+          data: {
+            cardId: taskId,
+            role: 'ai',
+            text: question.prompt,
+            questionId,
+            options: question.options ?? undefined,
+          },
         });
         await this.log(taskId, `AI pausou e perguntou (HITL): ${question.prompt}`);
         try {
@@ -232,6 +325,10 @@ export class Orchestrator implements OnModuleInit {
             options: question.options,
           });
           hitlExchange = { prompt: question.prompt, answer };
+          // Persiste a RESPOSTA do humano (role=user) com o mesmo questionId.
+          await this.prisma.agentMessage.create({
+            data: { cardId: taskId, role: 'user', text: answer, questionId },
+          });
           this.realtime.broadcast({ type: 'agent.answered', taskId, questionId });
           await this.log(taskId, `resposta HITL recebida — retomando iteração`);
           return answer;
@@ -242,12 +339,31 @@ export class Orchestrator implements OnModuleInit {
       },
     });
 
+    // Flush do transcript remanescente ao fim da execução do runner.
+    await flushChunkBuffer();
+
+    // DOD nasce na ANÁLISE. Se a task ainda não tem checklist, criamos os
+    // DodItems a partir do que a AI propôs (`runResult.proposedDod`). Se a AI
+    // não propôs nada (ex.: mock), aplicamos um fallback determinístico para
+    // que a task nunca prossiga sem DOD — sem DOD o gate de validação nunca
+    // dispara. Só criamos uma vez; após criado, `context.dodItems` reflete a
+    // realidade nas próximas iterações.
+    if (context.dodItems.length === 0) {
+      const created = await this.ensureDodExists(taskId, phase, runResult.proposedDod);
+      if (created.length > 0) {
+        // Atualiza o contexto em memória para que o restante desta iteração
+        // (marcação de DOD) já enxergue os itens recém-criados.
+        context.dodItems = created.map((d) => ({ id: d.id, text: d.text, done: d.done }));
+      }
+    }
+
     if (phase === 'validation') {
       await this.setExecState(taskId, 'validating');
       const outcome = await this.validation.validate({
         storyId,
         strategy: profile.validation,
         affectedFlows: context.affectedFlows,
+        cwd,
       });
 
       await this.appendIteration(taskId, {
@@ -262,6 +378,9 @@ export class Orchestrator implements OnModuleInit {
           files: context.files,
           dodIds: [],
         },
+        evidence: runResult.evidence,
+        durationMs: Date.now() - iterationStartedAt,
+        outcome: outcome.passed ? 'ok' : 'derived',
       });
 
       if (outcome.passed) {
@@ -289,10 +408,26 @@ export class Orchestrator implements OnModuleInit {
     const reported = (runResult.dodTouched ?? []).filter(Boolean);
     if (reported.length > 0) {
       const validIds = new Set(context.dodItems.filter((d) => !d.done).map((d) => d.id));
-      const toMark = reported.filter((id) => validIds.has(id));
+      const reportedValid = reported.filter((id) => validIds.has(id));
+      // Regra nano (#4): NO MÁXIMO 1 item de DOD por iteração. Se a AI reportar
+      // mais de um id válido, marcamos apenas o de MENOR `position` (a ordem
+      // canônica do DOD, não a ordem que a AI mandou) e ignoramos o excedente.
+      const orderByPosition = context.dodItems.map((d) => d.id);
+      const toMark = reportedValid
+        .slice()
+        .sort((a, b) => orderByPosition.indexOf(a) - orderByPosition.indexOf(b))
+        .slice(0, 1);
+      const ignored = reportedValid.filter((id) => !toMark.includes(id));
       for (const id of toMark) {
         await this.prisma.dodItem.update({ where: { id }, data: { done: true } });
         this.realtime.broadcast({ type: 'dod.checked', cardId: taskId, itemId: id, done: true });
+      }
+      if (ignored.length > 0) {
+        await this.log(
+          taskId,
+          `AI reportou ${reportedValid.length} itens de DOD; regra nano permite 1 por iteração — ` +
+            `marcado ${toMark[0]}, ignorados [${ignored.join(', ')}] (próximas iterações continuam).`,
+        );
       }
       touched = toMark;
     } else if (this.runner.id === 'mock' && phase === 'implementation') {
@@ -336,6 +471,9 @@ export class Orchestrator implements OnModuleInit {
         files: context.files,
         dodIds: [],
       },
+      evidence: runResult.evidence,
+      durationMs: Date.now() - iterationStartedAt,
+      outcome: hitlExchange ? 'awaiting-input' : 'ok',
     });
     await this.setExecState(taskId, execStateAfterPhase(phase));
     return true;
@@ -455,6 +593,14 @@ export class Orchestrator implements OnModuleInit {
   }
 
   private async stepStoryInner(storyId: string): Promise<boolean> {
+    // Gate HITL (autoritativo): se a story tem uma pergunta pendente aguardando
+    // resposta humana, NENHUMA iteração pode começar — senão a AI seria
+    // reinvocada em loop (gastando tokens/dinheiro) e substituiria a pergunta
+    // pendente. Independe do `inFlight` (que é best-effort na memória do processo).
+    if (this.sessions.getPending(storyId)) {
+      return false;
+    }
+
     const tasks = await this.loadStoryTasks(storyId);
     if (tasks.length === 0) return false;
     const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -813,12 +959,144 @@ export class Orchestrator implements OnModuleInit {
   }
 
   /**
-   * HITL: entrega a resposta do humano à pergunta pendente da story, retomando
-   * a iteração pausada (a resposta é escrita no stdin do subprocesso pelo
-   * runner via a Promise de `onQuestion`). Retorna false se não havia pergunta.
+   * #8: métricas de qualidade do loop de uma story, agregadas sobre as
+   * iterações de todas as tasks-filhas. Alimenta o endpoint
+   * `GET /cards/:id/loop/metrics` e serve de base para medir se as demais
+   * melhorias (#1/#3/#6) tornam a AI mais eficiente.
    */
-  answerQuestion(storyId: string, questionId: string, answer: string): boolean {
-    return this.sessions.resolveQuestion(storyId, questionId, answer);
+  async computeStoryMetrics(storyId: string): Promise<LoopMetrics> {
+    const tasks = await this.prisma.card.findMany({
+      where: { parentId: storyId, type: 'task' },
+      select: { id: true, execState: true, key: true, title: true },
+    });
+    const taskIds = tasks.map((t) => t.id);
+
+    const iterations = taskIds.length
+      ? await this.prisma.iteration.findMany({
+          where: { cardId: { in: taskIds } },
+          select: {
+            cardId: true,
+            phase: true,
+            durationMs: true,
+            inputTokens: true,
+            outputTokens: true,
+            outcome: true,
+          },
+        })
+      : [];
+
+    // Tasks derivadas: geradas quando a validação falha (createDerivedTask).
+    // Contabilizamos as que possuem dependência apontando para outra task da
+    // mesma story (heurística barata) OU cujo outcome de validação foi derived.
+    const derivedIterations = iterations.filter((it) => it.outcome === 'derived').length;
+    const okIterations = iterations.filter((it) => it.outcome === 'ok').length;
+
+    const durations = iterations
+      .map((it) => it.durationMs)
+      .filter((d): d is number => typeof d === 'number');
+    const avgDurationMs = durations.length
+      ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+      : null;
+
+    const totalInputTokens = iterations.reduce((a, it) => a + (it.inputTokens ?? 0), 0);
+    const totalOutputTokens = iterations.reduce((a, it) => a + (it.outputTokens ?? 0), 0);
+
+    const perTask = tasks.map((t) => {
+      const its = iterations.filter((it) => it.cardId === t.id);
+      return {
+        taskId: t.id,
+        key: t.key,
+        title: t.title,
+        execState: t.execState ?? 'idle',
+        iterations: its.length,
+      };
+    });
+
+    return {
+      storyId,
+      taskCount: tasks.length,
+      iterationCount: iterations.length,
+      avgIterationsPerTask: tasks.length
+        ? Number((iterations.length / tasks.length).toFixed(2))
+        : 0,
+      derivedTaskRate: iterations.length
+        ? Number((derivedIterations / iterations.length).toFixed(2))
+        : 0,
+      okIterationRate: iterations.length
+        ? Number((okIterations / iterations.length).toFixed(2))
+        : 0,
+      avgDurationMs,
+      totalInputTokens,
+      totalOutputTokens,
+      perTask,
+    };
+  }
+
+  /**
+   * HITL: entrega a resposta do humano à pergunta pendente, retomando o
+   * trabalho da task. Resiliente a restart da API (ver ADR-0022):
+   *
+   * - **Caminho rápido:** existe uma Promise viva de `waitForAnswer` (mesmo
+   *   processo, sem restart) → resolve como antes (o runner escreve no stdin e a
+   *   iteração pausada continua).
+   * - **Caminho de resiliência:** sem promise viva (houve restart — o `Map` de
+   *   sessões e o child process do Copilot morreram) → busca a AI question no
+   *   banco por `questionId`, confirma que ainda não há resposta do usuário para
+   *   ela, persiste a resposta e re-dispara `runIteration(taskId)`. Como o
+   *   runner injeta `--session-id=taskId`, o Copilot **resume** a sessão
+   *   persistida (a pergunta inclusa) e continua o trabalho.
+   *
+   * Retorna false apenas se a pergunta nem existe (→ 404 no controller).
+   */
+  async answerQuestion(
+    storyId: string,
+    questionId: string,
+    answer: string,
+  ): Promise<boolean> {
+    // Caminho rápido: promise viva no mesmo processo.
+    if (this.sessions.resolveQuestion(storyId, questionId, answer)) {
+      return true;
+    }
+
+    // Caminho de resiliência: sem promise viva (restart). A pergunta foi
+    // persistida (role=ai, questionId) amarrada ao cardId=taskId.
+    const question = await this.prisma.agentMessage.findFirst({
+      where: { role: 'ai', questionId },
+      orderBy: { ts: 'desc' },
+      select: { cardId: true },
+    });
+    if (!question) return false; // pergunta nem existe → 404
+
+    const taskId = question.cardId;
+
+    // Idempotência: se já existe uma resposta do usuário para este questionId,
+    // não re-processa (evita re-disparar iteração e duplicar a resposta).
+    const already = await this.prisma.agentMessage.findFirst({
+      where: { role: 'user', questionId },
+      select: { id: true },
+    });
+    if (already) return true;
+
+    // Persiste a RESPOSTA do humano (role=user) com o mesmo questionId.
+    await this.prisma.agentMessage.create({
+      data: { cardId: taskId, role: 'user', text: answer, questionId },
+    });
+    this.realtime.broadcast({ type: 'agent.answered', taskId, questionId });
+    await this.log(
+      taskId,
+      'resposta HITL recebida após restart — retomando iteração (resume via --session-id)',
+    );
+
+    // Re-dispara a iteração da task. O Copilot resume a sessão persistida
+    // (--session-id=taskId), que já contém a pergunta; o prompt reconstruído
+    // (histórico + protocolo) reforça o contexto. Fire-and-forget: o endpoint
+    // não bloqueia até o próximo turno terminar.
+    void this.runIteration(taskId).catch((err) => {
+      this.logger.error(
+        `runIteration(${taskId}) após resposta HITL falhou: ${String(err)}`,
+      );
+    });
+    return true;
   }
 
   // ── Mutações persistidas + emissão ────────────────────────────────────────
@@ -890,6 +1168,13 @@ export class Orchestrator implements OnModuleInit {
       summary: string;
       dodTouched: string[];
       handoff: { state: string; nextStep: string; files: string[]; dodIds: string[] };
+      /** #6: evidência de verificação do próprio trabalho. */
+      evidence?: string;
+      /** #8: telemetria de qualidade (opcional). */
+      durationMs?: number;
+      inputTokens?: number;
+      outputTokens?: number;
+      outcome?: string;
     },
   ): Promise<void> {
     const row = await this.prisma.$transaction(async (tx) => {
@@ -907,6 +1192,11 @@ export class Orchestrator implements OnModuleInit {
           handoffNextStep: it.handoff.nextStep,
           handoffFiles: it.handoff.files,
           handoffDodIds: it.handoff.dodIds,
+          evidence: it.evidence ?? '',
+          durationMs: it.durationMs ?? null,
+          inputTokens: it.inputTokens ?? null,
+          outputTokens: it.outputTokens ?? null,
+          outcome: it.outcome ?? null,
         },
       });
     });
@@ -920,6 +1210,64 @@ export class Orchestrator implements OnModuleInit {
 
   private async log(cardId: string, text: string): Promise<void> {
     await this.prisma.activity.create({ data: { cardId, text } });
+  }
+
+  /**
+   * Garante que a task tenha um DOD (Definition of Done). O DOD nasce na fase
+   * de ANÁLISE do loop:
+   *
+   * - Se a AI propôs itens (`proposedDod`), criamos um `DodItem` por string, na
+   *   ordem, começando em `position: 0`.
+   * - Se a AI não propôs nada mas estamos na fase de análise (ex.: mock runner),
+   *   aplicamos um DOD mínimo determinístico para que a task nunca prossiga sem
+   *   checklist — sem DOD o gate de validação nunca dispara.
+   *
+   * Só cria quando a task realmente não tem itens. Retorna os itens criados
+   * (vazio se nada foi criado) e emite o evento WS `dod.created`.
+   */
+  private async ensureDodExists(
+    taskId: string,
+    phase: string,
+    proposedDod: string[] | undefined,
+  ): Promise<{ id: string; text: string; done: boolean }[]> {
+    // Idempotência: se já existir DOD (corrida entre iterações), não recria.
+    const existing = await this.prisma.dodItem.count({ where: { cardId: taskId } });
+    if (existing > 0) return [];
+
+    let texts = (proposedDod ?? [])
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0)
+      .slice(0, 20);
+
+    // Fallback determinístico: só na análise, e só se a AI não propôs nada.
+    if (texts.length === 0) {
+      if (phase !== 'analysis') return [];
+      texts = [
+        'Implementação atende ao que foi descrito na task',
+        'Código compila (build) sem erros',
+        'Verificação executada e evidenciada antes de concluir',
+      ];
+    }
+
+    // Dedup preservando ordem.
+    const seen = new Set<string>();
+    texts = texts.filter((t) => (seen.has(t) ? false : (seen.add(t), true)));
+
+    await this.prisma.dodItem.createMany({
+      data: texts.map((text, position) => ({ cardId: taskId, text, position, done: false })),
+    });
+    const created = await this.prisma.dodItem.findMany({
+      where: { cardId: taskId },
+      orderBy: { position: 'asc' },
+      select: { id: true, text: true, done: true },
+    });
+
+    await this.log(
+      taskId,
+      `DOD definido na fase de ${phase} — ${created.length} ${created.length === 1 ? 'item' : 'itens'}`,
+    );
+    this.realtime.broadcast({ type: 'dod.created', cardId: taskId, count: created.length });
+    return created;
   }
 
   // ── Loaders ─────────────────────────────────────────────────────────────────
@@ -1043,6 +1391,7 @@ export class Orchestrator implements OnModuleInit {
     ownModel: string | null,
     parentId: string | null,
     boardId: string | null,
+    agentModel: string | null = null,
   ): Promise<string> {
     if (ownModel) return ownModel;
 
@@ -1058,6 +1407,9 @@ export class Orchestrator implements OnModuleInit {
       if (parent.model) return parent.model;
       currentParentId = parent.parentId;
     }
+
+    // Agent responsável define seu próprio modelo quando card/parents não fixam um.
+    if (agentModel) return agentModel;
 
     if (boardId) {
       const board = await this.prisma.board.findUnique({
@@ -1083,8 +1435,19 @@ export class Orchestrator implements OnModuleInit {
     affectedFlows: AffectedFlow[];
     /** DOD da task (id + texto + done) — a AI marca os ids que concluiu. */
     dodItems: { id: string; text: string; done: boolean }[];
-    /** Handoff da iteração anterior — para a AI não recomeçar do zero. */
-    prevHandoff: { detail: string; summary: string; nextStep: string } | null;
+    /**
+     * #3: histórico COMPLETO das iterações anteriores desta task (ordem asc),
+     * para a AI não repetir erros de tentativas passadas. A última entra com
+     * `detail` completo; as demais são resumidas em `buildPrompt`.
+     */
+    iterationHistory: {
+      index: number;
+      phase: string;
+      summary: string;
+      detail: string;
+      nextStep: string;
+      failedValidation: boolean;
+    }[];
     /** #10c: lastro das tasks irmãs já concluídas (mesma story). */
     siblingHandoffs: { key: string; title: string; summary: string; nextStep: string }[];
     /** #10c: lastro do épico — resumos das stories anteriores (comments). */
@@ -1118,11 +1481,27 @@ export class Orchestrator implements OnModuleInit {
       select: { id: true, text: true, done: true },
     });
 
-    const lastIt = await this.prisma.iteration.findFirst({
+    // #3: histórico completo das iterações desta task (ordem crescente).
+    const historyRows = await this.prisma.iteration.findMany({
       where: { cardId: taskId },
-      orderBy: { index: 'desc' },
-      select: { detail: true, summary: true, handoffNextStep: true },
+      orderBy: { index: 'asc' },
+      select: {
+        index: true,
+        phase: true,
+        summary: true,
+        detail: true,
+        handoffNextStep: true,
+        handoffState: true,
+      },
     });
+    const iterationHistory = historyRows.map((it) => ({
+      index: it.index,
+      phase: String(it.phase),
+      summary: it.summary ?? '',
+      detail: it.detail ?? '',
+      nextStep: it.handoffNextStep ?? '',
+      failedValidation: it.phase === 'validation' && it.handoffState === 'blocked',
+    }));
 
     // #10c: lastro cross-task — o que as tasks IRMÃS já concluídas fizeram.
     const siblingHandoffs: {
@@ -1178,13 +1557,7 @@ export class Orchestrator implements OnModuleInit {
       storyId: task?.parentId ?? null,
       affectedFlows: flows,
       dodItems,
-      prevHandoff: lastIt
-        ? {
-            detail: lastIt.detail ?? '',
-            summary: lastIt.summary ?? '',
-            nextStep: lastIt.handoffNextStep ?? '',
-          }
-        : null,
+      iterationHistory,
       siblingHandoffs,
       epicNotes,
     };
@@ -1200,6 +1573,7 @@ export class Orchestrator implements OnModuleInit {
     phase: LoopTask['phases'][number],
     profile: LoopProfileDef,
     context: Awaited<ReturnType<Orchestrator['buildContext']>>,
+    agentInstructions = '',
   ): string {
     const lines: string[] = [];
 
@@ -1209,6 +1583,14 @@ export class Orchestrator implements OnModuleInit {
         'Outras iterações virão depois e lerão o que você registrar. Foque em avançar ' +
         'a task, não em terminar tudo de uma vez. NÃO se perca: siga o profile e o handoff abaixo.',
     );
+
+    // Instruções do agent responsável ("AGENTS.md" do agent). Quando definidas,
+    // especializam o comportamento desta iteração (persona, foco, regras).
+    if (agentInstructions.trim()) {
+      lines.push('');
+      lines.push('## Instruções do agent responsável (siga com prioridade):');
+      lines.push(agentInstructions.trim());
+    }
 
     // Profile + fase (a AI precisa saber a estratégia e em que fase está).
     lines.push('');
@@ -1248,6 +1630,17 @@ export class Orchestrator implements OnModuleInit {
     lines.push('## Definition of Done (DOD) — único checklist. Marque VOCÊ os ids concluídos:');
     if (context.dodItems.length === 0) {
       lines.push('- (nenhum item de DOD cadastrado)');
+      if (phase === 'analysis') {
+        lines.push('');
+        lines.push(
+          '⚠️ Esta task ainda NÃO tem DOD. Como estamos na fase de ANÁLISE, é VOCÊ quem ' +
+            'deve DEFINIR o Definition of Done: emita no `KANBAN_RESULT` o campo ' +
+            '`proposedDod` — uma lista de strings curtas e objetivas (3 a 7 itens), cada uma ' +
+            'um critério verificável de conclusão desta task. Não invente ids; apenas ' +
+            'proponha os textos. O sistema criará os itens e nas próximas iterações você os ' +
+            'marcará por id via `dodTouched`.',
+        );
+      }
     } else {
       for (const d of context.dodItems) {
         lines.push(`- [${d.done ? 'x' : ' '}] id=${d.id} :: ${d.text}`);
@@ -1265,15 +1658,30 @@ export class Orchestrator implements OnModuleInit {
       }
     }
 
-    // Handoff da iteração anterior (para não recomeçar do zero).
+    // #3: histórico COMPLETO das iterações anteriores desta task, para a AI não
+    // repetir erros de tentativas passadas. A última iteração entra com o
+    // `detail` completo; as anteriores são resumidas para não estourar o prompt.
     lines.push('');
-    if (context.prevHandoff) {
-      lines.push('## Handoff da iteração ANTERIOR (continue daqui):');
-      if (context.prevHandoff.summary) lines.push(`- Resumo: ${context.prevHandoff.summary}`);
-      if (context.prevHandoff.nextStep) lines.push(`- Próximo passo definido: ${context.prevHandoff.nextStep}`);
-      if (context.prevHandoff.detail) {
-        lines.push('- Detalhe completo da iteração anterior:');
-        lines.push(context.prevHandoff.detail);
+    const history = context.iterationHistory;
+    if (history.length > 0) {
+      lines.push('## Histórico desta task — TODAS as iterações anteriores (continue daqui, NÃO repita erros):');
+      const lastIndex = history.length - 1;
+      history.forEach((it, i) => {
+        const flag = it.failedValidation ? '⚠️ FALHOU na validação — ' : '';
+        lines.push(`- #${it.index} [${it.phase}]: ${flag}${it.summary || '(sem resumo)'}`);
+        if (it.nextStep) lines.push(`  ↳ próximo passo definido: ${it.nextStep}`);
+        // Só a última iteração traz o detalhe completo (contexto imediato).
+        if (i === lastIndex && it.detail) {
+          lines.push('  ↳ detalhe completo da iteração mais recente:');
+          lines.push(it.detail);
+        }
+      });
+      const failures = history.filter((it) => it.failedValidation).length;
+      if (failures > 0) {
+        lines.push(
+          `Atenção: ${failures} iteração(ões) já FALHARAM na validação. Entenda o que deu errado ` +
+            'antes de tentar de novo — não repita a mesma abordagem.',
+        );
       }
     } else {
       lines.push('## Primeira iteração desta task.');
@@ -1326,18 +1734,40 @@ export class Orchestrator implements OnModuleInit {
     lines.push('<<<KANBAN_RESULT>>>');
     lines.push('{');
     lines.push('  "summary": "<1 linha do que você fez nesta iteração>",');
+    if (context.dodItems.length === 0 && phase === 'analysis') {
+      lines.push('  "proposedDod": ["<critério de conclusão 1>", "<critério 2>", "..."],');
+    }
     lines.push('  "dodTouched": ["<id de DOD que VOCÊ concluiu>"],');
     lines.push('  "affectedFlows": [{ "name": "<fluxo>", "files": ["<path>"], "note": "<o que muda>" }],');
     lines.push('  "nextStep": "<o que a PRÓXIMA iteração deve fazer; vazio se acabou>",');
+    lines.push('  "evidence": "<como você verificou seu trabalho; ex.: \\"npm test: 12 passed, build ok\\">",');
     lines.push('  "done": false');
     lines.push('}');
     lines.push('<<<END_KANBAN_RESULT>>>');
     lines.push('');
     lines.push('Regras do bloco:');
-    lines.push('- `dodTouched`: use os ids EXATOS listados no DOD acima. NO MÁXIMO 1 id por iteração (regra nano).');
-    lines.push('- `affectedFlows`: registre onde você mexeu (arquivos + o efeito). VOCÊ é a fonte disso.');
+    if (context.dodItems.length === 0 && phase === 'analysis') {
+      lines.push('- `proposedDod`: como a task ainda não tem DOD, proponha aqui os critérios de conclusão (3 a 7 strings). O sistema cria os itens; NÃO use `dodTouched` nesta iteração.');
+    }
+    lines.push('- `dodTouched`: use os ids EXATOS listados no DOD acima. NO MÁXIMO 1 id por iteração (regra nano). Se você reportar mais de 1, apenas o primeiro (na ordem do DOD) será marcado; o restante é ignorado.');
+    lines.push('- `affectedFlows`: registre onde você mexeu (arquivos + o efeito). VOCÊ é a fonte disso. Os arquivos são verificados contra o filesystem real — não liste arquivos que não existem.');
     lines.push('- `done`: `true` só quando o trabalho de código da task terminou e o DOD está todo marcado.');
     lines.push('- `nextStep`: seja específico — a próxima iteração começa a partir dele.');
+    lines.push('- `evidence`: obrigatório quando `done: true` — resuma a verificação que você fez (ver seção abaixo).');
+
+    // #6: exigir que a AI verifique o próprio trabalho ANTES de marcar done.
+    lines.push('');
+    lines.push('## ANTES de marcar `done` — verifique seu trabalho');
+    lines.push(
+      'Você NÃO deve emitir `done: true` sem antes verificar empiricamente que o código ' +
+        'funciona. Um gate de validação vai rodar os checks do projeto no seu diretório de ' +
+        'trabalho; se falharem, uma task de correção é derivada e o seu `done` é revertido. ' +
+        'Antecipe-se:',
+    );
+    lines.push('- Rode os checks relevantes do projeto NO DIRETÓRIO ATUAL antes de concluir — ex.: `npm test`, `npm run build`, `npm run lint` (use os scripts que existirem no `package.json`).');
+    lines.push('- Só marque `done: true` depois que esses checks passarem.');
+    lines.push('- Preencha `evidence` com o resultado concreto da verificação (ex.: "npm test: 12 passed; build ok").');
+    lines.push('- Se o projeto NÃO tiver como verificar (sem testes/scripts), diga isso explicitamente em `evidence` (ex.: "sem suíte de testes no projeto — verificação manual da lógica").');
 
     // #6: canal ESTRUTURADO de pergunta (HITL). Substitui a instrução vaga.
     lines.push('');
@@ -1348,11 +1778,20 @@ export class Orchestrator implements OnModuleInit {
     );
     lines.push('');
     lines.push('<<<KANBAN_QUESTION>>>');
-    lines.push('{ "prompt": "<pergunta objetiva>", "options": ["<opção A>", "<opção B>"] }');
+    lines.push('{ "prompt": "<pergunta objetiva>", "options": ["<opção curta A>", "<opção curta B>", "<opção curta C>"] }');
     lines.push('<<<END_KANBAN_QUESTION>>>');
     lines.push('');
     lines.push('Regras da pergunta:');
-    lines.push('- Faça UMA pergunta objetiva por vez. `options` é opcional (omita para resposta livre).');
+    lines.push('- Faça UMA pergunta objetiva por vez.');
+    lines.push(
+      '- SEMPRE que a pergunta admitir alternativas, forneça de 2 a 4 `options` curtas e ' +
+        'acionáveis (é assim que o humano responde com um clique). Só omita `options` quando ' +
+        'a resposta for genuinamente aberta (ex.: um nome, um texto livre).',
+    );
+    lines.push(
+      '- Mesmo com `options`, o humano ainda pode escrever uma resposta livre — então as ' +
+        'opções são atalhos, não uma lista fechada.',
+    );
     lines.push('- Se emitir KANBAN_QUESTION, NÃO emita KANBAN_RESULT nem `done` — a task fica aguardando resposta.');
     lines.push('- A resposta do humano chegará no handoff da próxima iteração.');
 
