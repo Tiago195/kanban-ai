@@ -5,7 +5,7 @@
  * subprocesso. Outras implementações (SDK, API remota) podem ser plugadas sem
  * mexer no orquestrador.
  */
-import type { IterationPhase } from '@kanban-ai/shared';
+import type { IterationPhase, StructuredEvidence } from '@kanban-ai/shared';
 
 /** Contexto de domínio da task/story para o runner mock gerar conteúdo coerente. */
 export interface AgentRunContext {
@@ -107,11 +107,14 @@ export interface AgentRunResult {
   /** Sinaliza que o trabalho terminou (gate para validação final). */
   done: boolean;
   /**
-   * #6: evidência de que a AI verificou o próprio trabalho antes de `done`
-   * (ex.: "npm test: 12 passed"). Opcional e tolerante à ausência; persistido
-   * junto do `detail` da iteração para rastreabilidade.
+   * #6: evidência de que a AI verificou o próprio trabalho antes de `done`.
+   * Aceita string livre (legado, ex.: "npm test: 12 passed") OU a forma
+   * ESTRUTURADA e verificável (`StructuredEvidence`). Quando
+   * `AGENT_REQUIRE_STRUCTURED_EVIDENCE=true`, o gate de `done` só fecha se a
+   * evidência for verificável (`isVerifiableEvidence`). Persistida junto do
+   * `detail` da iteração para rastreabilidade.
    */
-  evidence?: string;
+  evidence?: string | StructuredEvidence;
 }
 
 /** Interface plugável do runner. */

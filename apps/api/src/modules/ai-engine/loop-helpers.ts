@@ -1,4 +1,4 @@
-import type { ExecState, IterationPhase } from '@kanban-ai/shared';
+import type { ExecState, IterationPhase, StructuredEvidence } from '@kanban-ai/shared';
 import type { LoopProfileDef } from './loop-profiles/loop-profiles';
 
 /**
@@ -110,4 +110,83 @@ export function execStateAfterPhase(phase: IterationPhase): ExecState {
   if (phase === 'reproduce') return 'analyzing';
   if (phase === 'analysis') return 'analyzing';
   return 'implementing';
+}
+
+/**
+ * Serializa `evidence` (string livre OU `StructuredEvidence`) para a coluna
+ * `Iteration.evidence` (String). A forma estruturada vira uma representação
+ * legível e estável (checks + arquivos + nota) para persistência/rastreio; a
+ * forma livre é retornada como está. `undefined`/vazio → `''`.
+ */
+export function evidenceToString(
+  evidence: string | StructuredEvidence | null | undefined,
+): string {
+  if (!evidence) return '';
+  if (typeof evidence === 'string') return evidence.trim();
+  const parts: string[] = [];
+  for (const c of evidence.checks ?? []) {
+    parts.push(`- [${c.passed ? 'ok' : 'x'}] ${c.name}${c.output ? `: ${c.output}` : ''}`);
+  }
+  if (evidence.filesChanged && evidence.filesChanged.length > 0) {
+    parts.push(`arquivos: ${evidence.filesChanged.join(', ')}`);
+  }
+  if (evidence.note) parts.push(evidence.note);
+  return parts.join('\n');
+}
+
+/**
+ * Anti-thrash (#3): tokeniza texto para comparação de similaridade. Normaliza
+ * (lowercase, remove pontuação, colapsa espaços) e retorna o conjunto de
+ * palavras com ≥ 2 chars.
+ */
+function tokenize(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter((t) => t.length >= 2),
+  );
+}
+
+/**
+ * Similaridade de Jaccard entre dois textos (0..1). Dois textos vazios são
+ * considerados idênticos (1). Um vazio e um não-vazio → 0.
+ */
+export function textSimilarity(a: string, b: string): number {
+  const sa = tokenize(a);
+  const sb = tokenize(b);
+  if (sa.size === 0 && sb.size === 0) return 1;
+  if (sa.size === 0 || sb.size === 0) return 0;
+  let inter = 0;
+  for (const t of sa) if (sb.has(t)) inter++;
+  const union = sa.size + sb.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+/** Assinatura de uma iteração para detecção de thrash. */
+export interface ThrashSample {
+  summary: string;
+  nextStep: string;
+}
+
+/**
+ * Anti-thrash (#3): detecta se a AI está "travada" — iterações recentes com
+ * `summary`+`nextStep` quase idênticos. Compara as últimas `window` amostras
+ * (as mais recentes ao FINAL do array) par a par; se QUALQUER par consecutivo
+ * tiver similaridade ≥ `threshold`, considera thrash. Precisa de ≥ 2 amostras.
+ */
+export function isThrashing(
+  samples: ThrashSample[],
+  threshold: number,
+  window: number,
+): boolean {
+  if (!Array.isArray(samples) || samples.length < 2) return false;
+  const w = Math.max(2, Math.floor(window) || 2);
+  const recent = samples.slice(-w);
+  const sig = (s: ThrashSample) => `${s.summary ?? ''} ${s.nextStep ?? ''}`.trim();
+  for (let i = 1; i < recent.length; i++) {
+    if (textSimilarity(sig(recent[i - 1]), sig(recent[i])) >= threshold) return true;
+  }
+  return false;
 }

@@ -1,4 +1,5 @@
 import type { AppConfig } from '../../../shared/config/config';
+import type { StructuredEvidence } from '@kanban-ai/shared';
 
 /**
  * Contrato do "CLI adapter": isola o comando/flags/parser exatos da Copilot CLI
@@ -32,8 +33,8 @@ export type CliEvent =
       affectedFlows?: { name: string; files: string[]; note?: string }[];
       nextStep: string;
       done: boolean;
-      /** #6: evidência de verificação do próprio trabalho (opcional). */
-      evidence?: string;
+      /** #6: evidência de verificação — string livre (legado) ou estruturada. */
+      evidence?: string | StructuredEvidence;
     };
 
 /** Como o processo deve ser spawnado. */
@@ -121,7 +122,7 @@ export class CliAdapter {
         affectedFlows: parseAffectedFlows(obj.affectedFlows),
         nextStep: str(obj.nextStep),
         done: obj.done === true,
-        evidence: str(obj.evidence) || undefined,
+        evidence: parseEvidence(obj.evidence),
       };
     }
     // kind ausente/desconhecido → tratar como pensamento com o texto disponível.
@@ -150,4 +151,40 @@ function parseAffectedFlows(
     })
     .filter((f): f is { name: string; files: string[]; note?: string } => f !== null);
   return flows.length > 0 ? flows : undefined;
+}
+
+/**
+ * Normaliza `evidence` reportada pela AI. Aceita string livre (legado) OU um
+ * objeto ESTRUTURADO `{checks:[{name,passed,output?}], filesChanged?, note?}`.
+ * Tolerante a lixo: campos inválidos são descartados.
+ */
+function parseEvidence(v: unknown): string | StructuredEvidence | undefined {
+  if (typeof v === 'string') return v.trim() || undefined;
+  if (typeof v !== 'object' || v === null) return undefined;
+  const o = v as Record<string, unknown>;
+  if (!Array.isArray(o.checks)) {
+    // Objeto sem `checks` reconhecível → tenta note como string livre.
+    const note = str(o.note).trim();
+    return note || undefined;
+  }
+  const checks = o.checks
+    .map((c) => {
+      if (typeof c !== 'object' || c === null) return null;
+      const co = c as Record<string, unknown>;
+      const name = str(co.name).trim();
+      if (!name) return null;
+      const output = str(co.output).trim();
+      return output
+        ? { name, passed: co.passed === true, output }
+        : { name, passed: co.passed === true };
+    })
+    .filter((c): c is { name: string; passed: boolean; output?: string } => c !== null);
+  const filesChanged = Array.isArray(o.filesChanged)
+    ? o.filesChanged.map((x) => String(x)).filter((s) => s.trim().length > 0)
+    : undefined;
+  const note = str(o.note).trim() || undefined;
+  const evidence: StructuredEvidence = { checks };
+  if (filesChanged && filesChanged.length > 0) evidence.filesChanged = filesChanged;
+  if (note) evidence.note = note;
+  return evidence;
 }

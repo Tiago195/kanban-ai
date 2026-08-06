@@ -8,6 +8,7 @@
     "dev": "nest start --watch",
     "start": "node dist/main.js",
     "lint": "eslint src",
+    "test": "node --require ts-node/register --test --test-reporter spec \"src/**/*.spec.ts\"",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",

@@ -53,6 +53,47 @@ export interface AppConfig {
      * auto-play da story (graceful). Default 3.
      */
     maxValidationFailures: number;
+    /**
+     * Gate de custo — orçamento de TEMPO por task. Soma de `durationMs` das
+     * iterações da task; ao ultrapassar, o loop marca `needsHuman` (reason de
+     * custo), para o auto-play graceful e emite `card.needs_human`.
+     * `0` desliga o gate (default). AGENT_MAX_TASK_DURATION_MS.
+     */
+    maxTaskDurationMs: number;
+    /**
+     * Gate de custo — orçamento de TOKENS por task (input+output somados das
+     * iterações). Mesmo destino do gate de tempo. `0` desliga (default).
+     * AGENT_MAX_TASK_TOKENS.
+     */
+    maxTaskTokens: number;
+    /**
+     * Anti-thrash — similaridade (0..1) entre `summary`+`nextStep` de iterações
+     * consecutivas acima da qual a AI é considerada "travada". Default 0.9.
+    /**
+     * Anti-thrash — liga a detecção de "AI travada" (iterações repetitivas).
+     * Desligado por default para não interferir no loop normal/mock (onde
+     * iterações de implementação podem repetir `summary`/`nextStep`
+     * legitimamente). AGENT_THRASH_DETECTION_ENABLED.
+     */
+    thrashDetectionEnabled: boolean;
+    /**
+     * Anti-thrash — similaridade (0..1) entre `summary`+`nextStep` de iterações
+     * consecutivas acima da qual a AI é considerada "travada". Default 0.9.
+     * AGENT_THRASH_SIMILARITY.
+     */
+    thrashSimilarityThreshold: number;
+    /**
+     * Anti-thrash — quantas iterações recentes comparar (janela). Default 2
+     * (compara a última com a anterior). AGENT_THRASH_WINDOW.
+     */
+    thrashWindow: number;
+    /**
+     * Gate de `done` — exige `evidence` ESTRUTURADA e verificável (ao menos um
+     * check com `passed=true`) antes de fechar a task. Se `true` e a evidence
+     * não for verificável, o `done` é recusado. Default false.
+     * AGENT_REQUIRE_STRUCTURED_EVIDENCE.
+     */
+    requireStructuredEvidence: boolean;
   };
 }
 
@@ -99,6 +140,13 @@ export function loadConfig(): AppConfig {
       flowTestGlobs: csv(process.env.AGENT_FLOW_TEST_GLOBS, ['.spec.', '.test.']),
       requireFlowCoverage: process.env.AGENT_REQUIRE_FLOW_COVERAGE === 'true',
       maxValidationFailures: num(process.env.AGENT_MAX_VALIDATION_FAILURES, 3),
+      maxTaskDurationMs: num(process.env.AGENT_MAX_TASK_DURATION_MS, 0),
+      maxTaskTokens: num(process.env.AGENT_MAX_TASK_TOKENS, 0),
+      thrashDetectionEnabled:
+        process.env.AGENT_THRASH_DETECTION_ENABLED === 'true',
+      thrashSimilarityThreshold: num(process.env.AGENT_THRASH_SIMILARITY, 0.9),
+      thrashWindow: num(process.env.AGENT_THRASH_WINDOW, 2),
+      requireStructuredEvidence: process.env.AGENT_REQUIRE_STRUCTURED_EVIDENCE === 'true',
     },
   };
 }

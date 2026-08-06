@@ -279,3 +279,47 @@ export interface LoopMetrics {
   totalOutputTokens: number;
   perTask: LoopTaskMetrics[];
 }
+
+/**
+ * Resultado de UM check verificável rodado pela AI antes de fechar a task
+ * (ex.: `npm test`, `npm run lint`). Faz parte da evidência estruturada.
+ */
+export interface EvidenceCheck {
+  /** Nome do check (ex.: "test", "lint", "build" ou comando). */
+  name: string;
+  /** Se o check passou. Um `done` verificável exige ao menos um `passed=true`. */
+  passed: boolean;
+  /** Saída/resumo do check (opcional, truncável). */
+  output?: string;
+}
+
+/**
+ * Evidência ESTRUTURADA que a AI anexa ao concluir a task (gate de `done` mais
+ * forte — substitui a string livre quando `AGENT_REQUIRE_STRUCTURED_EVIDENCE`).
+ * É verificável: `checks` traz os comandos rodados e seus resultados;
+ * `filesChanged` lista os arquivos tocados. Contrato COMPARTILHADO entre api e
+ * web. A string livre legada continua aceita (retrocompat).
+ */
+export interface StructuredEvidence {
+  /** Checks verificáveis rodados pela AI (test/lint/build/...). */
+  checks: EvidenceCheck[];
+  /** Arquivos alterados nesta conclusão (opcional). */
+  filesChanged?: string[];
+  /** Nota livre adicional (opcional). */
+  note?: string;
+}
+
+/**
+ * Uma iteração é considerada com evidência VERIFICÁVEL quando é estruturada e
+ * possui ao menos um check com `passed=true`. String livre nunca é verificável.
+ */
+export function isVerifiableEvidence(
+  evidence: string | StructuredEvidence | null | undefined,
+): evidence is StructuredEvidence {
+  return (
+    !!evidence &&
+    typeof evidence === 'object' &&
+    Array.isArray((evidence as StructuredEvidence).checks) &&
+    (evidence as StructuredEvidence).checks.some((c) => c && c.passed === true)
+  );
+}

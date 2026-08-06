@@ -96,11 +96,48 @@ contrato de iteração:
   a UI (`IterationDiffViewer` na feature `ai-engine`) permite navegar iteração a
   iteração ("replay").
 
+### Guardas de qualidade de entrega (melhorias 🟡)
+
+Quatro guardas fecham o ciclo métrica→ação e endurecem o gate de `done`. Todas
+são configuráveis por env (ver `shared/config/config.ts`, bloco `agent`, e
+`.env.example`) e **desligadas por padrão** para não afetar o comportamento atual
+nem os mocks/testes:
+
+- **Cost gate (#1 — fecha o ciclo métrica→ação)**: `enforceLoopGuards` (chamado
+  cedo em `runIteration`) soma `durationMs`/`inputTokens`+`outputTokens` das
+  iterações já persistidas da task. Se exceder `AGENT_MAX_TASK_DURATION_MS` ou
+  `AGENT_MAX_TASK_TOKENS` (0 = desligado), escala para humano via
+  `escalateToHuman(...)` (marca `needsHuman`, `stop(graceful)`, broadcast
+  `card.needs_human`). Antes só media (#8); agora **age** sobre a métrica.
+- **Diff no prompt (#2)**: `buildContext` carrega o `diff` da ÚLTIMA iteração
+  persistida (`lastDiff`, sem rodar `git` de novo) e `buildPrompt` injeta esse
+  diff acumulado do worktree (truncado a ~20KB) para a AI enxergar o que já
+  mudou antes de agir.
+- **Anti-thrash (#3)**: `enforceLoopGuards` usa `isThrashing` (loop-helpers) —
+  compara as últimas `AGENT_THRASH_WINDOW` iterações por similaridade de Jaccard
+  (`textSimilarity`) de `summary`+`nextStep`; se qualquer par consecutivo ≥
+  `AGENT_THRASH_SIMILARITY`, considera a AI travada e escala para humano.
+  **Desligado por default** — só roda com `AGENT_THRASH_DETECTION_ENABLED=true`
+  (o loop normal/mock repete `summary`/`nextStep` legitimamente).
+- **Gate de `done` verificável (#6 reforçado)**: `evidence` do contrato passou a
+  aceitar `string | StructuredEvidence` (`@kanban-ai/shared`:
+  `EvidenceCheck`/`StructuredEvidence`/`isVerifiableEvidence`). Quando
+  `AGENT_REQUIRE_STRUCTURED_EVIDENCE=true`, o prompt pede evidência estruturada
+  (JSON com `checks[]` verificáveis) e a fase `validation` só fecha se
+  `isVerifiableEvidence(...)` (≥1 check `passed=true`); caso contrário a validação
+  "falha" e roteia para o caminho de derivação/needs-human. A string livre legada
+  continua aceita (retrocompat) e é persistida via `evidenceToString(...)`.
+
 Ao mudar esses contratos, mantenha este arquivo em dia.
 
 ## Como testar
 
 - `npx nest build` (a partir de `apps/api`) deve passar.
+- `npm test` (a partir de `apps/api`) roda os specs (`node:test` + `ts-node`,
+  arquivos `src/**/*.spec.ts`). Cobertura atual em `loop-quality.spec.ts`:
+  `isVerifiableEvidence`/`evidenceToString` (gate de `done`) e
+  `textSimilarity`/`isThrashing` (anti-thrash). Os specs são excluídos do build
+  via `tsconfig.build.json`.
 - Ao implementar `runIteration`, adicione testes cobrindo: encadeamento de
   iterações, idempotência do watchdog, stop graceful vs hard, e reconciliação no
   boot.

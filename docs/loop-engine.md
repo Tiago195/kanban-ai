@@ -111,6 +111,37 @@ acertiva e localizada.
   origem — para a próxima AI atacar já com o contexto completo. Emite
   `task.derived`.
 
+## Guardas de qualidade de entrega
+
+Além do gate de DOD e da validação empírica, quatro guardas opcionais fecham o
+ciclo **métrica → ação** e endurecem o critério de `done`. Todas são
+**configuráveis por env** (bloco `agent` em `config.ts` / `.env.example`) e
+**desligadas por padrão** — não alteram o comportamento atual nem os mocks:
+
+| Guarda | Env | Efeito |
+|---|---|---|
+| **Cost gate** | `AGENT_MAX_TASK_DURATION_MS`, `AGENT_MAX_TASK_TOKENS` (0 = off) | soma duração/tokens das iterações da task; ao estourar, **escala para humano** |
+| **Anti-thrash** | `AGENT_THRASH_DETECTION_ENABLED` (def. false), `AGENT_THRASH_SIMILARITY` (def. 0.9), `AGENT_THRASH_WINDOW` (def. 2) | detecta iterações quase idênticas (AI travada) e **escala para humano** |
+| **Diff no prompt** | — (sempre que houver diff) | injeta o diff acumulado do worktree (última iteração, ~20KB) no prompt |
+| **Evidência verificável** | `AGENT_REQUIRE_STRUCTURED_EVIDENCE` (def. false) | `done` só fecha com `StructuredEvidence` contendo ≥1 check `passed=true` |
+
+**Cost gate + anti-thrash** rodam em `enforceLoopGuards`, chamado no início de
+cada `runIteration`. Antes o engine só **media** (métricas `#8`); agora **age**:
+quando um limite estoura ou a AI está travada, `escalateToHuman(...)` marca
+`needsHuman`, faz `stop(graceful)` e emite `card.needs_human`. O anti-thrash usa
+similaridade de Jaccard (`textSimilarity`) sobre `summary`+`nextStep` das últimas
+`AGENT_THRASH_WINDOW` iterações.
+
+**Diff no prompt**: `buildContext` carrega o `diff` já persistido da última
+iteração (`Iteration.diff`, sem rodar `git` novamente) e `buildPrompt` o injeta,
+para a AI ver o que já mudou no worktree antes de agir.
+
+**Evidência verificável**: o contrato de saída aceita `evidence: string |
+StructuredEvidence` (`@kanban-ai/shared`). Com o gate ligado, o prompt pede um
+JSON com `checks[]` (test/lint/build e seus resultados) e a fase `validation` só
+fecha se `isVerifiableEvidence(...)` — do contrário a validação "falha" e roteia
+para derivação/needs-human. A string livre legada continua aceita (retrocompat).
+
 ## Loop profiles (por tipo de label)
 
 O comportamento do loop **depende do tipo da label** da task. Perfis embutidos

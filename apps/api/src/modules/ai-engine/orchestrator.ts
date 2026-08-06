@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { StopMode } from '@kanban-ai/shared';
 import type { ExecState, AffectedFlow, LoopMetrics } from '@kanban-ai/shared';
+import { isVerifiableEvidence } from '@kanban-ai/shared';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { PrismaService } from '../../shared/db/prisma.service';
@@ -16,14 +17,17 @@ import { deriveEpicStatus, type ColumnLike } from '../cards/cards.epic-status';
 import {
   allTasksDone,
   dodAllDone,
+  evidenceToString,
   execStateAfterPhase,
   fromPrismaExecState,
+  isThrashing,
   nextPhaseFor,
   pendingDeps,
   pickNextTask,
   storyHasPendingTasks,
   toPrismaExecState,
   type LoopTask,
+  type ThrashSample,
 } from './loop-helpers';
 
 /**
@@ -158,6 +162,15 @@ export class Orchestrator implements OnModuleInit {
       : null;
     const context = await this.buildContext(taskId, raw?.title ?? '(task)');
     const storyId = context.storyId ?? taskId;
+
+    // Gate de custo (#1) + anti-thrash (#3): ANTES de gastar uma nova iteração
+    // (worktree + spawn), verifica se a task já estourou o orçamento de tempo/
+    // tokens ou se a AI está travada repetindo a mesma coisa. Em ambos os casos
+    // marca `needsHuman`, para o auto-play graceful e emite `card.needs_human` —
+    // reaproveitando o caminho de resgate já existente. Guardado por config.
+    if (await this.enforceLoopGuards(taskId, storyId)) {
+      return false;
+    }
 
     // Modelo de AI resolvido em cascata: task → parents → agent responsável →
     // board.defaultModel → default global. Injetado no spawn via env
@@ -354,6 +367,34 @@ export class Orchestrator implements OnModuleInit {
         cwd,
       });
 
+      // Gate de `done` mais forte (#4): mesmo com a validação empírica passando,
+      // se `AGENT_REQUIRE_STRUCTURED_EVIDENCE` estiver ligado e a AI não anexou
+      // evidência ESTRUTURADA e verificável (ao menos um check `passed:true`),
+      // NÃO fechamos a task — tratamos como problema (deriva/needs-human como
+      // uma falha de validação normal). Isso impede que uma string livre
+      // ("acho que passou") feche a task.
+      let effectivePassed = outcome.passed;
+      const evidenceProblems = outcome.problems.slice();
+      if (
+        outcome.passed &&
+        this.config.agent.requireStructuredEvidence &&
+        !isVerifiableEvidence(runResult.evidence)
+      ) {
+        effectivePassed = false;
+        evidenceProblems.push({
+          title: 'evidência de conclusão não verificável',
+          description:
+            'A validação empírica passou, mas AGENT_REQUIRE_STRUCTURED_EVIDENCE está ' +
+            'ligado e a AI não anexou evidência estruturada verificável (checks com ' +
+            'passed:true). Rode os checks (test/lint/build) e reporte o resultado no ' +
+            'campo `evidence` estruturado antes de concluir.',
+        });
+        await this.log(
+          taskId,
+          'gate de done: validação passou mas evidência não é verificável — task NÃO fechada (evidence estruturada exigida).',
+        );
+      }
+
       await this.appendIteration(taskId, {
         phase,
         agentId,
@@ -361,24 +402,27 @@ export class Orchestrator implements OnModuleInit {
         summary: runResult.summary,
         dodTouched: [],
         handoff: {
-          state: outcome.passed ? 'done' : 'blocked',
-          nextStep: outcome.passed ? '' : 'Corrigir o problema encontrado (ver task derivada).',
+          state: effectivePassed ? 'done' : 'blocked',
+          nextStep: effectivePassed
+            ? ''
+            : 'Corrigir o problema encontrado (ver task derivada).',
           files: context.files,
           dodIds: [],
         },
-        evidence: runResult.evidence,
+        evidence: evidenceToString(runResult.evidence),
         diff: iterationDiff,
         durationMs: Date.now() - iterationStartedAt,
-        outcome: outcome.passed ? 'ok' : 'derived',
+        outcome: effectivePassed ? 'ok' : 'derived',
       });
 
-      if (outcome.passed) {
+      if (effectivePassed) {
         await this.setExecState(taskId, 'done');
         await this.log(taskId, 'validação final concluída — task Done');
         await this.onTaskDone(taskId);
       } else {
-        // Só ocorre com validação real; no mock nunca acontece.
-        const problem = outcome.problems[0] ?? {
+        // Só ocorre com validação real ou gate de evidence; no mock (com o gate
+        // desligado) nunca acontece.
+        const problem = evidenceProblems[0] ?? {
           title: 'falha na validação',
           description: `A validação de ${taskId} detectou comportamento incorreto.`,
         };
@@ -392,21 +436,10 @@ export class Orchestrator implements OnModuleInit {
           where: { cardId: taskId, phase: 'validation', handoffState: 'blocked' },
         });
         if (validationFailures >= this.config.agent.maxValidationFailures) {
-          await this.prisma.card.update({
-            where: { id: taskId },
-            data: { needsHuman: true, needsHumanReason: problem.title },
-          });
-          // Para o auto-play da story sem abortar hard (graceful): preserva o
-          // estado no Postgres e deixa o próximo tick encerrar limpo.
-          await this.stop(storyId, 'graceful');
-          this.realtime.broadcast({
-            type: 'card.needs_human',
+          await this.escalateToHuman(
             taskId,
             storyId,
-            reason: problem.title,
-          });
-          await this.log(
-            taskId,
+            problem.title,
             `validação falhou ${validationFailures}x (limite ${this.config.agent.maxValidationFailures}) — marcada como "precisa de humano"; auto-play parado`,
           );
         } else {
@@ -489,7 +522,7 @@ export class Orchestrator implements OnModuleInit {
         files: context.files,
         dodIds: [],
       },
-      evidence: runResult.evidence,
+      evidence: evidenceToString(runResult.evidence),
       diff: iterationDiff,
       durationMs: Date.now() - iterationStartedAt,
       outcome: hitlExchange ? 'awaiting-input' : 'ok',
@@ -988,6 +1021,119 @@ export class Orchestrator implements OnModuleInit {
   loopState(storyId: string): { isAutoRunning: boolean; session: string | null } {
     const session = this.sessions.get(storyId);
     return { isAutoRunning: this.isAutoRunning(storyId), session: session?.state ?? null };
+  }
+
+  /**
+   * Caminho de resgate ("needs human"): marca a task, para o auto-play graceful
+   * e emite `card.needs_human`. Reusado pelo limite de falhas de validação
+   * (#5), pelo gate de custo (#1) e pelo anti-thrash (#3).
+   */
+  private async escalateToHuman(
+    taskId: string,
+    storyId: string,
+    reason: string,
+    logMessage: string,
+  ): Promise<void> {
+    await this.prisma.card.update({
+      where: { id: taskId },
+      data: { needsHuman: true, needsHumanReason: reason },
+    });
+    // Para o auto-play da story sem abortar hard (graceful): preserva o estado
+    // no Postgres e deixa o próximo tick encerrar limpo.
+    await this.stop(storyId, 'graceful');
+    this.realtime.broadcast({ type: 'card.needs_human', taskId, storyId, reason });
+    await this.log(taskId, logMessage);
+  }
+
+  /**
+   * Salvaguardas por-iteração fecham o ciclo métrica→ação (#1) e anti-thrash
+   * (#3). Rodam ANTES de gastar uma nova iteração:
+   *
+   *  - **Gate de custo**: soma `durationMs` e (input+output) tokens já gastos
+   *    pela task; se ultrapassar `maxTaskDurationMs`/`maxTaskTokens` (0 = gate
+   *    desligado), escala para humano com reason de custo.
+   *  - **Anti-thrash**: compara `summary`+`nextStep` das últimas `thrashWindow`
+   *    iterações; se estiverem quase idênticas (≥ `thrashSimilarityThreshold`),
+   *    escala para humano (a AI está travada repetindo a mesma coisa).
+   *
+   * Retorna `true` se escalou (o chamador deve abortar a iteração).
+   */
+  private async enforceLoopGuards(taskId: string, storyId: string): Promise<boolean> {
+    const {
+      maxTaskDurationMs,
+      maxTaskTokens,
+      thrashDetectionEnabled,
+      thrashSimilarityThreshold,
+      thrashWindow,
+    } = this.config.agent;
+
+    const costGateOn = maxTaskDurationMs > 0 || maxTaskTokens > 0;
+    const thrashOn = thrashDetectionEnabled && thrashWindow >= 2;
+    if (!costGateOn && !thrashOn) return false;
+
+    const iterations = await this.prisma.iteration.findMany({
+      where: { cardId: taskId },
+      orderBy: { index: 'asc' },
+      select: {
+        durationMs: true,
+        inputTokens: true,
+        outputTokens: true,
+        summary: true,
+        handoffNextStep: true,
+      },
+    });
+    if (iterations.length === 0) return false;
+
+    // Gate de custo (#1).
+    if (maxTaskDurationMs > 0) {
+      const totalMs = iterations.reduce((a, it) => a + (it.durationMs ?? 0), 0);
+      if (totalMs >= maxTaskDurationMs) {
+        const reason = `orçamento de tempo excedido (${totalMs}ms ≥ ${maxTaskDurationMs}ms)`;
+        await this.escalateToHuman(
+          taskId,
+          storyId,
+          reason,
+          `gate de custo: ${reason} — task marcada como "precisa de humano"; auto-play parado`,
+        );
+        return true;
+      }
+    }
+    if (maxTaskTokens > 0) {
+      const totalTokens = iterations.reduce(
+        (a, it) => a + (it.inputTokens ?? 0) + (it.outputTokens ?? 0),
+        0,
+      );
+      if (totalTokens >= maxTaskTokens) {
+        const reason = `orçamento de tokens excedido (${totalTokens} ≥ ${maxTaskTokens})`;
+        await this.escalateToHuman(
+          taskId,
+          storyId,
+          reason,
+          `gate de custo: ${reason} — task marcada como "precisa de humano"; auto-play parado`,
+        );
+        return true;
+      }
+    }
+
+    // Anti-thrash (#3).
+    if (thrashOn) {
+      const samples: ThrashSample[] = iterations.map((it) => ({
+        summary: it.summary ?? '',
+        nextStep: it.handoffNextStep ?? '',
+      }));
+      if (isThrashing(samples, thrashSimilarityThreshold, thrashWindow)) {
+        const reason = 'AI travada (iterações repetitivas sem progresso)';
+        await this.escalateToHuman(
+          taskId,
+          storyId,
+          reason,
+          `anti-thrash: ${reason} — ${thrashWindow} iterações com similaridade ≥ ${thrashSimilarityThreshold}; task marcada como "precisa de humano"; auto-play parado`,
+        );
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -1536,6 +1682,13 @@ export class Orchestrator implements OnModuleInit {
     siblingHandoffs: { key: string; title: string; summary: string; nextStep: string }[];
     /** #10c: lastro do épico — resumos das stories anteriores (comments). */
     epicNotes: string[];
+    /**
+     * Contexto real (#2): diff acumulado do worktree, lido do `Iteration.diff`
+     * da ÚLTIMA iteração persistida desta task. Injetado no prompt para a AI ver
+     * concretamente o que já foi mudado (não só o histórico textual). Vazio na
+     * primeira iteração.
+     */
+    lastDiff: string;
   }> {
     const task = await this.prisma.card.findUnique({
       where: { id: taskId },
@@ -1576,6 +1729,7 @@ export class Orchestrator implements OnModuleInit {
         detail: true,
         handoffNextStep: true,
         handoffState: true,
+        diff: true,
       },
     });
     const iterationHistory = historyRows.map((it) => ({
@@ -1586,6 +1740,9 @@ export class Orchestrator implements OnModuleInit {
       nextStep: it.handoffNextStep ?? '',
       failedValidation: it.phase === 'validation' && it.handoffState === 'blocked',
     }));
+    // #2: diff acumulado — última iteração com diff não-vazio.
+    const lastDiff =
+      [...historyRows].reverse().find((it) => (it.diff ?? '').trim().length > 0)?.diff ?? '';
 
     // #10c: lastro cross-task — o que as tasks IRMÃS já concluídas fizeram.
     const siblingHandoffs: {
@@ -1644,6 +1801,7 @@ export class Orchestrator implements OnModuleInit {
       iterationHistory,
       siblingHandoffs,
       epicNotes,
+      lastDiff,
     };
   }
 
@@ -1798,6 +1956,27 @@ export class Orchestrator implements OnModuleInit {
       lines.push(`- Primeiro passo do profile: ${profile.firstStep}`);
     }
 
+    // #2: contexto REAL — diff acumulado do worktree (o que JÁ foi mudado nas
+    // iterações anteriores desta task). Dá à AI o estado concreto do código, não
+    // só o histórico textual. Truncado no prompt para não estourar o contexto.
+    const lastDiff = (context.lastDiff ?? '').trim();
+    if (lastDiff.length > 0) {
+      const MAX_PROMPT_DIFF = 20_000;
+      const shown =
+        lastDiff.length > MAX_PROMPT_DIFF
+          ? lastDiff.slice(0, MAX_PROMPT_DIFF) + '\n… [diff truncado no prompt]'
+          : lastDiff;
+      lines.push('');
+      lines.push('## Diff acumulado do worktree (o que JÁ foi mudado — NÃO refaça):');
+      lines.push(
+        'Este é o estado atual do seu trabalho no worktree (unified diff contra o commit base). ' +
+          'Continue a partir daqui; não reescreva o que já está correto.',
+      );
+      lines.push('```diff');
+      lines.push(shown);
+      lines.push('```');
+    }
+
     // #10c: lastro das tasks IRMÃS já concluídas (mesma story).
     if (context.siblingHandoffs.length) {
       lines.push('');
@@ -1850,7 +2029,13 @@ export class Orchestrator implements OnModuleInit {
     lines.push('  "dodTouched": ["<id de DOD que VOCÊ concluiu>"],');
     lines.push('  "affectedFlows": [{ "name": "<fluxo>", "files": ["<path>"], "note": "<o que muda>" }],');
     lines.push('  "nextStep": "<o que a PRÓXIMA iteração deve fazer; vazio se acabou>",');
-    lines.push('  "evidence": "<como você verificou seu trabalho; ex.: \\"npm test: 12 passed, build ok\\">",');
+    if (this.config.agent.requireStructuredEvidence) {
+      lines.push(
+        '  "evidence": { "checks": [{ "name": "test", "passed": true, "output": "12 passed" }], "filesChanged": ["<path>"], "note": "<opcional>" },',
+      );
+    } else {
+      lines.push('  "evidence": "<como você verificou seu trabalho; ex.: \\"npm test: 12 passed, build ok\\">",');
+    }
     lines.push('  "done": false');
     lines.push('}');
     lines.push('<<<END_KANBAN_RESULT>>>');
@@ -1877,6 +2062,14 @@ export class Orchestrator implements OnModuleInit {
     lines.push('- Rode os checks relevantes do projeto NO DIRETÓRIO ATUAL antes de concluir — ex.: `npm test`, `npm run build`, `npm run lint` (use os scripts que existirem no `package.json`).');
     lines.push('- Só marque `done: true` depois que esses checks passarem.');
     lines.push('- Preencha `evidence` com o resultado concreto da verificação (ex.: "npm test: 12 passed; build ok").');
+    if (this.config.agent.requireStructuredEvidence) {
+      lines.push(
+        '- ⚠️ Este projeto EXIGE `evidence` ESTRUTURADA: um objeto com `checks` (lista de ' +
+          '`{name, passed, output?}`) e opcionalmente `filesChanged`/`note`. Para fechar a task ' +
+          '(`done: true`) é OBRIGATÓRIO ao menos UM check com `passed: true`. Uma descrição em ' +
+          'texto livre NÃO fecha a task — a validação a tratará como "não verificável" e derivará correção.',
+      );
+    }
     lines.push('- Se o projeto NÃO tiver como verificar (sem testes/scripts), diga isso explicitamente em `evidence` (ex.: "sem suíte de testes no projeto — verificação manual da lógica").');
 
     // #6: canal ESTRUTURADO de pergunta (HITL). Substitui a instrução vaga.
