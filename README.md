@@ -98,6 +98,7 @@ Detalhes em [CONTRIBUTING.md](CONTRIBUTING.md).
 kanban-ai/
 ├── apps/web/          # frontend
 ├── apps/api/          # backend + loop engine + Prisma
+├── apps/mcp/          # MCP Server (segundo plano de controle — ADR-0020)
 ├── packages/shared/   # contratos compartilhados
 ├── docs/              # reference/, adr/, loop-engine.md
 ├── Dockerfile.dev     # imagem de dev (hot-reload) para api + web

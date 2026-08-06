@@ -435,13 +435,20 @@ export class Orchestrator implements OnModuleInit {
         const validationFailures = await this.prisma.iteration.count({
           where: { cardId: taskId, phase: 'validation', handoffState: 'blocked' },
         });
-        if (validationFailures >= this.config.agent.maxValidationFailures) {
-          await this.escalateToHuman(
-            taskId,
-            storyId,
-            problem.title,
-            `validação falhou ${validationFailures}x (limite ${this.config.agent.maxValidationFailures}) — marcada como "precisa de humano"; auto-play parado`,
-          );
+        // Cap de profundidade de derivação (#2): se a task de origem já está
+        // fundo demais na cadeia de derivações, parar de derivar e escalar —
+        // senão o engine pode derivar bugs em cadeia infinita.
+        const originCard = await this.prisma.card.findUnique({
+          where: { id: taskId },
+          select: { derivedDepth: true },
+        });
+        const depth = originCard?.derivedDepth ?? 0;
+        const decision = this.decideValidationFailureAction(depth, validationFailures);
+        if (decision.action === 'escalate') {
+          // O cap de falhas de validação usa `problem.title` como reason (o
+          // problema concreto); o cap de profundidade tem reason próprio.
+          const reason = decision.reasonKind === 'depth' ? decision.reason : problem.title;
+          await this.escalateToHuman(taskId, storyId, reason, decision.log);
         } else {
           await this.createDerivedTask(taskId, problem);
         }
@@ -555,6 +562,42 @@ export class Orchestrator implements OnModuleInit {
   }
 
   /**
+   * Decide, ao falhar a validação, entre DERIVAR uma task de correção ou
+   * ESCALAR para humano. Extraído para ser testável em isolamento (todo #4):
+   * dois caps escalam (em vez de derivar em cadeia infinita):
+   *   - #2 profundidade de derivação: `derivedDepth >= AGENT_MAX_DERIVED_DEPTH`
+   *   - #3 falhas de validação: `validationFailures >= AGENT_MAX_VALIDATION_FAILURES`
+   * O cap de profundidade tem precedência. `0` desliga o cap de profundidade.
+   */
+  private decideValidationFailureAction(
+    depth: number,
+    validationFailures: number,
+  ):
+    | { action: 'escalate'; reasonKind: 'depth' | 'failures'; reason: string; log: string }
+    | { action: 'derive' } {
+    const maxDerivedDepth = this.config.agent.maxDerivedDepth;
+    const maxValidationFailures = this.config.agent.maxValidationFailures;
+    if (maxDerivedDepth > 0 && depth >= maxDerivedDepth) {
+      const reason = `profundidade de derivação atingida (${depth} ≥ ${maxDerivedDepth})`;
+      return {
+        action: 'escalate',
+        reasonKind: 'depth',
+        reason,
+        log: `cap de derivação: ${reason} — task marcada como "precisa de humano"; auto-play parado`,
+      };
+    }
+    if (validationFailures >= maxValidationFailures) {
+      return {
+        action: 'escalate',
+        reasonKind: 'failures',
+        reason: `validação falhou ${validationFailures}x (limite ${maxValidationFailures})`,
+        log: `validação falhou ${validationFailures}x (limite ${maxValidationFailures}) — marcada como "precisa de humano"; auto-play parado`,
+      };
+    }
+    return { action: 'derive' };
+  }
+
+  /**
    * Cria uma task-bug derivada de uma falha de validação e liga a origem por
    * dependência REVERSA — artifact `createDerivedTask` (925–946). Em transação.
    * Implementado para a AI real; no mock a validação sempre passa.
@@ -595,6 +638,7 @@ export class Orchestrator implements OnModuleInit {
           loopType: 'bug',
           execState: 'idle',
           derivedFromId: originId,
+          derivedDepth: (origin.derivedDepth ?? 0) + 1,
           position: 0,
           dodItems: {
             create: [
@@ -1049,6 +1093,9 @@ export class Orchestrator implements OnModuleInit {
    * Salvaguardas por-iteração fecham o ciclo métrica→ação (#1) e anti-thrash
    * (#3). Rodam ANTES de gastar uma nova iteração:
    *
+   *  - **Cap de iterações**: se a task já acumulou `maxIterationsPerTask`
+   *    iterações persistidas (0 = desligado; LIGADO por default), escala para
+   *    humano — proteção anti-loop-infinito.
    *  - **Gate de custo**: soma `durationMs` e (input+output) tokens já gastos
    *    pela task; se ultrapassar `maxTaskDurationMs`/`maxTaskTokens` (0 = gate
    *    desligado), escala para humano com reason de custo.
@@ -1060,6 +1107,7 @@ export class Orchestrator implements OnModuleInit {
    */
   private async enforceLoopGuards(taskId: string, storyId: string): Promise<boolean> {
     const {
+      maxIterationsPerTask,
       maxTaskDurationMs,
       maxTaskTokens,
       thrashDetectionEnabled,
@@ -1067,9 +1115,10 @@ export class Orchestrator implements OnModuleInit {
       thrashWindow,
     } = this.config.agent;
 
+    const iterationCapOn = maxIterationsPerTask > 0;
     const costGateOn = maxTaskDurationMs > 0 || maxTaskTokens > 0;
     const thrashOn = thrashDetectionEnabled && thrashWindow >= 2;
-    if (!costGateOn && !thrashOn) return false;
+    if (!iterationCapOn && !costGateOn && !thrashOn) return false;
 
     const iterations = await this.prisma.iteration.findMany({
       where: { cardId: taskId },
@@ -1083,6 +1132,19 @@ export class Orchestrator implements OnModuleInit {
       },
     });
     if (iterations.length === 0) return false;
+
+    // Cap de iterações (#1 — anti-loop-infinito). Roda antes do gate de custo:
+    // se a task já acumulou muitas iterações, provavelmente está em loop.
+    if (iterationCapOn && iterations.length >= maxIterationsPerTask) {
+      const reason = `cap de iterações atingido (${iterations.length} ≥ ${maxIterationsPerTask}) — possível loop infinito`;
+      await this.escalateToHuman(
+        taskId,
+        storyId,
+        reason,
+        `cap de iterações: ${reason} — task marcada como "precisa de humano"; auto-play parado`,
+      );
+      return true;
+    }
 
     // Gate de custo (#1).
     if (maxTaskDurationMs > 0) {

@@ -54,6 +54,20 @@ export interface AppConfig {
      */
     maxValidationFailures: number;
     /**
+     * Cap de iterações por task — proteção contra loop infinito. Ao atingir
+     * `maxIterationsPerTask` iterações persistidas, o loop escala para humano
+     * (reason de loop). Default 30 (LIGADO por padrão — é a salvaguarda
+     * anti-loop-infinito). `0` desliga. AGENT_MAX_ITERATIONS_PER_TASK.
+     */
+    maxIterationsPerTask: number;
+    /**
+     * Cap de profundidade de derivação — quantas derivações em cadeia
+     * (task → task derivada → ...) são permitidas antes de o loop escalar para
+     * humano em vez de derivar de novo. Default 3. `0` desliga.
+     * AGENT_MAX_DERIVED_DEPTH.
+     */
+    maxDerivedDepth: number;
+    /**
      * Gate de custo — orçamento de TEMPO por task. Soma de `durationMs` das
      * iterações da task; ao ultrapassar, o loop marca `needsHuman` (reason de
      * custo), para o auto-play graceful e emite `card.needs_human`.
@@ -140,6 +154,8 @@ export function loadConfig(): AppConfig {
       flowTestGlobs: csv(process.env.AGENT_FLOW_TEST_GLOBS, ['.spec.', '.test.']),
       requireFlowCoverage: process.env.AGENT_REQUIRE_FLOW_COVERAGE === 'true',
       maxValidationFailures: num(process.env.AGENT_MAX_VALIDATION_FAILURES, 3),
+      maxIterationsPerTask: num(process.env.AGENT_MAX_ITERATIONS_PER_TASK, 30),
+      maxDerivedDepth: num(process.env.AGENT_MAX_DERIVED_DEPTH, 3),
       maxTaskDurationMs: num(process.env.AGENT_MAX_TASK_DURATION_MS, 0),
       maxTaskTokens: num(process.env.AGENT_MAX_TASK_TOKENS, 0),
       thrashDetectionEnabled:

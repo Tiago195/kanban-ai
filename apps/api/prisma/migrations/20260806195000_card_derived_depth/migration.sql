@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Card" ADD COLUMN "derivedDepth" INTEGER NOT NULL DEFAULT 0;

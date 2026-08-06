@@ -38,8 +38,13 @@ ai-engine/
   (configs `AGENT_VALIDATION_*` / `AGENT_VERIFY_FLOW_FILES`). Faz também
   **validação direcionada por fluxo**: para cada `affectedFlow` localiza specs
   co-located (`findRelatedTestFiles`) e os roda restritos (`runTestsForFiles`);
-  falha vira `problem` mencionando o fluxo; fluxo sem cobertura vira `problem` só
-  se `AGENT_REQUIRE_FLOW_COVERAGE=true` (senão log). Quando testes direcionados
+  falha vira `problem` mencionando o fluxo. **#5 (teste de mesa empírico):** para
+  fechar a lacuna "suite verde ≠ fluxo coberto", quando `AGENT_REQUIRE_FLOW_COVERAGE=true`
+  um fluxo que declara arquivos-**fonte** (não-spec) mas não tem spec co-located
+  vira `problem` (nomeando fluxo+arquivos), e um fluxo cujos specs foram localizados
+  mas **não puderam ser executados** (runner indeterminado) também vira `problem` —
+  sem execução não há teste de mesa. Com o flag off, ambos os casos são apenas log.
+  Quando testes direcionados
   rodam, o `test` global é pulado para não rodar duas vezes (build/lint globais
   seguem). Configs `AGENT_FLOW_TESTS_ENABLED` / `AGENT_FLOW_TEST_GLOBS` /
   `AGENT_REQUIRE_FLOW_COVERAGE`.
@@ -58,6 +63,25 @@ ai-engine/
    `needsHuman`/`needsHumanReason`, **para o auto-play da story (graceful)** e
    emite `card.needs_human`. Isso é o **destino/resgate**, não substitui caps de
    iteração/derivação.
+
+## Escalonamento a humano (#3) — três gatilhos
+
+O caminho de resgate `escalateToHuman(...)` (marca `needsHuman`/
+`needsHumanReason`, faz `stop(graceful)` e emite `card.needs_human`) é acionado
+por **três** gatilhos independentes — todos convergem para o mesmo destino:
+
+- **(a) Falhas de validação** — `AGENT_MAX_VALIDATION_FAILURES` (default 3):
+  ao esgotar as tentativas de validação da task, para de derivar e escala.
+- **(b) Cap de iterações** — `AGENT_MAX_ITERATIONS_PER_TASK` (default 30,
+  **LIGADO** por padrão como salvaguarda anti-loop-infinito; 0 = desligado):
+  em `enforceLoopGuards`, se a task já acumulou ≥ cap iterações persistidas,
+  escala com reason de loop.
+- **(c) Profundidade de derivação** — `AGENT_MAX_DERIVED_DEPTH` (default 3;
+  0 = desligado): no ramo de validação, antes de derivar, se a task de origem
+  já está fundo demais na cadeia de derivações (`Card.derivedDepth`), escala em
+  vez de criar mais uma derivada — evita cadeia infinita de bugs derivados.
+  `createDerivedTask` incrementa `derivedDepth` (origem = 0, cada derivada +1;
+  migration `card_derived_depth`).
 
 ## O que NÃO mexer
 
@@ -136,8 +160,14 @@ Ao mudar esses contratos, mantenha este arquivo em dia.
 - `npm test` (a partir de `apps/api`) roda os specs (`node:test` + `ts-node`,
   arquivos `src/**/*.spec.ts`). Cobertura atual em `loop-quality.spec.ts`:
   `isVerifiableEvidence`/`evidenceToString` (gate de `done`) e
-  `textSimilarity`/`isThrashing` (anti-thrash). Os specs são excluídos do build
-  via `tsconfig.build.json`.
+  `textSimilarity`/`isThrashing` (anti-thrash). `orchestrator-guards.spec.ts`
+  cobre o NÚCLEO via fakes leves (estratégia 1 — `new Orchestrator(...fakes)`):
+  cap de iterações + cost gate (`enforceLoopGuards`), decisão de derivação vs
+  escalonamento por `derivedDepth`, `escalateToHuman` (needsHuman + stop
+  graceful + `card.needs_human`), `createDerivedTask` (derivedDepth+1 +
+  dependência reversa), idempotência do watchdog, `stop` graceful vs hard
+  (AbortController) e `reconcileOnBoot` (retoma story ativa / no-op sem
+  stories). Os specs são excluídos do build via `tsconfig.build.json`.
 - Ao implementar `runIteration`, adicione testes cobrindo: encadeamento de
   iterações, idempotência do watchdog, stop graceful vs hard, e reconciliação no
   boot.

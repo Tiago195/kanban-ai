@@ -30,6 +30,9 @@ export class ValidationRunner {
    *  2. #7: verificacao de que os arquivos dos fluxos existem no worktree.
    *  3. #1: validacao empirica real - roda os scripts do projeto (test/build/lint)
    *     no worktree isolado e converte falhas em `problems` (-> task derivada).
+   *  4. #5: teste de mesa empirico por fluxo - garante que uma suite global verde
+   *     nao conte como "passed" quando os affectedFlows declarados nao sao de fato
+   *     exercitados por nenhum teste (ver runFlowTargetedTests).
    */
   async validate(input: {
     storyId: string;
@@ -133,11 +136,20 @@ export class ValidationRunner {
   }
 
   /**
-   * Validação direcionada por fluxo. Para cada affectedFlow tenta localizar os
-   * testes co-located dos seus arquivos e rodá-los restritos a esses arquivos.
+   * Validação direcionada por fluxo ("teste de mesa" empírico dos affectedFlows).
+   * Para cada affectedFlow localiza os testes co-located dos seus arquivos e os
+   * roda restritos a esses arquivos. O objetivo é fechar a lacuna "suite verde ≠
+   * mudança coberta": um fluxo cujos arquivos existem e cuja suite global passa
+   * NÃO deve contar como validado se nenhum teste realmente exercita aquele fluxo.
+   *
    *  - Testes encontrados que falham -> `problem` mencionando o fluxo.
-   *  - Fluxo sem NENHUM teste associado -> `problem` se `requireFlowCoverage`,
-   *    senão apenas `logger.debug`.
+   *  - Fluxo que declara arquivos-fonte (não-spec) mas NÃO tem nenhum spec
+   *    co-located -> lacuna de cobertura: `problem` (nomeando fluxo+arquivos) se
+   *    `requireFlowCoverage`, senão apenas aviso.
+   *  - Fluxo com specs localizados mas que NÃO puderam ser executados (runner
+   *    indeterminado) -> `problem` se `requireFlowCoverage` (não podemos afirmar
+   *    que o fluxo foi exercitado); senão fallback silencioso ao global.
+   *
    * Retorna true se ao menos um fluxo teve testes direcionados EXECUTADOS
    * (usado para pular o `test` global e evitar rodar duas vezes).
    */
@@ -147,9 +159,13 @@ export class ValidationRunner {
     problems: ValidationOutcome['problems'],
   ): Promise<boolean> {
     const markers = this.config.agent.flowTestGlobs;
+    const requireCoverage = this.config.agent.requireFlowCoverage;
     let ranAny = false;
 
     for (const flow of affectedFlows) {
+      // Separamos arquivos-fonte (que PRECISAM de teste que os exercite) dos
+      // arquivos que já são specs. Um fluxo que só declara specs não gera lacuna.
+      const sourceFiles = flow.files.filter((f) => !markers.some((m) => f.includes(m)));
       const testFiles = new Set<string>();
       for (const file of flow.files) {
         try {
@@ -163,16 +179,22 @@ export class ValidationRunner {
       }
 
       if (testFiles.size === 0) {
-        if (this.config.agent.requireFlowCoverage) {
+        // Lacuna de cobertura empírica: o fluxo declara arquivos-fonte mas
+        // nenhum spec co-located os exercita. A suite global pode estar verde
+        // sem tocar nada disto — não conta como "teste de mesa" do fluxo.
+        if (requireCoverage && sourceFiles.length > 0) {
           problems.push({
             title: `Fluxo "${flow.name}" sem cobertura de teste executável`,
             description:
-              `Nenhum arquivo de teste (${markers.join(', ')}) foi encontrado para os arquivos do ` +
-              `fluxo "${flow.name}". A entrega precisa de teste que exercite o fluxo declarado.`,
+              `Teste de mesa do fluxo "${flow.name}" impossível: nenhum arquivo de teste ` +
+              `(${markers.join(', ')}) foi encontrado para os arquivos-fonte declarados ` +
+              `(${sourceFiles.join(', ')}). Uma suite global verde NÃO comprova que este ` +
+              `fluxo foi exercitado. Adicione um teste co-located que cubra o fluxo declarado.`,
           });
         } else {
           this.logger.debug(
-            `Fluxo "${flow.name}" sem testes associados (requireFlowCoverage=false; apenas aviso).`,
+            `Fluxo "${flow.name}" sem testes associados ` +
+              `(requireFlowCoverage=${requireCoverage}, sourceFiles=${sourceFiles.length}; apenas aviso).`,
           );
         }
         continue;
@@ -181,10 +203,24 @@ export class ValidationRunner {
       try {
         const check = await this.workspaces.runTestsForFiles(cwd, [...testFiles]);
         if (!check.ran) {
-          // Runner não determinado com segurança: fallback silencioso ao global.
-          this.logger.debug(
-            `Testes direcionados do fluxo "${flow.name}" não executados (${check.output || 'runner desconhecido'}); usando scripts globais.`,
-          );
+          // Runner não determinado com segurança. Com cobertura exigida não
+          // podemos afirmar que o fluxo foi exercitado empiricamente: vira
+          // problema. Sem exigência, fallback silencioso aos scripts globais.
+          if (requireCoverage) {
+            problems.push({
+              title: `Fluxo "${flow.name}" com testes não executados`,
+              description:
+                `Foram localizados specs para o fluxo "${flow.name}" ` +
+                `(${[...testFiles].join(', ')}), mas o runner de testes não pôde ser ` +
+                `determinado com segurança, então eles NÃO foram executados ` +
+                `(${check.output || 'runner desconhecido'}). Sem execução não há teste de mesa ` +
+                `do fluxo — configure o script \`test\` do projeto para um runner suportado.`,
+            });
+          } else {
+            this.logger.debug(
+              `Testes direcionados do fluxo "${flow.name}" não executados (${check.output || 'runner desconhecido'}); usando scripts globais.`,
+            );
+          }
           continue;
         }
         ranAny = true;
@@ -196,6 +232,10 @@ export class ValidationRunner {
               `(${[...testFiles].join(', ')}). Corrija antes de concluir.\n\n` +
               truncate(check.output, 2000),
           });
+        } else {
+          this.logger.debug(
+            `Teste de mesa do fluxo "${flow.name}" OK: ${testFiles.size} spec(s) executado(s) com sucesso.`,
+          );
         }
       } catch (err) {
         this.logger.warn(

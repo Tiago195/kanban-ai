@@ -1,22 +1,21 @@
 
 # backlog
 
-- [ ] 🔴 Falhas / riscos (as mais graves)
-
-1. Sem cap de iterações por task. O  orchestrator  encadeia iterações sem  maxIterations  nem budget de tokens/tempo. Uma task que nunca fecha o DOD roda pra sempre — custo $ e loop infinito. O watchdog só garante idempotência, não conta tentativas.
-2. Sem limite de profundidade na derivação. Se uma task derivada ( createDerivedTask ) também falha na validação, ela deriva outra, sem  derivedDepth  nem contador. O próprio  loop-engine.md  descreve esse exato cenário de "tasks de correção duplicadas em loop infinito" — mas o guard-rail não existe no código.
-3. Não escala para humano em falha repetida. HITL só dispara se a própria AI perguntar. Se a validação falha N vezes, nada abre pergunta nem move a story para uma coluna de atenção. A AI pode queimar recursos sozinha.
-4. Zero testes. 0 arquivos  *.spec.ts , apesar do  AGENTS.md  do ai-engine exigir testes de encadeamento, idempotência do watchdog, stop graceful/hard e reconciliação no boot. O núcleo não tem rede de segurança.
-5. Validação é heurística, não empírica de verdade. O  ValidationRunner  roda  build/lint/test  e checa existência de arquivos, mas não faz o "teste de mesa" dos  affectedFlows  que a doc promete. Suite verde ≠ mudança coberta → falso "passed".
-6. ADR-0020 (MCP server) sem implementação — divergência doc↔código.
-
-
-
 
 # in progress
 
+
 # done
 <!-- apenas ultimas 2 tarefas, para n poluir o arquivo -->
+- [x] 🔴 Falhas / riscos (as mais graves)
+
+1. Cap de iterações por task: `AGENT_MAX_ITERATIONS_PER_TASK` (default 30, ON) somado em `enforceLoopGuards`; ao atingir, escala para humano via `escalateToHuman`. ✔
+2. Limite de profundidade de derivação: coluna `derivedDepth` no Card (+ migration), incrementada em `createDerivedTask`; `AGENT_MAX_DERIVED_DEPTH` (default 3) escala em vez de derivar. ✔
+3. Escalonamento a humano em falha repetida: agora coberto por TRÊS gatilhos → `AGENT_MAX_VALIDATION_FAILURES` + cap de iterações + profundidade de derivação, todos via `escalateToHuman` + `card.needs_human`. ✔
+4. Testes do núcleo: `orchestrator-guards.spec.ts` (12) + `validation-coverage.spec.ts` (6) cobrindo caps, escalonamento, encadeamento, idempotência do watchdog, stop graceful/hard e reconcileOnBoot. Suite total 31/31. ✔
+5. Validação empírica reforçada: `ValidationRunner` separa arquivos-fonte de specs por fluxo; fluxo sem cobertura verificável vira `problem` (sob `AGENT_REQUIRE_FLOW_COVERAGE`), fechando o falso "passed" de suite verde. ✔
+6. ADR-0020 (MCP): NÃO havia divergência — `apps/mcp` (`@kanban-ai/mcp`) já está implementado. Corrigida a única lacuna real (README não listava `apps/mcp`). ✔
+
 - [x] 🟡 Melhorias de qualidade de entrega
 
 • Fechar o ciclo métrica→ação: cost gate (AGENT_MAX_TASK_DURATION_MS / AGENT_MAX_TASK_TOKENS) em enforceLoopGuards escala para humano quando a task estoura duração/tokens. ✔

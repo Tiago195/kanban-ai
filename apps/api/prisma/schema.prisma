@@ -136,6 +136,9 @@ model Card {
   derivedFromId String?
   derivedFrom   Card?   @relation("Derivation", fields: [derivedFromId], references: [id], onDelete: SetNull)
   derived       Card[]  @relation("Derivation")
+  // Profundidade na cadeia de derivação (origem = 0; cada derivada = +1).
+  // Alimenta o cap AGENT_MAX_DERIVED_DEPTH (anti-loop de derivações).
+  derivedDepth  Int     @default(0)
 
   // Dependências entre tasks (grafo)
   dependsOn  TaskDependency[] @relation("Dependent")
