@@ -2195,3 +2195,37 @@
   align-items: center;
   gap: 4px;
 }
+
+/* Modal que exige campos obrigatórios antes de mover a story (ex.: Projeto-alvo). */
+.required-fields-dialog {
+  max-width: 520px;
+}
+.required-field-block {
+  margin: 8px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.required-field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg, #e6e8ef);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.required-field-mark {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--danger, #f87171);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.required-field-input {
+  border: 1px solid var(--danger, #f87171) !important;
+}
+.required-field-input:focus {
+  outline: none;
+  border-color: var(--accent, #6ea8fe) !important;
+  box-shadow: 0 0 0 2px rgba(110, 168, 254, 0.25);
+}

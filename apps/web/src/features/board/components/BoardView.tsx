@@ -26,6 +26,14 @@ import { useBoard, useCards, useCreateCard, useDeleteCard, useModels, useMoveCar
 import { useBoardUiStore } from "@/features/board/services";
 import { useCardLabels, LABEL_PALETTE } from "@/features/labels";
 import { useCard, useDodMutations, useFlows, useUpdateCard } from "@/features/stories";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/shared/components/ui/dialog";
 import { showToast } from "@/shared/services/toastStore";
 import type { ApiBoardColumn, ApiCardDetails, ApiCardSummary } from "@/shared/types";
 
@@ -1681,6 +1689,129 @@ function TaskModal({
   );
 }
 
+/**
+ * O agent só consegue trabalhar numa story se houver um Projeto-alvo (repo onde
+ * a AI cria o worktree isolado). Uma story herda o `aiProject` do épico pai.
+ * Retorna o projeto-alvo EFETIVO (próprio ou herdado) já normalizado, ou "".
+ */
+function resolveEffectiveProject(
+  card: Pick<ApiCardSummary, "aiProject" | "parentId">,
+  allCards: ApiCardSummary[],
+): string {
+  const own = card.aiProject?.trim() ?? "";
+  if (own) return own;
+  if (!card.parentId) return "";
+  const parent = allCards.find((c) => c.id === card.parentId);
+  return parent?.aiProject?.trim() ?? "";
+}
+
+/** Uma coluna do board é "In Progress"? (a que dispara o loop engine). */
+function isInProgressColumn(column: ApiBoardColumn | undefined): boolean {
+  return column?.title.trim().toLowerCase() === "in progress";
+}
+
+/**
+ * Move pendente que foi bloqueado por faltar campo obrigatório. Guardamos tudo
+ * o que precisamos para refazer o move depois que o usuário preencher o campo.
+ */
+interface PendingMove {
+  cardId: string;
+  cardKey: string;
+  cardTitle: string;
+  columnId: string;
+  parentId: string | null;
+  /** Nome do épico pai, se herdaria dele (para orientar o usuário). */
+  parentKey?: string | null;
+}
+
+/**
+ * Modal que EXIGE o Projeto-alvo antes de mover uma story para In Progress.
+ * Deixa óbvio qual campo preencher e, ao salvar, grava o `aiProject` na story e
+ * então efetiva o move original.
+ */
+function RequiredFieldsModal({
+  boardId,
+  pending,
+  onClose,
+  onSatisfied,
+}: {
+  boardId: string;
+  pending: PendingMove;
+  onClose: () => void;
+  onSatisfied: (move: PendingMove) => void;
+}) {
+  const updateCard = useUpdateCard();
+  const [aiProject, setAiProject] = useState("");
+
+  const value = aiProject.trim();
+  const canSave = value.length > 0 && !updateCard.isPending;
+
+  const handleSave = () => {
+    if (!canSave) return;
+    updateCard.mutate(
+      { boardId, cardId: pending.cardId, dto: { aiProject: value } },
+      {
+        onSuccess: () => {
+          onSatisfied(pending);
+          onClose();
+        },
+      },
+    );
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
+      <DialogContent className="required-fields-dialog">
+        <DialogHeader>
+          <DialogTitle>Falta o Projeto-alvo para mover a story</DialogTitle>
+          <DialogDescription>
+            A story <strong>{pending.cardKey}</strong> só pode entrar em{" "}
+            <strong>In Progress</strong> depois que você definir o repositório
+            onde a AI vai trabalhar. Sem isso o agent não tem onde criar o
+            worktree isolado.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="required-field-block">
+          <label className="required-field-label" htmlFor="required-ai-project">
+            Projeto-alvo (repositório onde a AI trabalha){" "}
+            <span className="required-field-mark">*obrigatório</span>
+          </label>
+          <input
+            id="required-ai-project"
+            className="card-desc-input required-field-input"
+            autoFocus
+            value={aiProject}
+            placeholder="/caminho/absoluto/do/repositorio"
+            onChange={(event) => setAiProject(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") handleSave();
+            }}
+          />
+          <div className="modal-hint">
+            Caminho absoluto do repositório onde a AI cria uma branch/worktree
+            isolada. Ex.: <code>/home/voce/dev/meu-projeto</code>.
+          </div>
+        </div>
+
+        <DialogFooter>
+          <button className="kb-btn" type="button" onClick={onClose}>
+            Cancelar
+          </button>
+          <button
+            className="kb-btn kb-btn-primary"
+            type="button"
+            disabled={!canSave}
+            onClick={handleSave}
+          >
+            {updateCard.isPending ? "Salvando…" : "Salvar e mover"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function BoardView() {
   const { boardId, isLoading: loadingBoards, isError: boardError } = usePrimaryBoardId();
   const { data: board } = useBoard(boardId);
@@ -1691,6 +1822,7 @@ export function BoardView() {
   const [overColumnId, setOverColumnId] = useState<string | null>(null);
   const [createEpicOpen, setCreateEpicOpen] = useState(false);
   const [createStoryCtx, setCreateStoryCtx] = useState<{ columnId: string; parentId: string | null } | null>(null);
+  const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
 
   const { modals, openEpic, openStory, openTask, closeAllModals, closeTopModal, setDraggedCard, draggedCardId } =
     useBoardUiStore();
@@ -1824,6 +1956,30 @@ export function BoardView() {
           const destination = getColumnFromOverId(overId, stories, activeId, (card) => card.boardColumnId);
           if (!destination) return;
           const movedStory = stories.find((story) => story.id === activeId);
+
+          // GATE: mover uma story para In Progress exige Projeto-alvo (aiProject)
+          // definido — próprio ou herdado do épico pai. Se faltar, não movemos;
+          // abrimos o modal exigindo o campo (o backend também recusa, defesa em
+          // profundidade). Ver CardsService.move.
+          const destColumn = (board?.columns ?? []).find((column) => column.id === destination);
+          if (movedStory && isInProgressColumn(destColumn)) {
+            const effective = resolveEffectiveProject(movedStory, cards ?? []);
+            if (!effective) {
+              const parent = movedStory.parentId
+                ? (cards ?? []).find((c) => c.id === movedStory.parentId)
+                : null;
+              setPendingMove({
+                cardId: movedStory.id,
+                cardKey: movedStory.key,
+                cardTitle: movedStory.title,
+                columnId: destination,
+                parentId: movedStory.parentId ?? null,
+                parentKey: parent?.key ?? null,
+              });
+              return;
+            }
+          }
+
           moveCard.mutate({
             boardId,
             cardId: activeId,
@@ -1918,6 +2074,22 @@ export function BoardView() {
           onCreated={(storyId) => {
             setCreateStoryCtx(null);
             openStory(storyId);
+          }}
+        />
+      ) : null}
+
+      {pendingMove ? (
+        <RequiredFieldsModal
+          boardId={boardId}
+          pending={pendingMove}
+          onClose={() => setPendingMove(null)}
+          onSatisfied={(move) => {
+            moveCard.mutate({
+              boardId,
+              cardId: move.cardId,
+              dto: { columnId: move.columnId },
+              parentId: move.parentId,
+            });
           }}
         />
       ) : null}

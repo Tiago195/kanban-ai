@@ -70,3 +70,26 @@ export interface CreateFlowDto {
   files?: string[];
   note?: string;
 }
+
+/**
+ * Código de erro estruturado usado quando um move é recusado por faltarem
+ * campos obrigatórios (ex.: mover story→In Progress sem `aiProject`). O backend
+ * inclui este código no corpo do erro para o front saber exatamente qual campo
+ * exigir do usuário (sem parsear a mensagem textual).
+ */
+export const MISSING_REQUIRED_FIELDS = 'MISSING_REQUIRED_FIELDS' as const;
+
+/** Campos que o gate de move pode exigir antes de permitir a transição. */
+export type RequiredCardField = 'aiProject';
+
+/**
+ * Corpo de erro (400) emitido pelo gate de move quando faltam campos
+ * obrigatórios para a transição pretendida.
+ */
+export interface MissingRequiredFieldsError {
+  code: typeof MISSING_REQUIRED_FIELDS;
+  /** Campos ausentes que precisam ser preenchidos antes de refazer o move. */
+  fields: RequiredCardField[];
+  /** Mensagem legível (fallback caso o front não trate o código). */
+  message: string;
+}

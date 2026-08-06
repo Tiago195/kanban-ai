@@ -51,14 +51,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     // Tenta extrair a mensagem do backend (Nest devolve { message, statusCode }).
     let serverMessage: string | undefined;
+    let serverCode: string | undefined;
     try {
-      const body = (await res.clone().json()) as { message?: string | string[] };
+      const body = (await res.clone().json()) as { message?: string | string[]; code?: string };
       serverMessage = Array.isArray(body?.message) ? body.message.join(", ") : body?.message;
+      serverCode = typeof body?.code === "string" ? body.code : undefined;
     } catch {
       // corpo não-JSON: ignora e cai no fallback abaixo
     }
     const err = new Error(serverMessage ?? `API ${path} respondeu ${res.status}`);
-    (err as Error & { status?: number }).status = res.status;
+    (err as Error & { status?: number; code?: string }).status = res.status;
+    if (serverCode) (err as Error & { code?: string }).code = serverCode;
     throw err;
   }
 

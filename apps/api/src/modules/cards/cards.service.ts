@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
-import { TASK_CREATION_COLUMNS } from '@kanban-ai/shared';
-import type { EpicDerivedStatus } from '@kanban-ai/shared';
+import { TASK_CREATION_COLUMNS, MISSING_REQUIRED_FIELDS } from '@kanban-ai/shared';
+import type { EpicDerivedStatus, MissingRequiredFieldsError } from '@kanban-ai/shared';
 import type {
   AttachAssigneeDto,
   AttachLabelDto,
@@ -356,6 +356,35 @@ export class CardsService {
 
       const toColumn = await tx.column.findUnique({ where: { id: dto.columnId } });
       if (!toColumn) throw new BadRequestException('coluna de destino inexistente');
+
+      // GATE: uma story só pode entrar em "In Progress" se tiver um
+      // Projeto-alvo (aiProject) definido — próprio ou herdado do épico pai.
+      // Sem ele, o loop engine não consegue criar o worktree isolado no
+      // repositório-alvo e a AI não tem onde trabalhar. Rejeitamos a transição
+      // com um código estruturado para o front exigir o campo certo.
+      if (
+        card.type === 'story' &&
+        !toColumn.isTaskColumn &&
+        toColumn.title.trim().toLowerCase() === 'in progress'
+      ) {
+        let effectiveProject = card.aiProject?.trim() ?? '';
+        if (!effectiveProject && card.parentId) {
+          const epic = await tx.card.findUnique({
+            where: { id: card.parentId },
+            select: { aiProject: true },
+          });
+          effectiveProject = epic?.aiProject?.trim() ?? '';
+        }
+        if (!effectiveProject) {
+          const payload: MissingRequiredFieldsError = {
+            code: MISSING_REQUIRED_FIELDS,
+            fields: ['aiProject'],
+            message:
+              'Defina o Projeto-alvo (repositório onde a AI trabalha) antes de mover a story para In Progress.',
+          };
+          throw new BadRequestException(payload);
+        }
+      }
 
       const isTaskBoard = toColumn.isTaskColumn;
       const fromColumnId = isTaskBoard ? card.taskColumnId : card.boardColumnId;

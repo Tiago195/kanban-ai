@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { MoveCardDto } from "@kanban-ai/shared";
+import { MISSING_REQUIRED_FIELDS, type MoveCardDto } from "@kanban-ai/shared";
 
 import { queryKeys } from "@/features/board/services/queryKeys";
 import { apiClient } from "@/shared/services/apiClient";
+import { showToast } from "@/shared/services/toastStore";
 import type { ApiBoard, ApiCardDetails, ApiCardSummary } from "@/shared/types";
 
 interface MoveCardVariables {
@@ -82,12 +83,22 @@ export function useMoveCard() {
 
       return { previousCards, previousParent };
     },
-    onError: (_error, variables, context) => {
+    onError: (error, variables, context) => {
       if (context?.previousCards) {
         queryClient.setQueryData(queryKeys.cards(variables.boardId), context.previousCards);
       }
       if (variables.parentId && context?.previousParent) {
         queryClient.setQueryData(queryKeys.card(variables.parentId), context.previousParent);
+      }
+      // Gate do backend: story→In Progress sem Projeto-alvo. Avisa de forma clara
+      // (o board principal já abre o modal proativamente; isto cobre outros
+      // pontos de move, como o mini-kanban dentro do épico).
+      const code = (error as Error & { code?: string })?.code;
+      if (code === MISSING_REQUIRED_FIELDS) {
+        showToast(
+          (error as Error)?.message ??
+            "Defina o Projeto-alvo da story antes de movê-la para In Progress.",
+        );
       }
     },
     onSettled: (_data, _error, variables) => {
