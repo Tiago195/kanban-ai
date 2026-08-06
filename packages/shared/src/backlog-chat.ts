@@ -105,6 +105,20 @@ export interface BacklogProposalStory {
   aiNotes?: string;
   points?: StoryPoints;
   /**
+   * Definition of Done sugerido para a story (3–7 itens objetivos e
+   * verificáveis). Cada string vira um `DodItem` do card story ao aplicar
+   * (`/apply`), na ordem em que aparecem (position incremental). É o **único**
+   * checklist do v1 — NÃO é DoR nem acceptance (proibidos — ADR-0007).
+   * Opcional para manter compatibilidade retroativa com propostas antigas.
+   */
+  dod?: string[];
+  /**
+   * Fluxos/áreas do código que a story afeta (usados na validação final). Cada
+   * item vira um `AffectedFlow` do card story ao aplicar (`/apply`). Opcional
+   * para manter compatibilidade retroativa com propostas antigas.
+   */
+  affectedFlows?: { name: string; files: string[]; note?: string }[];
+  /**
    * Rascunho de tasks (decomposição da story em passos acionáveis). **Opcional
    * e sob demanda** — a proposta não gera tasks por padrão (backlog enxuto);
    * o humano pode pedir "sugira tasks" na thread da story. Ao aprovar (`/apply`)
@@ -154,9 +168,9 @@ export interface BacklogProposal {
  * `path` aponta para um campo editável: `/epic/title`, `/epic/description`,
  * `/epic/points`, `/stories/<i>/title`, `/stories/<i>/description`,
  * `/stories/<i>/aiSummary`, `/stories/<i>/aiNotes`, `/stories/<i>/points`,
- * `/stories/<i>/tasks` (array inteiro). `add`/`remove` operam sobre
- * `/stories/<i>` e sobre `/stories/<i>/tasks/<j>` (`add` em
- * `/stories/<i>/tasks/-`).
+ * `/stories/<i>/dod`, `/stories/<i>/affectedFlows`, `/stories/<i>/tasks`
+ * (arrays inteiros). `add`/`remove` operam sobre `/stories/<i>` e sobre
+ * `/stories/<i>/tasks/<j>` (`add` em `/stories/<i>/tasks/-`).
  */
 export interface BacklogPatchOp {
   op: 'replace' | 'add' | 'remove';

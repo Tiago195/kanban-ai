@@ -180,6 +180,19 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
         if (event.type === "iteration.appended" || event.type === "task.state.changed") {
           void queryClient.invalidateQueries({ queryKey: queryKeys.card(event.taskId) });
           void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
+          // O evento carrega taskId, não storyId; invalida qualquer painel de
+          // métricas aberto (chave ["loopMetrics", storyId]) para refletir a
+          // nova iteração sem F5.
+          void queryClient.invalidateQueries({
+            predicate: (q) => q.queryKey[0] === "loopMetrics",
+          });
+          return;
+        }
+
+        if (event.type === "card.needs_human") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.card(event.taskId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.cards(boardId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.loopState(event.storyId) });
           return;
         }
 

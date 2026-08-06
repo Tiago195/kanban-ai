@@ -124,7 +124,7 @@ function applyOp(
   }
 
   const storyMatch =
-    /^\/stories\/(\d+)(\/(title|description|aiSummary|aiNotes|points))?$/.exec(path);
+    /^\/stories\/(\d+)(\/(title|description|aiSummary|aiNotes|points|dod|affectedFlows))?$/.exec(path);
   if (storyMatch) {
     const idx = Number(storyMatch[1]);
     const field = storyMatch[3];
@@ -169,6 +169,22 @@ function applyOp(
     }
     if (field === 'points') {
       story.points = requirePoints(op.value, path);
+      return;
+    }
+    if (field === 'dod') {
+      if (op.op === 'remove') {
+        story.dod = [];
+        return;
+      }
+      story.dod = requireStringArray(op.value, path);
+      return;
+    }
+    if (field === 'affectedFlows') {
+      if (op.op === 'remove') {
+        story.affectedFlows = [];
+        return;
+      }
+      story.affectedFlows = requireFlowArray(op.value, path);
       return;
     }
   }
@@ -229,7 +245,48 @@ function requireStory(value: unknown, path: string): BacklogProposalStory {
   if (o.tasks !== undefined) {
     story.tasks = requireTaskArray(o.tasks, `${path}/tasks`);
   }
+  if (o.dod !== undefined) {
+    story.dod = requireStringArray(o.dod, `${path}/dod`);
+  }
+  if (o.affectedFlows !== undefined) {
+    story.affectedFlows = requireFlowArray(o.affectedFlows, `${path}/affectedFlows`);
+  }
   return story;
+}
+
+function requireStringArray(value: unknown, path: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new BadRequestException(`valor de ${path} deve ser um array de strings`);
+  }
+  return value.map((item, i) => requireString(item, `${path}/${i}`));
+}
+
+function requireFlowArray(
+  value: unknown,
+  path: string,
+): { name: string; files: string[]; note?: string }[] {
+  if (!Array.isArray(value)) {
+    throw new BadRequestException(`valor de ${path} deve ser um array de flows`);
+  }
+  return value.map((item, i) => requireFlow(item, `${path}/${i}`));
+}
+
+function requireFlow(
+  value: unknown,
+  path: string,
+): { name: string; files: string[]; note?: string } {
+  if (typeof value !== 'object' || value === null) {
+    throw new BadRequestException(`valor de ${path} deve ser um objeto flow`);
+  }
+  const o = value as Record<string, unknown>;
+  const name = requireString(o.name, `${path}/name`);
+  const files =
+    o.files === undefined ? [] : requireStringArray(o.files, `${path}/files`);
+  const flow: { name: string; files: string[]; note?: string } = { name, files };
+  if (o.note !== undefined) {
+    flow.note = requireString(o.note, `${path}/note`);
+  }
+  return flow;
 }
 
 function requireTask(value: unknown, path: string): BacklogProposalTask {

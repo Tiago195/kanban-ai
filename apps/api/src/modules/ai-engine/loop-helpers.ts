@@ -38,6 +38,8 @@ export interface LoopTask {
   phases: IterationPhase[];
   /** DOD: só o `done` importa para o gate. */
   dodDone: boolean[];
+  /** Task escalada para humano: fica fora do conjunto executável até ser resolvida. */
+  needsHuman: boolean;
 }
 
 /** Todas as tasks da story estão concluídas? */
@@ -57,9 +59,14 @@ export function pendingDeps(task: LoopTask, byId: Map<string, LoopTask>): LoopTa
     .filter((d): d is LoopTask => !!d && d.execState !== 'done');
 }
 
-/** Task pronta para rodar: não concluída e sem dependências pendentes — artifact `taskReady`. */
+/** Task pronta para rodar: não concluída, sem deps pendentes e não escalada a humano — artifact `taskReady`. */
 export function taskReady(task: LoopTask, byId: Map<string, LoopTask>): boolean {
-  return task.type === 'task' && task.execState !== 'done' && pendingDeps(task, byId).length === 0;
+  return (
+    task.type === 'task' &&
+    task.execState !== 'done' &&
+    !task.needsHuman &&
+    pendingDeps(task, byId).length === 0
+  );
 }
 
 /**

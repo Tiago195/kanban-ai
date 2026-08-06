@@ -109,7 +109,7 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
   lines.push('## Regras de domínio (NUNCA violar)');
   lines.push('- Hierarquia: um **Epic** agrupa **Stories**; uma Story pode ter **Tasks** (as unidades de trabalho executável).');
   lines.push(`- Story points ∈ {${pointsList}} (escala Fibonacci). Só Epic e Story têm pontos; **Tasks NÃO têm pontos**. Use apenas esses valores.`);
-  lines.push('- NÃO existe "Definition of Ready" nem "acceptance criteria" no v1. O único checklist é o **DoD (Definition of Done)**, e ele é montado DEPOIS, direto no board — **não** o proponha nem o descreva aqui (evita duplicação).');
+  lines.push('- NÃO existe "Definition of Ready" nem "acceptance criteria" no v1. O único checklist é o **DoD (Definition of Done)** — proponha-o POR STORY (3–7 itens objetivos e verificáveis), no campo `dod`. NÃO invente DoR nem acceptance.');
   lines.push('- Mantenha o backlog **enxuto**: só as Stories realmente necessárias para a ideia. Prefira 2–6 Stories a uma lista inflada. O humano pode pedir para expandir depois.');
   lines.push('- Títulos curtos e acionáveis. **Descrições ricas**: 2–5 linhas explicando o VALOR e o comportamento esperado da story (não uma frase genérica).');
 
@@ -151,6 +151,8 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
   lines.push('      "aiSummary": "<1–2 linhas: contexto/objetivo desta story para o agente executor>",');
   lines.push('      "aiNotes": "<opcional: notas técnicas, dependências, pontos de atenção>",');
   lines.push('      "points": 3,');
+  lines.push('      "dod": [ "<critério objetivo e verificável 1>", "<critério 2>", "<critério 3>" ],');
+  lines.push('      "affectedFlows": [ { "name": "<fluxo/área afetada>", "files": ["<path 1>", "<path 2>"], "note": "<opcional>" } ],');
   lines.push('      "tasks": [ { "title": "<task opcional 1>" }, { "title": "<task opcional 2>" } ]');
   lines.push('    }');
   lines.push('  ],');
@@ -163,6 +165,8 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
   lines.push(`- \`points\`: apenas valores Fibonacci ∈ {${pointsList}}. Omita se não souber estimar. **Tasks não têm pontos.**`);
   lines.push('- `stories`: enxuto. Cada story é uma fatia de valor entregável, com descrição rica (2–5 linhas).');
   lines.push('- `aiSummary` / `aiNotes`: opcionais mas recomendados — dão contexto ao agente que vai executar a story depois.');
+  lines.push('- `dod`: **recomendado** — 3–7 itens objetivos, verificáveis e escritos como resultado ("X está feito/testado/documentado"). É o único checklist (sem DoR/acceptance). Cada item vira um DodItem do card story ao aplicar.');
+  lines.push('- `affectedFlows`: **opcional** — inclua quando já der para antecipar os fluxos/áreas do código que a story toca. Cada item tem `name` (fluxo/área), `files` (paths prováveis, pode ser lista vazia) e `note` (opcional). Omita o campo se não fizer sentido ainda.');
   lines.push('- `tasks`: **OPCIONAL**. Só rascunhe tasks se o humano pedir OU se a decomposição for óbvia e agregar valor. Task tem só `title` (sem pontos, sem DoD). Elas viram cards `type:task` filhos da story quando o backlog for aplicado; o refinamento real e o DoD acontecem no board. Se não fizer sentido, deixe `tasks` fora.');
   lines.push('- Não repita a proposta como texto solto fora do bloco — o bloco é a fonte da verdade.');
 
@@ -186,6 +190,8 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
     lines.push('    { "op": "replace", "path": "/epic/title", "value": "<novo título>" },');
     lines.push('    { "op": "replace", "path": "/stories/0/points", "value": 5 },');
     lines.push('    { "op": "replace", "path": "/stories/0/aiNotes", "value": "<notas técnicas>" },');
+    lines.push('    { "op": "replace", "path": "/stories/0/dod", "value": ["<critério 1>", "<critério 2>"] },');
+    lines.push('    { "op": "replace", "path": "/stories/0/affectedFlows", "value": [ { "name": "<fluxo>", "files": ["<path>"], "note": "" } ] },');
     lines.push('    { "op": "add", "path": "/stories/0/tasks/-", "value": { "title": "<nova task>" } },');
     lines.push('    { "op": "add", "path": "/stories/-", "value": { "title": "<nova story>", "points": 3 } },');
     lines.push('    { "op": "remove", "path": "/stories/2" }');
@@ -195,7 +201,7 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
     lines.push('');
     lines.push('Regras do patch:');
     lines.push('- `baseVersion`: a versão da proposta corrente exibida acima.');
-    lines.push('- `path` válidos: `/epic/title`, `/epic/description`, `/epic/points`; por story: `/stories/<i>/title`, `/stories/<i>/description`, `/stories/<i>/aiSummary`, `/stories/<i>/aiNotes`, `/stories/<i>/points`. Para adicionar/remover story: `add` em `/stories/-` (fim) e `remove` em `/stories/<i>`. Para tasks de uma story: `replace` em `/stories/<i>/tasks` (array inteiro), `add` em `/stories/<i>/tasks/-` (fim) e `remove`/`replace` em `/stories/<i>/tasks/<j>`.');
+    lines.push('- `path` válidos: `/epic/title`, `/epic/description`, `/epic/points`; por story: `/stories/<i>/title`, `/stories/<i>/description`, `/stories/<i>/aiSummary`, `/stories/<i>/aiNotes`, `/stories/<i>/points`, `/stories/<i>/dod` (array inteiro de strings), `/stories/<i>/affectedFlows` (array inteiro de flows). Para adicionar/remover story: `add` em `/stories/-` (fim) e `remove` em `/stories/<i>`. Para tasks de uma story: `replace` em `/stories/<i>/tasks` (array inteiro), `add` em `/stories/<i>/tasks/-` (fim) e `remove`/`replace` em `/stories/<i>/tasks/<j>`.');
     lines.push(`- \`points\` só Fibonacci ∈ {${pointsList}}. Task tem só \`title\` (sem pontos).`);
     lines.push('- Só inclua ops para o que o humano pediu. NÃO toque em itens não solicitados.');
     lines.push('- Se o humano pedir uma mudança grande que reestrutura tudo, aí sim emita um KANBAN_BACKLOG novo com `version` incrementado.');

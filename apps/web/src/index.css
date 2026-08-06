@@ -1312,6 +1312,94 @@
     margin-top: 2px;
   }
 
+  /* Diff / Replay Viewer por iteração */
+  .diff-viewer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .diff-replay-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .diff-nav-btn {
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .diff-nav-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .diff-replay-pos {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 0 auto;
+  }
+  .diff-iter-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .diff-iter-chip {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .diff-iter-chip.is-active {
+    background: var(--accent, #1971c2);
+    border-color: var(--accent, #1971c2);
+    color: #fff;
+  }
+  .diff-empty {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 6px 0;
+  }
+  .diff-body {
+    margin: 0;
+    max-height: 360px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .diff-line {
+    white-space: pre;
+    padding: 0 8px;
+  }
+  .diff-line.diff-add {
+    background: rgba(47, 158, 68, 0.14);
+    color: #2f9e44;
+  }
+  .diff-line.diff-del {
+    background: rgba(224, 49, 49, 0.14);
+    color: #e03131;
+  }
+  .diff-line.diff-hunk {
+    color: #1971c2;
+  }
+  .diff-line.diff-meta {
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+  .diff-line.diff-ctx {
+    color: var(--text);
+  }
+
   .flows-list {
     display: flex;
     flex-direction: column;
@@ -1431,6 +1519,20 @@
     background: color-mix(in srgb, var(--warn) 22%, transparent);
     color: var(--warn);
     border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  }
+
+  /* badge "precisa de você" (needs-human: loop desistiu após falhas de validação) */
+  .needs-human-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--danger) 20%, transparent);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
   }
 
   /* chat/transcript do agente (streaming + HITL) */
@@ -2228,4 +2330,65 @@
   outline: none;
   border-color: var(--accent, #6ea8fe) !important;
   box-shadow: 0 0 0 2px rgba(110, 168, 254, 0.25);
+}
+
+/* ── Painel de custo & qualidade do loop (LoopMetricsPanel) ────────────── */
+.loop-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.metrics-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 0;
+}
+.metric-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+.metric-stat {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 8px 10px;
+}
+.metric-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+.metric-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.metric-stat-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+.metrics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.metrics-table th,
+.metrics-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.metrics-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.metrics-table .metrics-num {
+  text-align: right;
+}
+.metrics-table .metrics-key {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  white-space: nowrap;
 }

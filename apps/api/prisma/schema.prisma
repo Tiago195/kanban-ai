@@ -99,6 +99,11 @@ model Card {
   blocked        Boolean @default(false)
   everInProgress Boolean @default(false)
 
+  // "Needs human": o loop engine desistiu da task após esgotar as tentativas
+  // de validação (AGENT_MAX_VALIDATION_FAILURES). Flag/badge, não coluna nova.
+  needsHuman       Boolean @default(false)
+  needsHumanReason String?
+
   // Modelo de AI para desenvolver este card. null = herda do pai
   // (task -> story -> epic -> board.defaultModel).
   model String?
@@ -244,6 +249,11 @@ model Iteration {
 
   // #6: evidência de verificação do próprio trabalho (ex.: "npm test: 12 passed").
   evidence String @default("")
+
+  // Diff/Replay Viewer: unified diff do worktree capturado ao fim da iteração
+  // (git diff HEAD). String vazia quando não houver mudança; truncado no
+  // orquestrador para não estourar payload/DB.
+  diff String @default("")
 
   // #8: telemetria de qualidade (todos nullable — sem backfill).
   durationMs   Int? // duração da iteração

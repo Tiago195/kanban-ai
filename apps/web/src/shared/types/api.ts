@@ -73,6 +73,8 @@ export interface ApiCardSummary {
   points: StoryPoints | null;
   blocked: boolean;
   everInProgress: boolean;
+  needsHuman: boolean;
+  needsHumanReason?: string | null;
   parentId: string | null;
   boardColumnId: string | null;
   taskColumnId: string | null;

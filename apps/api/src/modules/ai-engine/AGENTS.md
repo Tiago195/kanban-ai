@@ -35,7 +35,14 @@ ai-engine/
   do projeto-alvo (`test`/`build`/`lint`) no worktree isolado (`cwd`) via `npm run`
   e verifica (#7) que os arquivos declarados existem no worktree; qualquer falha
   vira `problem` → task derivada. Depende de `WorkspaceService` + `APP_CONFIG`
-  (configs `AGENT_VALIDATION_*` / `AGENT_VERIFY_FLOW_FILES`).
+  (configs `AGENT_VALIDATION_*` / `AGENT_VERIFY_FLOW_FILES`). Faz também
+  **validação direcionada por fluxo**: para cada `affectedFlow` localiza specs
+  co-located (`findRelatedTestFiles`) e os roda restritos (`runTestsForFiles`);
+  falha vira `problem` mencionando o fluxo; fluxo sem cobertura vira `problem` só
+  se `AGENT_REQUIRE_FLOW_COVERAGE=true` (senão log). Quando testes direcionados
+  rodam, o `test` global é pulado para não rodar duas vezes (build/lint globais
+  seguem). Configs `AGENT_FLOW_TESTS_ENABLED` / `AGENT_FLOW_TEST_GLOBS` /
+  `AGENT_REQUIRE_FLOW_COVERAGE`.
 - **Loop profiles**: `resolveLoopProfile(labelProfileId)` com fallback `__default`.
 
 ## Invariantes (NUNCA violar)
@@ -45,7 +52,12 @@ ai-engine/
 3. As **4 salvaguardas** são obrigatórias: reconciliação no boot; limite de
    concorrência; idempotência do watchdog; encerramento limpo via AbortSignal.
 4. **Estado de verdade é o Postgres**, não a memória — sempre reconcilie no boot.
-5. Falha na validação **cria task derivada** com `derivedFrom`/`dependsOn`.
+5. Falha na validação **cria task derivada** com `derivedFrom`/`dependsOn` —
+   **exceto** ao atingir `AGENT_MAX_VALIDATION_FAILURES` falhas de validação na
+   mesma task: aí o loop **desiste** (não deriva mais), marca a task com
+   `needsHuman`/`needsHumanReason`, **para o auto-play da story (graceful)** e
+   emite `card.needs_human`. Isso é o **destino/resgate**, não substitui caps de
+   iteração/derivação.
 
 ## O que NÃO mexer
 
@@ -69,7 +81,20 @@ contrato de iteração:
 - **Telemetria (#8)**: `Iteration` ganhou `durationMs`, `inputTokens`,
   `outputTokens`, `outcome` (todos nullable, migration `iteration_telemetry`).
   Endpoint `GET /cards/:id/loop/metrics` agrega métricas por story
-  (`Orchestrator.computeStoryMetrics`).
+  (`Orchestrator.computeStoryMetrics`). O tipo de retorno `LoopMetrics` (e
+  `LoopTaskMetrics`) vive em `@kanban-ai/shared` (contrato compartilhado com o
+  web); `orchestrator.ts` importa e **re-exporta** (`export type { LoopMetrics }`)
+  para não quebrar consumidores. A UI consome via `apiClient.getLoopMetrics` +
+  hook `useLoopMetrics`, renderizada em `LoopMetricsPanel` (feature `ai-engine`,
+  seção "📊 Custo & qualidade do loop" no modal da story).
+- **Diff/Replay Viewer**: `Iteration` ganhou `diff String @default("")`
+  (migration `iteration_diff`). O orquestrador captura o diff do worktree ao fim
+  de cada iteração via `captureDiff(cwd)` (`git add -A -N` + `git diff HEAD`,
+  truncado em ~100KB) — este `git` é do ENGINE inspecionando o resultado, não do
+  agent (que continua proibido de rodar git). O campo flui para o front pelo DTO
+  `Iteration` (`packages/shared`), `mapIteration` e o evento `iteration.appended`;
+  a UI (`IterationDiffViewer` na feature `ai-engine`) permite navegar iteração a
+  iteração ("replay").
 
 Ao mudar esses contratos, mantenha este arquivo em dia.
 

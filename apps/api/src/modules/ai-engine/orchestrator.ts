@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { StopMode } from '@kanban-ai/shared';
-import type { ExecState, AffectedFlow } from '@kanban-ai/shared';
+import type { ExecState, AffectedFlow, LoopMetrics } from '@kanban-ai/shared';
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { APP_CONFIG, type AppConfig } from '../../shared/config/config';
 import { RealtimeService } from '../../realtime/realtime.service';
@@ -29,29 +30,11 @@ import {
  * #8: métricas agregadas do loop de uma story. Retornadas por
  * `Orchestrator.computeStoryMetrics` e expostas via
  * `GET /cards/:id/loop/metrics`.
+ *
+ * O tipo agora é o contrato COMPARTILHADO (`@kanban-ai/shared`) para o web
+ * consumir type-safe; re-exportado aqui para não quebrar imports existentes.
  */
-export interface LoopMetrics {
-  storyId: string;
-  taskCount: number;
-  iterationCount: number;
-  /** Média de iterações por task (proxy de esforço). */
-  avgIterationsPerTask: number;
-  /** Fração de iterações que derivaram uma task de correção (validação falhou). */
-  derivedTaskRate: number;
-  /** Fração de iterações com desfecho `ok`. */
-  okIterationRate: number;
-  /** Duração média por iteração (ms), quando instrumentada. */
-  avgDurationMs: number | null;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  perTask: {
-    taskId: string;
-    key: string;
-    title: string;
-    execState: string;
-    iterations: number;
-  }[];
-}
+export type { LoopMetrics } from '@kanban-ai/shared';
 
 /**
  * Núcleo do loop engine. Orquestra o ciclo de vida das sessões de agent e o
@@ -342,6 +325,11 @@ export class Orchestrator implements OnModuleInit {
     // Flush do transcript remanescente ao fim da execução do runner.
     await flushChunkBuffer();
 
+    // Diff/Replay Viewer: captura o diff do worktree ANTES da validação/derivação,
+    // refletindo exatamente o que o agent produziu nesta iteração. Reutilizado
+    // em ambos os call sites de appendIteration abaixo.
+    const iterationDiff = await this.captureDiff(cwd);
+
     // DOD nasce na ANÁLISE. Se a task ainda não tem checklist, criamos os
     // DodItems a partir do que a AI propôs (`runResult.proposedDod`). Se a AI
     // não propôs nada (ex.: mock), aplicamos um fallback determinístico para
@@ -379,6 +367,7 @@ export class Orchestrator implements OnModuleInit {
           dodIds: [],
         },
         evidence: runResult.evidence,
+        diff: iterationDiff,
         durationMs: Date.now() - iterationStartedAt,
         outcome: outcome.passed ? 'ok' : 'derived',
       });
@@ -393,7 +382,36 @@ export class Orchestrator implements OnModuleInit {
           title: 'falha na validação',
           description: `A validação de ${taskId} detectou comportamento incorreto.`,
         };
-        await this.createDerivedTask(taskId, problem);
+
+        // "Needs human": conta quantas iterações de validação desta task já
+        // falharam (inclui a recém-anexada acima, com handoffState='blocked').
+        // Ao atingir o threshold, em vez de derivar de novo (risco de loop
+        // infinito de derivações), marcamos a task com `needsHuman`, paramos o
+        // auto-play da story de forma graceful e emitimos um evento WS.
+        const validationFailures = await this.prisma.iteration.count({
+          where: { cardId: taskId, phase: 'validation', handoffState: 'blocked' },
+        });
+        if (validationFailures >= this.config.agent.maxValidationFailures) {
+          await this.prisma.card.update({
+            where: { id: taskId },
+            data: { needsHuman: true, needsHumanReason: problem.title },
+          });
+          // Para o auto-play da story sem abortar hard (graceful): preserva o
+          // estado no Postgres e deixa o próximo tick encerrar limpo.
+          await this.stop(storyId, 'graceful');
+          this.realtime.broadcast({
+            type: 'card.needs_human',
+            taskId,
+            storyId,
+            reason: problem.title,
+          });
+          await this.log(
+            taskId,
+            `validação falhou ${validationFailures}x (limite ${this.config.agent.maxValidationFailures}) — marcada como "precisa de humano"; auto-play parado`,
+          );
+        } else {
+          await this.createDerivedTask(taskId, problem);
+        }
       }
       return true;
     }
@@ -472,6 +490,7 @@ export class Orchestrator implements OnModuleInit {
         dodIds: [],
       },
       evidence: runResult.evidence,
+      diff: iterationDiff,
       durationMs: Date.now() - iterationStartedAt,
       outcome: hitlExchange ? 'awaiting-input' : 'ok',
     });
@@ -608,6 +627,7 @@ export class Orchestrator implements OnModuleInit {
     const revalidating = tasks.find(
       (t) =>
         t.execState === 'validating' &&
+        !t.needsHuman &&
         pendingDeps(t, byId).length === 0 &&
         dodAllDone(t) &&
         t.phases.includes('validation'),
@@ -685,9 +705,11 @@ export class Orchestrator implements OnModuleInit {
   }
 
   /**
-   * #4: promove uma story para a coluna "Done" do board de stories quando todas
-   * as suas tasks concluíram. Idempotente (não re-promove se já está em Done) e
-   * NÃO reacorda o motor. Ao final, encadeia a próxima story do épico (#5).
+   * #4: promove uma story quando todas as suas tasks concluíram. Vai para a
+   * coluna "Review" (revisão humana antes de Done) quando ela existir; caso
+   * contrário, cai de volta para "Done". Idempotente (não re-promove se já
+   * está na coluna-alvo) e NÃO reacorda o motor. Ao final, encadeia a próxima
+   * story do épico (#5).
    */
   private async promoteStory(storyId: string): Promise<void> {
     try {
@@ -697,31 +719,41 @@ export class Orchestrator implements OnModuleInit {
       });
       if (!story || story.type !== 'story') return;
 
-      const doneCol = await this.prisma.column.findFirst({
-        where: { boardId: story.boardId, isTaskColumn: false, title: 'Done' },
-        select: { id: true },
-      });
-      if (!doneCol) return;
+      // Fluxo feliz vai para revisão humana (Review) antes de Done. Se o board
+      // não tiver a coluna Review, cai de volta para Done.
+      const targetCol =
+        (await this.prisma.column.findFirst({
+          where: { boardId: story.boardId, isTaskColumn: false, title: 'Review' },
+          select: { id: true, title: true },
+        })) ??
+        (await this.prisma.column.findFirst({
+          where: { boardId: story.boardId, isTaskColumn: false, title: 'Done' },
+          select: { id: true, title: true },
+        }));
+      if (!targetCol) return;
       // Idempotência: só promove uma vez.
-      if (story.boardColumnId === doneCol.id) return;
+      if (story.boardColumnId === targetCol.id) return;
 
       const fromColumnId = story.boardColumnId;
       const position = await this.prisma.card.count({
-        where: { boardColumnId: doneCol.id, NOT: { id: storyId } },
+        where: { boardColumnId: targetCol.id, NOT: { id: storyId } },
       });
       await this.prisma.card.update({
         where: { id: storyId },
-        data: { boardColumnId: doneCol.id, position, everInProgress: true },
+        data: { boardColumnId: targetCol.id, position, everInProgress: true },
       });
       this.realtime.broadcast({
         type: 'card.moved',
         cardId: storyId,
         parentId: story.parentId ?? null,
         fromColumnId,
-        toColumnId: doneCol.id,
+        toColumnId: targetCol.id,
         isTaskBoard: false,
       });
-      await this.log(storyId, 'Story concluída — todas as tasks done. Promovida para Done.');
+      await this.log(
+        storyId,
+        `Story concluída — todas as tasks done. Promovida para ${targetCol.title}.`,
+      );
 
       // #10b: registrar resumo da story no épico pai (lastro cross-story).
       if (story.parentId) {
@@ -1170,6 +1202,8 @@ export class Orchestrator implements OnModuleInit {
       handoff: { state: string; nextStep: string; files: string[]; dodIds: string[] };
       /** #6: evidência de verificação do próprio trabalho. */
       evidence?: string;
+      /** Diff/Replay: unified diff do worktree ao fim da iteração. */
+      diff?: string;
       /** #8: telemetria de qualidade (opcional). */
       durationMs?: number;
       inputTokens?: number;
@@ -1193,6 +1227,7 @@ export class Orchestrator implements OnModuleInit {
           handoffFiles: it.handoff.files,
           handoffDodIds: it.handoff.dodIds,
           evidence: it.evidence ?? '',
+          diff: it.diff ?? '',
           durationMs: it.durationMs ?? null,
           inputTokens: it.inputTokens ?? null,
           outputTokens: it.outputTokens ?? null,
@@ -1206,6 +1241,51 @@ export class Orchestrator implements OnModuleInit {
       taskId,
       iteration: mapIteration(row as PrismaIterationRow),
     });
+  }
+
+  /**
+   * Diff/Replay Viewer: captura o unified diff do worktree isolado ao fim de
+   * uma iteração, para o front navegar iteração a iteração vendo o que mudou.
+   *
+   * IMPORTANTE: este `git` é do ORQUESTRADOR (código do engine) inspecionando o
+   * resultado no worktree — NÃO é o agent rodando git (isso é proibido pelo
+   * prompt). Roda `git add -A -N` para que arquivos novos apareçam no diff, e
+   * então `git diff HEAD` (staged + unstaged) contra o commit base do worktree.
+   * Trunca em ~100KB para não estourar payload/DB. Qualquer erro (cwd inválido,
+   * não é repo git, timeout) é tratado silenciosamente retornando ''.
+   */
+  private async captureDiff(cwd: string): Promise<string> {
+    if (!cwd) return '';
+    const MAX_DIFF_BYTES = 100 * 1024;
+    const run = (args: string[]): Promise<string> =>
+      new Promise<string>((resolve) => {
+        execFile(
+          'git',
+          args,
+          { cwd, encoding: 'utf8', timeout: 15_000, maxBuffer: 20 * 1024 * 1024 },
+          (error, stdout) => {
+            if (error) {
+              resolve('');
+              return;
+            }
+            resolve(stdout ?? '');
+          },
+        );
+      });
+    try {
+      // Registra intenção de adicionar arquivos novos (não altera conteúdo) para
+      // que apareçam no diff; ignoramos falha (repo vazio, etc.).
+      await run(['add', '-A', '-N']);
+      let diff = await run(['diff', 'HEAD']);
+      if (!diff) diff = await run(['diff']);
+      if (diff.length > MAX_DIFF_BYTES) {
+        diff = diff.slice(0, MAX_DIFF_BYTES) + '\n… [diff truncado]';
+      }
+      return diff;
+    } catch (err) {
+      this.logger.warn(`Falha ao capturar diff em ${cwd}: ${(err as Error).message}`);
+      return '';
+    }
   }
 
   private async log(cardId: string, text: string): Promise<void> {
@@ -1280,6 +1360,7 @@ export class Orchestrator implements OnModuleInit {
         type: true,
         execState: true,
         createdAt: true,
+        needsHuman: true,
         dependsOn: { select: { dependsOnId: true } },
         iterations: { select: { phase: true } },
         dodItems: { select: { done: true } },
@@ -1297,6 +1378,7 @@ export class Orchestrator implements OnModuleInit {
         type: true,
         execState: true,
         createdAt: true,
+        needsHuman: true,
         dependsOn: { select: { dependsOnId: true } },
         iterations: { select: { phase: true } },
         dodItems: { select: { done: true } },
@@ -1321,6 +1403,7 @@ export class Orchestrator implements OnModuleInit {
     type: string;
     execState: string | null;
     createdAt: Date;
+    needsHuman: boolean;
     dependsOn: { dependsOnId: string }[];
     iterations: { phase: string }[];
     dodItems: { done: boolean }[];
@@ -1333,6 +1416,7 @@ export class Orchestrator implements OnModuleInit {
       dependsOn: card.dependsOn.map((d) => d.dependsOnId),
       phases: card.iterations.map((i) => i.phase as LoopTask['phases'][number]),
       dodDone: card.dodItems.map((d) => d.done),
+      needsHuman: card.needsHuman,
     };
   }
 
@@ -1623,6 +1707,32 @@ export class Orchestrator implements OnModuleInit {
     lines.push(
       '- NUNCA crie features, arquivos ou pastas no repositório do próprio kanban-ai ' +
         '(este é a ferramenta, não o produto). Entregue estritamente o que a task pede, no projeto-alvo.',
+    );
+
+    // Proibição de operações git. O worktree/branch é gerenciado EXCLUSIVAMENTE
+    // pelo loop engine. Se o agent commitar ou trocar de branch, o worktree que
+    // o gate de validação inspeciona fica dessincronizado do trabalho real, a
+    // verificação de arquivos falha e uma task de correção é derivada em loop.
+    lines.push('');
+    lines.push('## ❌ PROIBIDO — operações de git (NÃO NEGOCIÁVEL)');
+    lines.push(
+      '- Você **NÃO PODE** rodar `git commit`, `git add`, `git branch`, `git checkout`, ' +
+        '`git switch`, `git merge`, `git rebase`, `git reset`, `git stash`, `git push`, ' +
+        '`git worktree` ou QUALQUER comando git que altere o estado do repositório.',
+    );
+    lines.push(
+      '- **Apenas EDITE os arquivos** no diretório atual (leia/escreva/crie arquivos normalmente). ' +
+        'Deixe as mudanças no working tree, NÃO commitadas.',
+    );
+    lines.push(
+      '- O worktree e a branch são criados e gerenciados pelo loop engine. Se você commitar ' +
+        'ou criar/trocar branch, o gate de validação passa a inspecionar um snapshot ' +
+        'dessincronizado do seu trabalho real — os arquivos que você declara em `affectedFlows` ' +
+        'aparecem como "inexistentes" e o sistema deriva tasks de correção duplicadas em loop infinito.',
+    );
+    lines.push(
+      '- Comandos git de LEITURA (`git status`, `git diff`, `git log`) são permitidos apenas ' +
+        'para inspeção — nunca comandos que mudem estado.',
     );
 
     // DOD real — o ÚNICO checklist do v1. É a AI quem marca os ids concluídos.

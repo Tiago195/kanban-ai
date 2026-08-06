@@ -78,6 +78,8 @@ export interface Iteration {
   summary: string;
   /** IDs de itens de DOD marcados nesta iteração. */
   dodTouched: string[];
+  /** Unified diff (git diff HEAD) do worktree ao fim da iteração; '' se nada mudou. */
+  diff: string;
   handoff: IterationHandoff;
 }
 
@@ -146,6 +148,14 @@ export interface CardBase {
   parentId: string | null;
   blocked: boolean;
   everInProgress: boolean;
+  /**
+   * "Needs human": levantado quando o loop engine desiste após esgotar as
+   * tentativas de validação de uma task (ver `AGENT_MAX_VALIDATION_FAILURES`).
+   * É um FLAG/badge derivado — não uma coluna nem um estado novo (ver ADR-0018).
+   */
+  needsHuman: boolean;
+  /** Motivo do `needsHuman` (título do problema que esgotou as tentativas). */
+  needsHumanReason: string | null;
   /** Modelo de AI escolhido explicitamente para este card. null = herda do pai. */
   model: string | null;
   /**
@@ -237,4 +247,35 @@ export interface BoardState {
   assignees: Assignee[];
   loopProfiles: Record<string, LoopProfile>;
   seq: number;
+}
+
+/** Métrica agregada de uma task dentro de uma story (linha da tabela perTask). */
+export interface LoopTaskMetrics {
+  taskId: string;
+  key: string;
+  title: string;
+  execState: string;
+  iterations: number;
+}
+
+/**
+ * #8: métricas agregadas do loop de uma story. Retornadas por
+ * `Orchestrator.computeStoryMetrics` e expostas via
+ * `GET /cards/:id/loop/metrics`. Contrato COMPARTILHADO entre api e web.
+ */
+export interface LoopMetrics {
+  storyId: string;
+  taskCount: number;
+  iterationCount: number;
+  /** Média de iterações por task (proxy de esforço). */
+  avgIterationsPerTask: number;
+  /** Fração de iterações que derivaram uma task de correção (validação falhou). */
+  derivedTaskRate: number;
+  /** Fração de iterações com desfecho `ok`. */
+  okIterationRate: number;
+  /** Duração média por iteração (ms), quando instrumentada. */
+  avgDurationMs: number | null;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  perTask: LoopTaskMetrics[];
 }

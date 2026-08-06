@@ -86,12 +86,26 @@ export class ValidationRunner {
       }
     }
 
+    // 3b. Validação direcionada por fluxo: localizar e rodar os testes
+    //     associados aos arquivos de cada affectedFlow. Complementar ao passo
+    //     global (3). Roda ANTES do global para saber se já cobrimos `test`.
+    let flowTestsCoveredTest = false;
+    if (this.config.agent.flowTestsEnabled && cwd) {
+      flowTestsCoveredTest = await this.runFlowTargetedTests(cwd, affectedFlows, problems);
+    }
+
     // 3. #1: validacao empirica real (scripts do projeto no worktree).
     if (this.config.agent.validationEnabled && cwd) {
-      const wanted =
+      let wanted =
         this.config.agent.validationScripts.length > 0
           ? this.config.agent.validationScripts
           : STRATEGY_SCRIPTS[strategy];
+      // Evita rodar `test` duas vezes: se os testes direcionados já rodaram
+      // testes de fluxo, mantemos build/lint globais (regression) mas pulamos
+      // o `test` global — os direcionados são um subconjunto mais preciso.
+      if (flowTestsCoveredTest) {
+        wanted = wanted.filter((s) => s !== 'test');
+      }
       try {
         const checks = await this.workspaces.runProjectChecks(cwd, wanted);
         for (const check of checks) {
@@ -116,6 +130,81 @@ export class ValidationRunner {
     );
 
     return { passed, problems };
+  }
+
+  /**
+   * Validação direcionada por fluxo. Para cada affectedFlow tenta localizar os
+   * testes co-located dos seus arquivos e rodá-los restritos a esses arquivos.
+   *  - Testes encontrados que falham -> `problem` mencionando o fluxo.
+   *  - Fluxo sem NENHUM teste associado -> `problem` se `requireFlowCoverage`,
+   *    senão apenas `logger.debug`.
+   * Retorna true se ao menos um fluxo teve testes direcionados EXECUTADOS
+   * (usado para pular o `test` global e evitar rodar duas vezes).
+   */
+  private async runFlowTargetedTests(
+    cwd: string,
+    affectedFlows: AffectedFlow[],
+    problems: ValidationOutcome['problems'],
+  ): Promise<boolean> {
+    const markers = this.config.agent.flowTestGlobs;
+    let ranAny = false;
+
+    for (const flow of affectedFlows) {
+      const testFiles = new Set<string>();
+      for (const file of flow.files) {
+        try {
+          const related = await this.workspaces.findRelatedTestFiles(cwd, file, markers);
+          for (const t of related) testFiles.add(t);
+        } catch (err) {
+          this.logger.warn(
+            `Falha ao localizar testes do fluxo "${flow.name}" (arquivo=${file}): ${String(err)}`,
+          );
+        }
+      }
+
+      if (testFiles.size === 0) {
+        if (this.config.agent.requireFlowCoverage) {
+          problems.push({
+            title: `Fluxo "${flow.name}" sem cobertura de teste executável`,
+            description:
+              `Nenhum arquivo de teste (${markers.join(', ')}) foi encontrado para os arquivos do ` +
+              `fluxo "${flow.name}". A entrega precisa de teste que exercite o fluxo declarado.`,
+          });
+        } else {
+          this.logger.debug(
+            `Fluxo "${flow.name}" sem testes associados (requireFlowCoverage=false; apenas aviso).`,
+          );
+        }
+        continue;
+      }
+
+      try {
+        const check = await this.workspaces.runTestsForFiles(cwd, [...testFiles]);
+        if (!check.ran) {
+          // Runner não determinado com segurança: fallback silencioso ao global.
+          this.logger.debug(
+            `Testes direcionados do fluxo "${flow.name}" não executados (${check.output || 'runner desconhecido'}); usando scripts globais.`,
+          );
+          continue;
+        }
+        ranAny = true;
+        if (!check.passed) {
+          problems.push({
+            title: `Testes do fluxo "${flow.name}" falharam (exit ${check.exitCode ?? '?'})`,
+            description:
+              `Os testes direcionados ao fluxo "${flow.name}" falharam no worktree ` +
+              `(${[...testFiles].join(', ')}). Corrija antes de concluir.\n\n` +
+              truncate(check.output, 2000),
+          });
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Falha ao rodar testes direcionados do fluxo "${flow.name}": ${String(err)}`,
+        );
+      }
+    }
+
+    return ranAny;
   }
 }
 

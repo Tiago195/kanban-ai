@@ -192,6 +192,97 @@ export class WorkspaceService {
     return this.pathExists(resolved);
   }
 
+  /**
+   * Validação direcionada por fluxo: dado um arquivo fonte relativo ao worktree,
+   * procura por specs co-located seguindo a convenção de nome. Para cada marcador
+   * (ex.: `.spec.`, `.test.`) monta o candidato `<basename><marcador><ext>` no
+   * mesmo diretório do fonte e verifica existência. Também aceita o próprio
+   * arquivo caso ele JÁ seja um teste. Pragmático por convenção — não parseia
+   * imports. Retorna paths relativos (deduplicados, sem o fonte não-teste).
+   */
+  async findRelatedTestFiles(
+    worktreePath: string,
+    sourceRelPath: string,
+    testMarkers: string[],
+  ): Promise<string[]> {
+    const normalized = sourceRelPath.split(path.sep).join('/');
+    const dir = path.posix.dirname(normalized);
+    const ext = path.posix.extname(normalized);
+    const base = path.posix.basename(normalized, ext);
+
+    // Se o arquivo declarado já é um teste, ele mesmo é cobertura.
+    if (testMarkers.some((m) => normalized.includes(m))) {
+      const exists = await this.fileExistsInWorktree(worktreePath, sourceRelPath);
+      return exists ? [normalized] : [];
+    }
+
+    const found = new Set<string>();
+    for (const marker of testMarkers) {
+      // marker tipicamente ".spec." ou ".test." -> foo.ts vira foo.spec.ts.
+      const infix = marker.replace(/^\.|\.$/g, '');
+      const candidate = path.posix.join(dir === '.' ? '' : dir, `${base}.${infix}${ext}`);
+      if (await this.fileExistsInWorktree(worktreePath, candidate)) {
+        found.add(candidate);
+      }
+    }
+    return [...found];
+  }
+
+  /**
+   * Roda os testes do projeto RESTRITOS a `testFiles` no worktree. Descobre o
+   * runner a partir do script `test` do package.json: se for vitest/jest,
+   * ambos aceitam paths posicionais via `npm test -- <arquivos>`. Se o runner
+   * não puder ser determinado com segurança, retorna um resultado `ran:false`
+   * (o consumidor faz fallback para os scripts globais) — nunca inventa flags
+   * que possam quebrar. Sem shell (execFile).
+   */
+  async runTestsForFiles(
+    worktreePath: string,
+    testFiles: string[],
+  ): Promise<ProjectCheckResult> {
+    if (testFiles.length === 0) {
+      return { name: 'test:flow', ran: false, passed: true, exitCode: null, output: '' };
+    }
+    const testScript = await this.readTestScriptCommand(worktreePath);
+    if (!testScript || !this.isPositionalPathRunner(testScript)) {
+      // Runner desconhecido ou que não aceita paths posicionais com segurança.
+      return {
+        name: 'test:flow',
+        ran: false,
+        passed: true,
+        exitCode: null,
+        output: `runner de teste não determinado com segurança (script test="${testScript ?? ''}")`,
+      };
+    }
+    // vitest sem subcomando entra em watch mode; força rodada única com `run`.
+    // (jest é single-run por padrão; CI=1 no env cobre ambos como reforço.)
+    const isVitest = /\bvitest\b/.test(testScript) && !/\bvitest\s+run\b/.test(testScript);
+    const positional = isVitest ? ['run', ...testFiles] : [...testFiles];
+    return this.runNpmScript(worktreePath, 'test', ['--', ...positional], 'test:flow');
+  }
+
+  /** Lê o comando bruto do script `test` do package.json (undefined se ausente). */
+  private async readTestScriptCommand(worktreePath: string): Promise<string | undefined> {
+    try {
+      const raw = await fs.readFile(path.join(worktreePath, 'package.json'), 'utf8');
+      const pkg = JSON.parse(raw) as { scripts?: Record<string, unknown> };
+      const cmd = pkg.scripts?.test;
+      return typeof cmd === 'string' ? cmd : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * True se o comando do script test usa um runner que aceita paths de teste
+   * posicionais de forma segura (vitest/jest). Conservador: só libera runners
+   * conhecidos.
+   */
+  private isPositionalPathRunner(testScript: string): boolean {
+    return /\b(vitest|jest)\b/.test(testScript);
+  }
+
+
   /** Lê os nomes de scripts do package.json do worktree (vazio se ausente). */
   private async readPackageScripts(worktreePath: string): Promise<Set<string>> {
     try {
@@ -204,13 +295,26 @@ export class WorkspaceService {
   }
 
   /** Roda `npm run <name>` no worktree com timeout; captura saída e exit code. */
-  private runNpmScript(worktreePath: string, name: string): Promise<ProjectCheckResult> {
+  private runNpmScript(
+    worktreePath: string,
+    name: string,
+    extraArgs: string[] = [],
+    resultName: string = name,
+  ): Promise<ProjectCheckResult> {
     const timeout = this.config.agent.validationTimeoutMs;
     return new Promise<ProjectCheckResult>((resolve) => {
       execFile(
         'npm',
-        ['run', name, '--silent'],
-        { cwd: worktreePath, encoding: 'utf8', timeout, maxBuffer: 10 * 1024 * 1024 },
+        ['run', name, '--silent', ...extraArgs],
+        {
+          cwd: worktreePath,
+          encoding: 'utf8',
+          timeout,
+          maxBuffer: 10 * 1024 * 1024,
+          // CI=1 força runners (vitest/jest) a rodada única não-interativa,
+          // evitando modo watch que travaria até o timeout.
+          env: { ...process.env, CI: '1' },
+        },
         (error, stdout, stderr) => {
           const output = `${stdout ?? ''}${stderr ?? ''}`.trim();
           if (error) {
@@ -218,10 +322,10 @@ export class WorkspaceService {
               typeof (error as { code?: unknown }).code === 'number'
                 ? (error as { code: number }).code
                 : null;
-            resolve({ name, ran: true, passed: false, exitCode, output });
+            resolve({ name: resultName, ran: true, passed: false, exitCode, output });
             return;
           }
-          resolve({ name, ran: true, passed: true, exitCode: 0, output });
+          resolve({ name: resultName, ran: true, passed: true, exitCode: 0, output });
         },
       );
     });

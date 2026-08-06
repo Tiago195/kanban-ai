@@ -31,12 +31,44 @@ export interface AppConfig {
     validationScripts: string[];
     /** #7: verifica se os arquivos declarados em affectedFlows existem no worktree. */
     verifyFlowFiles: boolean;
+    /**
+     * Validação direcionada por fluxo: liga a busca+execução de testes
+     * associados aos arquivos de cada affectedFlow (complementa os scripts
+     * globais). Default true.
+     */
+    flowTestsEnabled: boolean;
+    /**
+     * Marcadores (infixos/sufixos) que identificam um arquivo de teste
+     * co-located, ex.: `.spec.` casa `foo.spec.ts`. Default `['.spec.','.test.']`.
+     */
+    flowTestGlobs: string[];
+    /**
+     * Se true, um fluxo declarado sem NENHUM teste associado vira `problem`.
+     * Se false (default), apenas registra aviso — não bloqueia.
+     */
+    requireFlowCoverage: boolean;
+    /**
+     * "Needs human": número máximo de falhas de validação por task antes de o
+     * loop desistir de derivar e marcar a task com `needsHuman`, parando o
+     * auto-play da story (graceful). Default 3.
+     */
+    maxValidationFailures: number;
   };
 }
 
 function num(value: string | undefined, fallback: number): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+/** Lê uma env csv em lista de strings não-vazias; usa `fallback` se ausente/vazia. */
+function csv(value: string | undefined, fallback: string[]): string[] {
+  if (value === undefined) return fallback;
+  const parsed = value
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return parsed.length > 0 ? parsed : fallback;
 }
 
 export function loadConfig(): AppConfig {
@@ -63,6 +95,10 @@ export function loadConfig(): AppConfig {
         .map((s) => s.trim())
         .filter((s) => s.length > 0),
       verifyFlowFiles: process.env.AGENT_VERIFY_FLOW_FILES !== 'false',
+      flowTestsEnabled: process.env.AGENT_FLOW_TESTS_ENABLED !== 'false',
+      flowTestGlobs: csv(process.env.AGENT_FLOW_TEST_GLOBS, ['.spec.', '.test.']),
+      requireFlowCoverage: process.env.AGENT_REQUIRE_FLOW_COVERAGE === 'true',
+      maxValidationFailures: num(process.env.AGENT_MAX_VALIDATION_FAILURES, 3),
     },
   };
 }

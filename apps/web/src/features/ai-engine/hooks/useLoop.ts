@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/features/board/services/queryKeys";
 import { apiClient } from "@/shared/services/apiClient";
 import type { LoopStateResponse } from "@/shared/services/apiClient";
+import type { LoopMetrics } from "@kanban-ai/shared";
 
 /**
  * Estado do loop de uma story (auto-play rodando? sessão viva?). O realtime
@@ -12,6 +13,19 @@ export function useLoopState(storyId: string | null, enabled = true) {
   return useQuery<LoopStateResponse>({
     queryKey: queryKeys.loopState(storyId ?? "none"),
     queryFn: () => apiClient.getLoopState(storyId as string),
+    enabled: Boolean(storyId) && enabled,
+    staleTime: 2_000,
+  });
+}
+
+/**
+ * #8: métricas de custo & qualidade do loop de uma story. Reage a novas
+ * iterações via invalidação da query (mesmo padrão do loop state).
+ */
+export function useLoopMetrics(storyId: string | null, enabled = true) {
+  return useQuery<LoopMetrics>({
+    queryKey: queryKeys.loopMetrics(storyId ?? "none"),
+    queryFn: () => apiClient.getLoopMetrics(storyId as string),
     enabled: Boolean(storyId) && enabled,
     staleTime: 2_000,
   });

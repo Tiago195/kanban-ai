@@ -76,6 +76,15 @@ e é persistida como um `Iteration` no diário:
 A iteração roda dentro de um **git worktree isolado** (`WorkspaceService`) do
 repo-alvo, com o **modelo/agent escolhido** por task/loop (opus, gpt, ...).
 
+> ⚠️ **O agent NÃO faz operações de git.** O worktree e a branch (`kanban/<key>`)
+> são criados e mantidos **exclusivamente** pelo `WorkspaceService`. O agent apenas
+> **edita arquivos** no `cwd` e deixa as mudanças no working tree (não commitadas).
+> Se o agent commitar, trocar de branch ou mexer no worktree, o snapshot que o gate
+> de validação inspeciona fica **dessincronizado** do trabalho real — os arquivos
+> declarados em `affectedFlows` aparecem como inexistentes (verificação #7) e o
+> sistema **deriva tasks de correção duplicadas em loop infinito**. A proibição está
+> explícita no prompt (`buildPrompt`, seção "PROIBIDO — operações de git").
+
 ### Fases (`IterationPhase`)
 
 `reproduce | analysis | implementation | validation` — quais fases se aplicam e em

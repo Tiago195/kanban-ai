@@ -548,6 +548,31 @@ export class BacklogChatOrchestrator {
         parentId: epic.id,
       });
 
+      // DoD sugerido pela proposta vira DodItem do card story, na ordem
+      // proposta (position incremental). É o único checklist do v1 (ADR-0007).
+      const dod = story.dod ?? [];
+      for (let i = 0; i < dod.length; i++) {
+        const text = dod[i]?.trim();
+        if (!text) continue;
+        await this.prisma.dodItem.create({
+          data: { cardId: s.id, text, position: i },
+        });
+      }
+
+      // affectedFlows sugeridos viram AffectedFlow do card story.
+      for (const flow of story.affectedFlows ?? []) {
+        const name = flow?.name?.trim();
+        if (!name) continue;
+        await this.prisma.affectedFlow.create({
+          data: {
+            cardId: s.id,
+            name,
+            files: flow.files ?? [],
+            note: flow.note ?? '',
+          },
+        });
+      }
+
       // Tasks rascunhadas viram cards type:task filhos da story (caem em "To Do"
       // automaticamente — ver CardsService.create). Task não tem pontos nem DoD:
       // o refinamento e o DoD acontecem depois, no board. Ver ADR-0024.

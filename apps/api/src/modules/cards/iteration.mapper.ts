@@ -18,6 +18,7 @@ export interface PrismaIterationRow {
   handoffFiles: string[];
   handoffDodIds: string[];
   dodTouched: string[];
+  diff: string;
 }
 
 /**
@@ -38,6 +39,7 @@ export function mapIteration(row: PrismaIterationRow): Iteration {
     detail: row.detail,
     summary: row.summary,
     dodTouched: row.dodTouched ?? [],
+    diff: row.diff ?? '',
     handoff: {
       state: row.handoffState as ExecState | 'blocked' | 'done',
       nextStep: row.handoffNextStep,

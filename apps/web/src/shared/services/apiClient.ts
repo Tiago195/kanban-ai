@@ -11,6 +11,7 @@ import type {
   CreateDodItemDto,
   CreateFlowDto,
   IterationPhase,
+  LoopMetrics,
   MoveCardDto,
   UpdateCardDto,
   UpdateDodItemDto,
@@ -301,6 +302,11 @@ export const apiClient = {
 
   getLoopState(storyId: string): Promise<LoopStateResponse> {
     return request<LoopStateResponse>(`/cards/${storyId}/loop/state`);
+  },
+
+  /** #8: métricas de custo & qualidade do loop de uma story (agregadas). */
+  getLoopMetrics(storyId: string): Promise<LoopMetrics> {
+    return request<LoopMetrics>(`/cards/${storyId}/loop/metrics`);
   },
 
   stepLoop(storyId: string): Promise<{ ran: boolean }> {

@@ -19,7 +19,7 @@ import { cleanChatText } from "@kanban-ai/shared";
 import type { ExecState, StoryPoints } from "@kanban-ai/shared";
 
 import { useCardAssignees } from "@/features/assignees";
-import { ChatPanel, useAgentChat, useAutoPlay, useLoopState, useStepLoop } from "@/features/ai-engine";
+import { ChatPanel, IterationDiffViewer, LoopMetricsPanel, useAgentChat, useAutoPlay, useLoopState, useStepLoop } from "@/features/ai-engine";
 import type { ChatPanelMessage } from "@/features/ai-engine";
 import { useAgentChatStore } from "@/features/ai-engine/services/agentChatStore";
 import { useBoard, useCards, useCreateCard, useDeleteCard, useModels, useMoveCard, usePrimaryBoardId } from "@/features/board/hooks";
@@ -233,6 +233,11 @@ function MiniCardContent({ card, showPoints }: { card: ApiCardSummary; showPoint
         <span className="card-key">{card.key}</span>
         {showPoints && card.points != null ? <span className="points-badge">{card.points}</span> : null}
         {card.blocked ? <span>⛔</span> : null}
+        {card.needsHuman ? (
+          <span className="needs-human-badge" title={card.needsHumanReason ?? "Precisa de você"}>
+            🙋 precisa de você
+          </span>
+        ) : null}
         {awaiting ? <span className="awaiting-badge" title="O agente aguarda sua resposta">✋</span> : null}
       </div>
       <div className="task-card-title">{card.title}</div>
@@ -562,12 +567,12 @@ function CommentsSection({ card }: { card: ApiCardDetails }) {
             </div>
           ))}
       </div>
-      <form className="comment-form" onSubmit={(event) => event.preventDefault()} title="Em breve — comentários manuais chegam com o AI engine">
+      {/* <form className="comment-form" onSubmit={(event) => event.preventDefault()} title="Em breve — comentários manuais chegam com o AI engine">
         <input className="comment-input" placeholder="Escreva um comentário… (em breve)" autoComplete="off" disabled />
         <button className="btn btn-primary btn-sm" type="submit" disabled>
           Enviar
         </button>
-      </form>
+      </form> */}
     </div>
   );
 }
@@ -1444,6 +1449,11 @@ function StoryModal({
           />
         </div>
 
+        <div className="modal-section">
+          <div className="modal-section-title">📊 Custo & qualidade do loop</div>
+          <LoopMetricsPanel storyId={story.id} />
+        </div>
+
         <ChecklistSection card={story} boardId={boardId} />
         <CommentsSection card={story} />
         <ActivitySection card={story} />
@@ -1610,6 +1620,11 @@ function TaskModal({
           <span className="type-badge task">TASK</span>
           <span className="card-key">{task.key}</span>
           {task.blocked ? <span className="blocked-flag">⛔ BLOQUEADO</span> : null}
+          {task.needsHuman ? (
+            <span className="needs-human-badge" title={task.needsHumanReason ?? "Precisa de você"}>
+              🙋 precisa de você
+            </span>
+          ) : null}
           {chatPending ? <span className="awaiting-badge">✋ aguardando você</span> : null}
           <span className={"exec-badge st-" + execMeta.cls} style={{ marginLeft: "auto" }}>
             {execMeta.label}
@@ -1679,6 +1694,11 @@ function TaskModal({
               );
             })}
           </div>
+        </div>
+
+        <div className="modal-section">
+          <div className="modal-section-title">🎞️ Diff / Replay por iteração</div>
+          <IterationDiffViewer iterations={task.iterations} />
         </div>
 
         <CommentsSection card={task} />

@@ -67,6 +67,22 @@ export function ProposalCard({
                   ☑ {story.tasks.length}
                 </span>
               ) : null}
+              {story.dod && story.dod.length > 0 ? (
+                <span
+                  className="proposal-story-dod"
+                  title={`${story.dod.length} itens de DoD`}
+                >
+                  ✓ {story.dod.length}
+                </span>
+              ) : null}
+              {story.affectedFlows && story.affectedFlows.length > 0 ? (
+                <span
+                  className="proposal-story-flows"
+                  title={`${story.affectedFlows.length} fluxos afetados`}
+                >
+                  🔀 {story.affectedFlows.length}
+                </span>
+              ) : null}
               {clickable ? (
                 <span className="proposal-story-open" aria-hidden="true">
                   💬

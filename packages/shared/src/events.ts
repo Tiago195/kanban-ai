@@ -251,6 +251,19 @@ export interface PingEvent {
   ts: number;
 }
 
+/**
+ * O loop engine desistiu de uma task após esgotar as tentativas de validação
+ * (ver `AGENT_MAX_VALIDATION_FAILURES`). Em vez de derivar mais uma task-bug,
+ * marca a task com `needsHuman` e para o auto-play da story (graceful). A UI
+ * exibe o badge "Precisa de você". Ver ADR-0018 (HITL como flag, não coluna).
+ */
+export interface CardNeedsHumanEvent {
+  type: 'card.needs_human';
+  taskId: string;
+  storyId: string;
+  reason: string;
+}
+
 /** Um comentário foi criado num card (ex.: resumo de story escrito no épico). */
 export interface CommentCreatedEvent {
   type: 'comment.created';
@@ -296,6 +309,7 @@ export type ServerEvent =
   | BacklogProposalEvent
   | CommentCreatedEvent
   | BoardUpdatedEvent
+  | CardNeedsHumanEvent
   | PingEvent;
 
 /** Nomes de eventos, úteis para type-guards e roteamento. */
