@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type {
   BacklogChatMessage,
@@ -30,6 +30,25 @@ interface PendingQuestion {
 const HITL_TIMEOUT_MS = 600_000; // 10min, alinhado ao loop engine
 
 /**
+ * Sentinela usada para encerrar graciosamente o turno HITL "morto".
+ *
+ * bug-backlog-hitl-hang: o adapter da CLI é ONE-SHOT — ao fazer uma pergunta,
+ * o processo `copilot` já saiu (a pergunta é emitida no `close`). Escrever a
+ * resposta no `child.stdin` é no-op e o turno termina sem proposta. A correção
+ * é SEMPRE re-spawnar um turno novo com a resposta (idempotente via
+ * `--session-id`, que resume o contexto). Para isso, ao responder rejeitamos a
+ * promise de `waitForAnswer` com este sentinela: o `runTurn` em curso o
+ * reconhece e encerra sem erro e SEM persistir a resposta (quem persiste é o
+ * novo turno disparado por `answerQuestion`).
+ */
+class HitlRespawnSignal extends Error {
+  constructor() {
+    super('hitl-respawn');
+    this.name = 'HitlRespawnSignal';
+  }
+}
+
+/**
  * Orquestra o chat de criação de backlog (Epic + Stories).
  *
  * Diferente do loop engine (autônomo, iterativo), aqui cada turno é disparado
@@ -39,10 +58,16 @@ const HITL_TIMEOUT_MS = 600_000; // 10min, alinhado ao loop engine
  * cards — só o `apply()` (server-side, via `CardsService`).
  */
 @Injectable()
-export class BacklogChatOrchestrator {
+export class BacklogChatOrchestrator implements OnModuleInit {
   private readonly logger = new Logger(BacklogChatOrchestrator.name);
   /** Perguntas HITL pendentes por sessão. */
   private readonly pending = new Map<string, PendingQuestion>();
+  /**
+   * Sessões com um turno rodando AGORA neste processo. Usado para (a) não
+   * disparar dois turnos concorrentes na mesma sessão e (b) o reconcile de boot
+   * não ressuscitar um turno que já está vivo. Chave = sessionId.
+   */
+  private readonly running = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -50,6 +75,55 @@ export class BacklogChatOrchestrator {
     private readonly runner: BacklogCliRunner,
     private readonly cards: CardsService,
   ) {}
+
+  /**
+   * bug-dropped-turn: ao subir, retoma turnos que ficaram "no ar". Se o browser
+   * fechou (ou a API reiniciou) DURANTE um turno normal — não uma pergunta HITL
+   * — a sessão fica `open` com uma mensagem do humano como ÚLTIMA do canal e
+   * nenhuma resposta da AI depois. Como o turno roda com `--session-id` (a
+   * sessão do Copilot é persistida em disco), basta redisparar `runTurn` com o
+   * texto do humano: o CLI resume o contexto e conclui. Perguntas HITL
+   * pendentes NÃO são retomadas aqui — seguem o caminho de `answerQuestion`.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.reconcileOpenTurns();
+    } catch (err) {
+      this.logger.warn(
+        `reconcileOpenTurns falhou no boot (seguindo de pé): ${String(err)}`,
+      );
+    }
+  }
+
+  /** Ver `onModuleInit`. Extraído para ser testável em isolamento. */
+  async reconcileOpenTurns(): Promise<number> {
+    const openSessions = await this.prisma.backlogChatSession.findMany({
+      where: { status: 'open', messages: { some: {} } },
+      select: { id: true, boardId: true },
+    });
+    let resumed = 0;
+    for (const session of openSessions) {
+      if (this.running.has(session.id)) continue;
+      const last = await this.prisma.backlogChatMessage.findFirst({
+        where: { sessionId: session.id },
+        orderBy: { ts: 'desc' },
+      });
+      // Turno pendente = última mensagem é do humano. Se for uma resposta a uma
+      // pergunta HITL (`questionId`), também retomamos (o turno que a aguardava
+      // morreu). Se a última for da AI, o turno já concluiu — nada a fazer.
+      if (!last || last.role !== 'user') continue;
+      const channel = last.channel ?? BACKLOG_MAIN_CHANNEL;
+      this.logger.log(
+        `retomando turno pendente da sessão ${session.id} (canal ${channel}) após restart`,
+      );
+      void this.runTurn(session.id, session.boardId, last.text, channel).catch((err) => {
+        this.logger.error(`runTurn (reconcile) falhou (sessão ${session.id}): ${String(err)}`);
+      });
+      resumed += 1;
+    }
+    if (resumed > 0) this.logger.log(`reconcileOpenTurns: ${resumed} turno(s) retomado(s).`);
+    return resumed;
+  }
 
   // ── Sessões ─────────────────────────────────────────────────────────────
 
@@ -196,17 +270,9 @@ export class BacklogChatOrchestrator {
     questionId: string,
     answer: string,
   ): Promise<boolean> {
-    // Caminho rápido: promise viva no mesmo processo.
-    const p = this.pending.get(sessionId);
-    if (p && p.questionId === questionId) {
-      clearTimeout(p.timer);
-      this.pending.delete(sessionId);
-      p.resolve(answer);
-      return true;
-    }
-
-    // Caminho de resiliência: a pergunta existe no histórico persistido e ainda
-    // não foi respondida, mas não há turno vivo esperando (restart). Retoma.
+    // Só aceita responder uma pergunta que EXISTE no histórico persistido e que
+    // ainda NÃO foi respondida — vale para ambos os caminhos (mesmo processo ou
+    // pós-restart), evitando respostas duplicadas ou órfãs.
     const question = await this.prisma.backlogChatMessage.findFirst({
       where: { sessionId, role: 'ai', questionId },
     });
@@ -217,10 +283,26 @@ export class BacklogChatOrchestrator {
     if (alreadyAnswered) return false;
 
     const session = await this.ensureSession(sessionId);
+    const channel = question.channel ?? BACKLOG_MAIN_CHANNEL;
+
+    // bug-backlog-hitl-hang: como o adapter da CLI é one-shot (o processo já
+    // morreu quando a pergunta chegou), NÃO adianta resolver a promise e deixar
+    // o runner escrever no stdin morto — a resposta some e o turno termina sem
+    // proposta. A correção é SEMPRE tratar a resposta como um turno novo. Se há
+    // uma promise viva no mesmo processo (fast-path), a encerramos com o
+    // sentinela `HitlRespawnSignal` para o turno "morto" desistir sem erro e SEM
+    // persistir a resposta em duplicidade — quem persiste é este método, logo
+    // abaixo, e o novo `runTurn` faz o Copilot resumir o contexto (--session-id)
+    // e finalmente produzir a proposta.
+    const p = this.pending.get(sessionId);
+    if (p && p.questionId === questionId) {
+      clearTimeout(p.timer);
+      this.pending.delete(sessionId);
+      p.reject(new HitlRespawnSignal());
+    }
 
     // Persiste a resposta humana (marcando-a como resposta desta pergunta) no
     // MESMO canal (thread) da pergunta — assim a resposta fica na thread certa.
-    const channel = question.channel ?? BACKLOG_MAIN_CHANNEL;
     await this.prisma.backlogChatMessage.create({
       data: { sessionId, role: 'user', text: answer, questionId, channel },
     });
@@ -233,15 +315,39 @@ export class BacklogChatOrchestrator {
 
     // Dispara um turno novo com a resposta como entrada. O `--session-id` faz o
     // Copilot resumir o contexto (incluindo a pergunta) — a conversa continua.
+    // Aguardamos o turno "morto" liberar o lock `running` antes de disparar o
+    // novo (o `finally` do runTurn em curso roda logo após a rejeição acima).
     this.logger.log(
-      `HITL retomado após restart (sessão ${sessionId}, pergunta ${questionId})`,
+      `HITL respondido → re-spawn de turno (sessão ${sessionId}, pergunta ${questionId})`,
     );
-    void this.runTurn(sessionId, session.boardId, answer, channel).catch((err) => {
+    void this.respawnAfterAnswer(sessionId, session.boardId, answer, channel);
+    return true;
+  }
+
+  /**
+   * Dispara o turno de continuação após uma resposta HITL, esperando o turno
+   * "morto" liberar o lock `running`. Sem essa espera, a guarda de concorrência
+   * do `runTurn` recusaria o novo turno (o antigo ainda não terminou seu
+   * `finally`). Faz um curto polling (o turno morto encerra em ms, pois o child
+   * já saiu). Ver bug-backlog-hitl-hang.
+   */
+  private async respawnAfterAnswer(
+    sessionId: string,
+    boardId: string,
+    answer: string,
+    channel: string,
+  ): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (this.running.has(sessionId) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    try {
+      await this.runTurn(sessionId, boardId, answer, channel);
+    } catch (err) {
       this.logger.error(
         `runTurn (retomada HITL) falhou (sessão ${sessionId}): ${String(err)}`,
       );
-    });
-    return true;
+    }
   }
 
   private async runTurn(
@@ -250,6 +356,17 @@ export class BacklogChatOrchestrator {
     userText: string,
     channel: string = BACKLOG_MAIN_CHANNEL,
   ): Promise<void> {
+    // Guarda de concorrência (bug-dropped-turn): no máximo um turno vivo por
+    // sessão neste processo — evita que o reconcile de boot e um POST /messages
+    // (ou dois disparos) rodem turnos concorrentes que embaralhariam o
+    // transcript e a sessão do Copilot.
+    if (this.running.has(sessionId)) {
+      this.logger.warn(
+        `runTurn ignorado: já há um turno vivo para a sessão ${sessionId}.`,
+      );
+      return;
+    }
+    this.running.add(sessionId);
     const board = await this.prisma.board.findUnique({ where: { id: boardId } });
     // Histórico por canal: como o turno roda com `--session-id` (o Copilot já
     // resume TODO o contexto real da sessão), passamos ao prompt apenas o
@@ -346,12 +463,19 @@ export class BacklogChatOrchestrator {
               });
               return answer;
             } catch (err) {
-              this.realtime.broadcast({
-                type: 'backlog.answered',
-                sessionId,
-                channel,
-                questionId,
-              });
+              // bug-backlog-hitl-hang: `HitlRespawnSignal` NÃO é falha — é o sinal
+              // de que a resposta chegou e será entregue por um turno NOVO (o
+              // adapter one-shot já morreu). Encerramos este turno "morto" sem
+              // persistir a resposta (o novo turno cuida disso) e sem broadcast
+              // de `answered` (idem). Repropagamos para desfazer o turno atual.
+              if (!(err instanceof HitlRespawnSignal)) {
+                this.realtime.broadcast({
+                  type: 'backlog.answered',
+                  sessionId,
+                  channel,
+                  questionId,
+                });
+              }
               throw err;
             }
           },
@@ -365,8 +489,20 @@ export class BacklogChatOrchestrator {
           },
         },
       });
+    } catch (err) {
+      // Encerramento gracioso quando a resposta HITL foi entregue via re-spawn:
+      // o turno "morto" desiste com `HitlRespawnSignal` — não é erro. Qualquer
+      // outra falha é repropagada.
+      if (err instanceof HitlRespawnSignal) {
+        this.logger.debug(
+          `turno HITL encerrado para re-spawn (sessão ${sessionId}).`,
+        );
+        return;
+      }
+      throw err;
     } finally {
       await flushChunk();
+      this.running.delete(sessionId);
     }
   }
 
@@ -512,6 +648,10 @@ export class BacklogChatOrchestrator {
     const created: BacklogAppliedCard[] = [];
 
     // Epic primeiro (parentId=null, sem columnId — vive por hierarquia).
+    // O `aiProject` (repo-alvo descoberto pelo PO na fase de discovery) é
+    // persistido aqui; as stories filhas o herdam no loop engine (fallback
+    // epic→story). Ver finding imp-aiproject-missing.
+    const epicAiProject = proposal.epic.aiProject?.trim();
     const epic = await this.cards.create({
       boardId: session.boardId,
       type: 'epic',
@@ -519,6 +659,7 @@ export class BacklogChatOrchestrator {
       description: proposal.epic.description ?? '',
       points: proposal.epic.points,
       parentId: null,
+      ...(epicAiProject ? { aiProject: epicAiProject } : {}),
     });
     created.push({
       id: epic.id,

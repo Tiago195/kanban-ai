@@ -61,6 +61,16 @@ export interface AppConfig {
      */
     maxIterationsPerTask: number;
     /**
+     * Cap de iterações IMPRODUTIVAS consecutivas — quantas iterações seguidas
+     * de fase `implementation` podem terminar com o `diff` do worktree VAZIO
+     * antes de o loop escalar para humano (marca `needsHuman`, para o auto-play).
+     * É uma defesa PRÓPRIA contra o deadlock de `blocked_dep`/derivações que
+     * ciclam sem produzir código — independente de qualquer outro defeito que
+     * possa zerar o diff. Default 3. `0` desliga.
+     * AGENT_MAX_UNPRODUCTIVE_ITERATIONS.
+     */
+    maxUnproductiveIterations: number;
+    /**
      * Cap de profundidade de derivação — quantas derivações em cadeia
      * (task → task derivada → ...) são permitidas antes de o loop escalar para
      * humano em vez de derivar de novo. Default 3. `0` desliga.
@@ -155,6 +165,7 @@ export function loadConfig(): AppConfig {
       requireFlowCoverage: process.env.AGENT_REQUIRE_FLOW_COVERAGE === 'true',
       maxValidationFailures: num(process.env.AGENT_MAX_VALIDATION_FAILURES, 3),
       maxIterationsPerTask: num(process.env.AGENT_MAX_ITERATIONS_PER_TASK, 30),
+      maxUnproductiveIterations: num(process.env.AGENT_MAX_UNPRODUCTIVE_ITERATIONS, 3),
       maxDerivedDepth: num(process.env.AGENT_MAX_DERIVED_DEPTH, 3),
       maxTaskDurationMs: num(process.env.AGENT_MAX_TASK_DURATION_MS, 0),
       maxTaskTokens: num(process.env.AGENT_MAX_TASK_TOKENS, 0),

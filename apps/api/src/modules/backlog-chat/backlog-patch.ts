@@ -59,6 +59,10 @@ function applyOp(
     proposal.epic.points = requirePoints(op.value, path);
     return;
   }
+  if (path === '/epic/aiProject') {
+    proposal.epic.aiProject = requireString(op.value, path);
+    return;
+  }
 
   // ── Stories: add/remove ─────────────────────────────────────────────────────
   if (path === '/stories/-') {

@@ -20,7 +20,13 @@ export function registerBoardTools(server: McpServer, client: KanbanClient): voi
   registerTool(
     server,
     'list_boards',
-    'Lista os boards disponíveis com suas colunas. Ponto de partida para descobrir ids de board e coluna.',
+    'Lista os boards disponíveis com suas colunas. Ponto de partida para descobrir ids de board e coluna. ' +
+      'IMPORTANTE: cada board tem DUAS raias de colunas distinguidas pela flag `isTaskColumn`: ' +
+      'colunas de board/story (`isTaskColumn:false` — Backlog, To Do, In Progress, Review, Done) e ' +
+      'colunas de task (`isTaskColumn:true` — To Do, In Progress, Review, Done, sem Backlog). ' +
+      'Títulos como "To Do"/"Done" aparecem em AMBAS as raias com ids diferentes — isso NÃO é duplicação, ' +
+      'é o modelo de duas raias. Sempre filtre por `isTaskColumn` ao escolher a coluna certa: ' +
+      'stories usam `boardColumnId` (raia de board), tasks usam `taskColumnId` (raia de task).',
     {},
     async () => ok(await client.get('/boards')),
   );
@@ -30,7 +36,13 @@ export function registerBoardTools(server: McpServer, client: KanbanClient): voi
     'get_board',
     'Retorna o snapshot completo de um board (colunas, labels, assignees e loop profiles). ' +
       'Use para carregar todo o contexto de um quadro antes de operar sobre ele — ' +
-      'ids de colunas, labels e assignees vêm daqui.',
+      'ids de colunas, labels e assignees vêm daqui. ' +
+      'IMPORTANTE: o board expõe DUAS raias de colunas distinguidas pela flag `isTaskColumn`: ' +
+      'raia de board/story (`isTaskColumn:false`: Backlog, To Do, In Progress, Review, Done) e ' +
+      'raia de task (`isTaskColumn:true`: To Do, In Progress, Review, Done). ' +
+      'Um título como "In Progress" aparece em ambas as raias com ids diferentes — NÃO é duplicação. ' +
+      'Ao mover: stories vão para uma coluna com `isTaskColumn:false` (via `boardColumnId`), ' +
+      'tasks vão para uma coluna com `isTaskColumn:true` (via `taskColumnId`).',
     { id: z.string().uuid() },
     async ({ id }) => ok(await client.get(`/boards/${id}`)),
   );

@@ -16,9 +16,54 @@ export function registerCardTools(server: McpServer, client: KanbanClient): void
   registerTool(
     server,
     'list_cards',
-    'Lista os cards de um board (GET /cards). Passe `boardId` para filtrar; sem ele lista todos. Epics trazem `epicStatus` derivado das stories filhas.',
-    { boardId: z.string().uuid().optional() },
-    async (args) => ok(await client.get('/cards', { boardId: args.boardId })),
+    [
+      'Lista os cards de um board (GET /cards). Epics trazem `epicStatus` derivado das stories filhas.',
+      'Para não estourar o contexto do LLM, esta tool é PAGINADA e RESUMIDA por padrão:',
+      'retorna `{ items, nextCursor }` com campos essenciais (id, key, type, title, parentId,',
+      'boardColumnId, taskColumnId, position, points, blocked, needsHuman, execState, epicStatus, updatedAt).',
+      'Use `nextCursor` para buscar a próxima página; use `get_card` para o detalhe completo de um card.',
+      'Filtre com `boardId`, `type` (epic|story|task), `columnId` (casa boardColumnId OU taskColumnId)',
+      'e `updatedSince` (ISO 8601). Passe `fields:"full"` para o objeto completo de cada card.',
+    ].join(' '),
+    {
+      boardId: z.string().uuid().optional(),
+      type: z.enum(['epic', 'story', 'task']).optional(),
+      columnId: z.string().uuid().optional(),
+      updatedSince: z
+        .string()
+        .datetime()
+        .optional()
+        .describe('Só cards atualizados em/depois deste instante (ISO 8601).'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe('Tamanho da página (default 50).'),
+      cursor: z
+        .string()
+        .uuid()
+        .optional()
+        .describe('Cursor de continuação (nextCursor da página anterior).'),
+      fields: z
+        .enum(['full', 'summary'])
+        .optional()
+        .describe('summary (default): campos essenciais; full: objeto completo.'),
+    },
+    async (args) =>
+      ok(
+        await client.get('/cards', {
+          boardId: args.boardId,
+          type: args.type,
+          columnId: args.columnId,
+          updatedSince: args.updatedSince,
+          // Defaults ergonômicos para LLM: página pequena + projeção resumida.
+          limit: args.limit ?? 50,
+          cursor: args.cursor,
+          fields: args.fields ?? 'summary',
+        }),
+      ),
   );
 
   registerTool(

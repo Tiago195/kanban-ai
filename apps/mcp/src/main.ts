@@ -15,6 +15,7 @@ import { registerChecklistTools } from './tools/checklist.js';
 import { registerTaxonomyTools } from './tools/taxonomy.js';
 import { registerContextTools } from './tools/context.js';
 import { registerLoopTools } from './tools/loop.js';
+import { registerBacklogTools } from './tools/backlog.js';
 import { registerResources } from './resources/index.js';
 import { registerStreaming } from './streaming.js';
 
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
   registerTaxonomyTools(server, client);
   registerContextTools(server, client);
   registerLoopTools(server, client);
+  registerBacklogTools(server, client);
   registerResources(server, client);
 
   // Streaming WS → notificações MCP (fase 2). Lê o path configurável do WS.

@@ -1733,6 +1733,14 @@
     font-size: 11px;
     color: var(--text-muted);
     margin-left: 4px;
+    max-width: 340px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chat-typing-elapsed {
+    opacity: 0.7;
+    font-variant-numeric: tabular-nums;
   }
   @keyframes chat-typing-bounce {
     0%, 60%, 100% {

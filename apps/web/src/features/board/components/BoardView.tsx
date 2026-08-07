@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   DndContext,
   DragOverlay,
+  KeyboardCode,
+  KeyboardSensor,
   PointerSensor,
   pointerWithin,
   rectIntersection,
@@ -12,8 +14,9 @@ import {
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
+  type KeyboardCoordinateGetter,
 } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { cleanChatText } from "@kanban-ai/shared";
 import type { ExecState, StoryPoints } from "@kanban-ai/shared";
@@ -121,6 +124,82 @@ const boardCollision: CollisionDetection = (args) => {
 };
 
 /**
+ * Coordinate getter para navegação por teclado em board **horizontal**.
+ *
+ * O `sortableKeyboardCoordinates` padrão do dnd-kit é otimizado para listas
+ * verticais: ArrowLeft/Right acabam mirando no card vizinho mais próximo, que
+ * quase sempre está na MESMA coluna — então o card nunca troca de coluna.
+ *
+ * Aqui interceptamos ArrowLeft/ArrowRight para mover o card entre as *colunas*
+ * droppable (`column:<id>`): descobrimos a coluna atual pela posição do card
+ * arrastado e saltamos para o centro da coluna imediatamente à esquerda/direita.
+ * ArrowUp/ArrowDown continuam delegando ao comportamento padrão (reordenar
+ * dentro da coluna).
+ */
+const boardKeyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
+  const { context } = args;
+  const isLeft = event.code === KeyboardCode.Left;
+  const isRight = event.code === KeyboardCode.Right;
+
+  if (isLeft || isRight) {
+    const current = context.collisionRect;
+    if (current) {
+      // Coleta os retângulos das colunas droppable habilitadas, ordenados por x.
+      const columns = context.droppableContainers
+        .getEnabled()
+        .filter((container) => String(container.id).startsWith("column:"))
+        .map((container) => ({
+          id: container.id,
+          rect: context.droppableRects.get(container.id),
+        }))
+        .filter((entry): entry is { id: typeof entry.id; rect: NonNullable<typeof entry.rect> } =>
+          Boolean(entry.rect),
+        )
+        .sort((a, b) => a.rect.left - b.rect.left);
+
+      if (columns.length > 0) {
+        const currentCenterX = current.left + current.width / 2;
+        // Índice da coluna que contém (ou está mais próxima de) o card atual.
+        let currentIndex = columns.findIndex(
+          (col) => currentCenterX >= col.rect.left && currentCenterX <= col.rect.left + col.rect.width,
+        );
+        if (currentIndex === -1) {
+          let bestDist = Number.POSITIVE_INFINITY;
+          columns.forEach((col, index) => {
+            const colCenterX = col.rect.left + col.rect.width / 2;
+            const dist = Math.abs(colCenterX - currentCenterX);
+            if (dist < bestDist) {
+              bestDist = dist;
+              currentIndex = index;
+            }
+          });
+        }
+
+        const targetIndex = isRight ? currentIndex + 1 : currentIndex - 1;
+        const target = columns[targetIndex];
+        if (target) {
+          event.preventDefault();
+          // O KeyboardSensor do dnd-kit interpreta a coordenada retornada como o
+          // novo canto superior-esquerdo do card arrastado (não o centro). Para
+          // que o `collisionRect` fique contido na coluna-alvo (e não invada a
+          // vizinha), alinhamos a borda esquerda do card à borda esquerda da
+          // coluna de destino.
+          return {
+            x: target.rect.left,
+            y: current.top,
+          };
+        }
+        // Sem coluna vizinha nessa direção: mantém a posição atual.
+        return undefined;
+      }
+    }
+  }
+
+  return sortableKeyboardCoordinates(event, args);
+};
+
+
+/**
  * Registra a lista de uma coluna como droppable no dnd-kit (id `column:<id>`),
  * de modo que seja possível soltar um card mesmo quando a coluna está vazia.
  */
@@ -171,6 +250,9 @@ function StoryCard({ card, onOpen }: { card: ApiCardSummary; onOpen: (card: ApiC
       style={style}
       className={"card type-story" + (card.blocked ? " blocked" : "") + (isDragging ? " dragging" : "")}
       onClick={() => onOpen(card)}
+      data-testid="board-card"
+      data-card-id={card.id}
+      data-card-key={card.key}
       {...attributes}
       {...listeners}
     >
@@ -197,10 +279,20 @@ function StoryColumn({
   const allowsCreate = column.title === "Backlog" || column.title === "To Do";
 
   return (
-    <div className={"column" + (isDropTarget ? " drop-target" : "")}>
+    <div
+      className={"column" + (isDropTarget ? " drop-target" : "")}
+      data-testid="board-column"
+      data-column-id={column.id}
+      data-column-title={column.title}
+    >
       <div className="column-header">
         <div className="column-title">{column.title}</div>
-        <span className={"column-count" + (overLimit ? " over-limit" : "")}>{stories.length}</span>
+        <span
+          className={"column-count" + (overLimit ? " over-limit" : "")}
+          data-testid="board-column-count"
+        >
+          {stories.length}
+        </span>
         {points > 0 ? <span className="column-points">{points} pts</span> : null}
         {column.wipLimit != null ? (
           <span className="column-wip">
@@ -217,7 +309,12 @@ function StoryColumn({
         </ColumnDropZone>
       </SortableContext>
       {allowsCreate ? (
-        <button className="add-card-btn" onClick={() => onCreateStory(column.id)}>
+        <button
+          className="add-card-btn"
+          onClick={() => onCreateStory(column.id)}
+          data-testid="board-add-story"
+          data-column-id={column.id}
+        >
           + Adicionar história
         </button>
       ) : null}
@@ -263,6 +360,9 @@ function MiniCard({
       style={style}
       className={"task-card" + (card.blocked ? " blocked" : "") + (isDragging ? " dragging" : "")}
       onClick={() => onOpen(card)}
+      data-testid="board-task-card"
+      data-card-id={card.id}
+      data-card-key={card.key}
       {...attributes}
       {...listeners}
     >
@@ -291,7 +391,10 @@ function MiniKanban({
   allowAddOn?: (column: ApiBoardColumn) => boolean;
 }) {
   const moveCard = useMoveCard();
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: boardKeyboardCoordinates }),
+  );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overColId, setOverColId] = useState<string | null>(null);
   const activeCard = activeId ? cards.find((card) => card.id === activeId) ?? null : null;
@@ -1433,7 +1536,7 @@ function StoryModal({
                 /{tasks.length}
               </span>
             ) : null}
-            <button className="kb-btn kb-btn-ghost kb-btn-sm" style={{ marginLeft: "auto" }} onClick={createTask}>
+            <button className="kb-btn kb-btn-ghost kb-btn-sm" style={{ marginLeft: "auto" }} data-testid="board-add-task" onClick={createTask}>
               + Task
             </button>
           </div>
@@ -1524,6 +1627,7 @@ function TaskLoopControls({ task, boardId }: { task: ApiCardDetails; boardId: st
       <div className="ai-exec-controls">
         <button
           className="btn btn-ghost btn-sm"
+          data-testid="loop-step"
           onClick={onStep}
           disabled={!storyId || execState === "done" || busy}
         >
@@ -1531,11 +1635,23 @@ function TaskLoopControls({ task, boardId }: { task: ApiCardDetails; boardId: st
         </button>
         <button
           className={"btn btn-sm " + (running ? "btn-ghost" : "btn-primary")}
+          data-testid="loop-toggle-auto"
           onClick={onToggleAuto}
           disabled={!storyId || busy}
         >
           {running ? "⏸ Parar auto-play" : "⏩ Auto-play"}
         </button>
+        {running ? (
+          <button
+            className="btn btn-sm btn-ghost"
+            data-testid="loop-stop-hard"
+            title="Interrompe imediatamente a iteração atual (abort)"
+            onClick={() => storyId && stop.mutate({ storyId, mode: "hard" })}
+            disabled={!storyId || busy}
+          >
+            ⏹ Forçar parada
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -1838,7 +1954,10 @@ export function BoardView() {
   const { data: cards } = useCards(boardId);
   const moveCard = useMoveCard();
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: boardKeyboardCoordinates }),
+  );
   const [overColumnId, setOverColumnId] = useState<string | null>(null);
   const [createEpicOpen, setCreateEpicOpen] = useState(false);
   const [createStoryCtx, setCreateStoryCtx] = useState<{ columnId: string; parentId: string | null } | null>(null);
@@ -2008,7 +2127,7 @@ export function BoardView() {
           });
         }}
       >
-        <div className="board">
+        <div className="board" data-testid="board">
           {boardColumns.map((column) => (
             <StoryColumn
               key={column.id}

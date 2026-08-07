@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BacklogChatMessage, BacklogProposalStory } from "@kanban-ai/shared";
 
@@ -53,10 +53,28 @@ export function BacklogChatView({
 
   const createMutate = createSession.mutate;
   const creating = createSession.isPending;
+  // Guarda síncrona: `isPending` do react-query não vira `true` no mesmo tick do
+  // `mutate`, então sob StrictMode (double-invoke) ou re-render antes do estado
+  // atualizar, o effect dispararia `createMutate` várias vezes → dezenas de
+  // sessões vazias. O ref flipa de forma síncrona no 1º disparo e trava os
+  // seguintes até a URL ganhar um `sessionId`; se a criação falhar, liberamos o
+  // ref para permitir uma nova tentativa.
+  const hasRequestedRef = useRef(false);
   useEffect(() => {
+    // Se a URL já tem sessão, não há o que criar — e reseta o guard para uma
+    // futura navegação a /backlog-chat "limpo" (ex.: "nova conversa").
+    if (sessionId) {
+      hasRequestedRef.current = false;
+      return;
+    }
     // Só cria sessão quando a URL não tem id (rota /backlog-chat sem :sessionId).
-    if (boardId && !sessionId && !creating) {
-      createMutate(boardId);
+    if (boardId && !creating && !hasRequestedRef.current) {
+      hasRequestedRef.current = true;
+      createMutate(boardId, {
+        onError: () => {
+          hasRequestedRef.current = false;
+        },
+      });
     }
   }, [boardId, sessionId, creating, createMutate]);
 
@@ -65,6 +83,8 @@ export function BacklogChatView({
     pending,
     proposal,
     streaming,
+    streamingSince,
+    lastActivity,
     isSending,
     isAnswering,
     isApplying,
@@ -151,6 +171,8 @@ export function BacklogChatView({
             messages={panelMessages}
             pending={pending ? { options: pending.options } : null}
             thinking={streaming}
+            activityLabel={lastActivity}
+            since={streamingSince}
             busy={busy}
             inputMode="always"
             placeholder={

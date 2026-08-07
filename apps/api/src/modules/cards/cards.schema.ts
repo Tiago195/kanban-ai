@@ -17,10 +17,35 @@ export const createCardSchema = z.object({
   columnId: z.string().uuid().optional(),
   loopType: z.string().min(1).optional(),
   aiSummary: z.string().optional(),
+  aiProject: z.string().optional(),
   aiNotes: z.string().optional(),
 });
 
 export type CreateCardDto = z.infer<typeof createCardSchema>;
+
+/**
+ * Query params de `GET /cards` — todos opcionais e retrocompatíveis: sem nenhum
+ * param a rota devolve o comportamento antigo (lista completa, campos completos).
+ * Habilita paginação por cursor, filtros e projeção `summary` para consumidores
+ * headless (MCP/LLM) não estourarem contexto.
+ */
+export const listCardsQuerySchema = z.object({
+  boardId: z.string().uuid().optional(),
+  /** Filtra por tipo de card. */
+  type: z.enum(['epic', 'story', 'task']).optional(),
+  /** Filtra por coluna (bate em boardColumnId OU taskColumnId). */
+  columnId: z.string().uuid().optional(),
+  /** Retorna só cards atualizados em/depois deste instante (ISO 8601). */
+  updatedSince: z.string().datetime().optional(),
+  /** Página máxima; quando presente, ativa o modo paginado (retorna `{ items, nextCursor }`). */
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  /** Cursor de continuação (id do último card da página anterior). */
+  cursor: z.string().uuid().optional(),
+  /** Projeção: `full` (default) mantém tudo; `summary` retorna só campos essenciais. */
+  fields: z.enum(['full', 'summary']).optional(),
+});
+
+export type ListCardsQueryDto = z.infer<typeof listCardsQuerySchema>;
 
 /** Schema de movimento de card entre colunas. */
 export const moveCardSchema = z.object({

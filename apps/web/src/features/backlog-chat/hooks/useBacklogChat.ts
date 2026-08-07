@@ -21,6 +21,10 @@ export interface UseBacklogChatResult {
   pending: BacklogPending | null;
   proposal: BacklogProposal | null;
   streaming: boolean;
+  /** Epoch (ms) em que o turno corrente começou, ou null se ocioso. */
+  streamingSince: number | null;
+  /** Última linha de atividade da AI (status vivo), ou null. */
+  lastActivity: string | null;
   isSending: boolean;
   isAnswering: boolean;
   isApplying: boolean;
@@ -157,6 +161,8 @@ export function useBacklogChat(
     pending: chat?.pending ?? null,
     proposal,
     streaming: chat?.streaming ?? false,
+    streamingSince: chat?.streamingSince ?? null,
+    lastActivity: chat?.lastActivity ?? null,
     isSending: sendMutation.isPending,
     isAnswering: answerMutation.isPending,
     isApplying: applyMutation.isPending,

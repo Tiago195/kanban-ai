@@ -154,6 +154,14 @@ export interface BacklogProposal {
     title: string;
     description?: string;
     points?: StoryPoints;
+    /**
+     * Caminho absoluto do repositório-alvo (aiProject) que o agente PO
+     * inspecionou via shell durante a descoberta. Persistido no card épico ao
+     * aplicar (`/apply`); as stories filhas herdam este valor no loop engine
+     * (fallback epic→story). Opcional para compatibilidade com propostas
+     * antigas. Ver finding imp-aiproject-missing.
+     */
+    aiProject?: string;
   };
   stories: BacklogProposalStory[];
   /** 1 linha do porquê desta decomposição (exibida ao expandir detalhes). */

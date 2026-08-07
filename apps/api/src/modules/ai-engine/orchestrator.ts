@@ -262,7 +262,7 @@ export class Orchestrator implements OnModuleInit {
       // one-shot e torna o HITL resiliente a restart: o turno que retoma após a
       // resposta humana resume a MESMA sessão do Copilot. Ver ADR-0022.
       cliSessionId: taskId,
-      prompt: this.buildPrompt(phase, profile, context, agent?.instructions ?? ''),
+      prompt: this.buildPrompt(phase, profile, context, agent?.instructions ?? '', cwd),
       context: runnerContext,
       signal,
       // b6: repassa cada chunk de streaming para o WS (buffer reativo no front)
@@ -456,6 +456,32 @@ export class Orchestrator implements OnModuleInit {
       return true;
     }
 
+    // Guard anti-bypass do worktree (bug-hallucinated-loop): na fase de
+    // implementação, se a AI relata progresso (marcou DOD, declarou `done` ou
+    // listou `affectedFlows`) mas o `git diff` do worktree está VAZIO, então o
+    // trabalho não aterrissou no worktree isolado — sintoma de o agent ter
+    // escrito FORA do `cwd` (ex.: `cd` para o repo-alvo original). Nesse caso
+    // NÃO aceitamos o progresso: ignoramos o DOD reportado e registramos um
+    // desvio, para o loop corrigir em vez de avançar sobre trabalho fantasma.
+    // (runner mock não produz diff real — só aplicamos ao runner de verdade.)
+    const reportedProgress =
+      (runResult.dodTouched ?? []).filter(Boolean).length > 0 ||
+      runResult.done === true ||
+      (runResult.affectedFlows?.length ?? 0) > 0;
+    const emptyWorktreeBypass =
+      this.runner.id !== 'mock' &&
+      phase === 'implementation' &&
+      reportedProgress &&
+      iterationDiff.trim().length === 0;
+    if (emptyWorktreeBypass) {
+      await this.log(
+        taskId,
+        'desvio detectado: a AI relatou progresso mas o git diff do worktree está VAZIO. ' +
+          'Provável escrita FORA do diretório de trabalho (cwd). O progresso foi IGNORADO — ' +
+          'faça todas as mudanças no diretório atual (não use `cd` para outro caminho).',
+      );
+    }
+
     // Iteração normal (reproduce / analysis / implementation).
     // É a AI (CLI) quem decide quais itens de DOD concluiu. Respeitamos
     // `runResult.dodTouched`, validando que os ids pertencem a ESTA task e ainda
@@ -463,7 +489,7 @@ export class Orchestrator implements OnModuleInit {
     // fallback determinístico (marca o próximo item pendente) só na fase de
     // implementação, preservando o comportamento dev/test do mock.
     let touched: string[] = [];
-    const reported = (runResult.dodTouched ?? []).filter(Boolean);
+    const reported = emptyWorktreeBypass ? [] : (runResult.dodTouched ?? []).filter(Boolean);
     if (reported.length > 0) {
       const validIds = new Set(context.dodItems.filter((d) => !d.done).map((d) => d.id));
       const reportedValid = reported.filter((id) => validIds.has(id));
@@ -506,7 +532,7 @@ export class Orchestrator implements OnModuleInit {
       await this.persistAffectedFlows(context.storyId, runResult.affectedFlows);
     }
 
-    const handoffState = runResult.done ? 'done' : execStateAfterPhase(phase);
+    const handoffState = runResult.done && !emptyWorktreeBypass ? 'done' : execStateAfterPhase(phase);
     // #6: se houve HITL nesta iteração, anexa a pergunta+resposta ao nextStep
     // para reinjeção no lastro da próxima iteração (modelo one-shot).
     const nextStep = hitlExchange
@@ -1108,6 +1134,7 @@ export class Orchestrator implements OnModuleInit {
   private async enforceLoopGuards(taskId: string, storyId: string): Promise<boolean> {
     const {
       maxIterationsPerTask,
+      maxUnproductiveIterations,
       maxTaskDurationMs,
       maxTaskTokens,
       thrashDetectionEnabled,
@@ -1116,9 +1143,10 @@ export class Orchestrator implements OnModuleInit {
     } = this.config.agent;
 
     const iterationCapOn = maxIterationsPerTask > 0;
+    const unproductiveCapOn = maxUnproductiveIterations > 0;
     const costGateOn = maxTaskDurationMs > 0 || maxTaskTokens > 0;
     const thrashOn = thrashDetectionEnabled && thrashWindow >= 2;
-    if (!iterationCapOn && !costGateOn && !thrashOn) return false;
+    if (!iterationCapOn && !unproductiveCapOn && !costGateOn && !thrashOn) return false;
 
     const iterations = await this.prisma.iteration.findMany({
       where: { cardId: taskId },
@@ -1129,6 +1157,8 @@ export class Orchestrator implements OnModuleInit {
         outputTokens: true,
         summary: true,
         handoffNextStep: true,
+        phase: true,
+        diff: true,
       },
     });
     if (iterations.length === 0) return false;
@@ -1146,7 +1176,34 @@ export class Orchestrator implements OnModuleInit {
       return true;
     }
 
-    // Gate de custo (#1).
+    // Cap de iterações IMPRODUTIVAS consecutivas (#4 — anti-deadlock de
+    // blocked_dep/derivações que ciclam sem produzir código). Conta, do fim
+    // para o começo, iterações de fase `implementation` cujo `diff` do worktree
+    // ficou VAZIO; para na primeira iteração de implementação produtiva (com
+    // diff). É uma defesa PRÓPRIA: mesmo que outro defeito zere o diff, o loop
+    // para e escala em vez de ciclar indefinidamente.
+    if (unproductiveCapOn) {
+      let consecutiveEmpty = 0;
+      for (let i = iterations.length - 1; i >= 0; i--) {
+        const it = iterations[i];
+        if (it.phase !== 'implementation') continue;
+        if ((it.diff ?? '').trim().length === 0) {
+          consecutiveEmpty += 1;
+        } else {
+          break;
+        }
+      }
+      if (consecutiveEmpty >= maxUnproductiveIterations) {
+        const reason = `iterações improdutivas consecutivas (${consecutiveEmpty} ≥ ${maxUnproductiveIterations}) — nenhuma mudança no worktree; possível deadlock`;
+        await this.escalateToHuman(
+          taskId,
+          storyId,
+          reason,
+          `cap de iterações improdutivas: ${reason} — task marcada como "precisa de humano"; auto-play parado`,
+        );
+        return true;
+      }
+    }
     if (maxTaskDurationMs > 0) {
       const totalMs = iterations.reduce((a, it) => a + (it.durationMs ?? 0), 0);
       if (totalMs >= maxTaskDurationMs) {
@@ -1878,6 +1935,7 @@ export class Orchestrator implements OnModuleInit {
     profile: LoopProfileDef,
     context: Awaited<ReturnType<Orchestrator['buildContext']>>,
     agentInstructions = '',
+    worktreePath = '',
   ): string {
     const lines: string[] = [];
 
@@ -1907,20 +1965,29 @@ export class Orchestrator implements OnModuleInit {
     // Task + contexto de domínio.
     lines.push('');
     lines.push(`## Task: ${context.taskTitle}`);
-    if (context.project) lines.push(`- Projeto-alvo (repo): ${context.project}`);
     if (context.notes) lines.push(`- Notas / efeitos colaterais: ${context.notes}`);
 
-    // #7/#8: escopo e projeto-alvo — a AI NÃO pode sair do repo-alvo.
+    // #7/#8: escopo e projeto-alvo — a AI trabalha DENTRO do worktree isolado
+    // (o `cwd` do processo). NUNCA expomos o path do repo-alvo original aqui:
+    // se o agent visse esse caminho absoluto ele faria `cd` para lá e escreveria
+    // FORA do worktree — anulando o isolamento, deixando o `git diff` do worktree
+    // vazio e fazendo stories concorrentes colidirem no mesmo working tree
+    // (bug-hallucinated-loop). Referimos SEMPRE o worktree/`cwd`.
     lines.push('');
-    lines.push('## Escopo e projeto-alvo (LEIA COM ATENÇÃO)');
-    if (context.project) {
+    lines.push('## Escopo e diretório de trabalho (LEIA COM ATENÇÃO)');
+    if (worktreePath) {
       lines.push(
-        `- Você está trabalhando NO PROJETO-ALVO: \`${context.project}\`. O diretório atual ` +
-          'já é uma branch/worktree isolada desse repositório. Faça TODAS as mudanças aqui.',
+        `- Seu diretório de trabalho (\`cwd\`) é \`${worktreePath}\`. Ele JÁ É uma branch/worktree ` +
+          'isolada do repositório-alvo. **Faça TODAS as mudanças AQUI, no diretório atual.**',
+      );
+      lines.push(
+        '- **NÃO** rode `cd` para outro caminho absoluto, nem edite arquivos fora deste ' +
+          'diretório. Trabalhe SEMPRE relativo ao `cwd` (ex.: `./ping.js`, `test/x.test.js`). ' +
+          'Escrever fora do worktree corrompe o isolamento e faz o loop nunca convergir.',
       );
     } else {
       lines.push(
-        '- ⚠️ Projeto-alvo NÃO definido. Não crie arquivos fora do diretório atual e ' +
+        '- Trabalhe apenas no diretório atual (`cwd`). Não crie arquivos fora dele e ' +
           'não invente estrutura. Se faltar contexto, faça UMA pergunta objetiva.',
       );
     }

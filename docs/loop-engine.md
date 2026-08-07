@@ -166,6 +166,37 @@ faz o fallback para `__default`.
 
 Ambos limpam o watchdog e emitem `auto.stopped` com o `mode`.
 
+### Como parar o loop (REST)
+
+A rota de parada é **`POST /cards/:id/loop/auto/stop`** (id = **story**), com o
+`mode` no corpo:
+
+```http
+POST /cards/US-42/loop/auto/stop
+Content-Type: application/json
+
+{ "mode": "graceful" }   // ou "hard"
+```
+
+Resposta: `{ "running": false }`. O corpo é validado por `stopAutoSchema`
+(`mode` ∈ `{graceful, hard}`, default `graceful`). No board, o botão
+**"⏸ Parar auto-play"** (menu do loop da task) dispara o stop **graceful**; o
+botão **"⏹ Forçar parada"** dispara o **hard/abort**. A rota **não** é
+`/loop/stop-auto` — é `/loop/auto/stop`, simétrica com `/loop/auto/start`.
+
+### Endpoints REST do loop (referência rápida)
+
+Todos sob o recurso `cards`, `:id` = **story** (exceto onde indicado):
+
+| Método + rota | Corpo | Efeito |
+|---|---|---|
+| `POST /cards/:id/loop/step` | — | roda **1 iteração** manual |
+| `POST /cards/:id/loop/auto/start` | — | inicia o **auto-play** server-side |
+| `POST /cards/:id/loop/auto/stop` | `{mode:'graceful'\|'hard'}` | **para** o auto-play |
+| `GET  /cards/:id/loop/state` | — | estado do loop (`isAutoRunning`, sessão…) |
+| `GET  /cards/:id/loop/metrics` | — | métricas de qualidade agregadas |
+| `POST /cards/:id/loop/answer` | `{questionId, answer}` | responde a pergunta HITL |
+
 ## Watchdog + as 4 salvaguardas
 
 Enquanto a story está viva em In Progress, um **`setInterval` de ~2 min**

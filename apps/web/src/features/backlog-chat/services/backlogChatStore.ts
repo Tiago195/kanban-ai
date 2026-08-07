@@ -40,6 +40,20 @@ export interface ChannelChat {
   pending: BacklogPending | null;
   /** true enquanto a AI está processando (streaming ativo) NESTE canal. */
   streaming: boolean;
+  /**
+   * Epoch (ms) em que o streaming corrente começou NESTE canal, ou `null`
+   * quando ocioso. Permite à UI mostrar um cronômetro de "há Xs trabalhando"
+   * durante turnos longos do PO (que rodam shell real no repo-alvo e podem levar
+   * minutos entre chunks). Ver finding imp-slow-turns.
+   */
+  streamingSince: number | null;
+  /**
+   * Última linha de "pensamento" (`thought`) emitida pela AI neste canal.
+   * Serve de status vivo no indicador de digitação durante silêncios longos
+   * (ex.: "explorando o repositório…", "rodando os testes…"), para que um turno
+   * de vários minutos não pareça travado. Ver finding imp-slow-turns.
+   */
+  lastActivity: string | null;
 }
 
 /**
@@ -97,6 +111,8 @@ export const emptyChannel = (): ChannelChat => ({
   messages: [],
   pending: null,
   streaming: false,
+  streamingSince: null,
+  lastActivity: null,
 });
 
 /**
@@ -111,6 +127,8 @@ const EMPTY_CHANNEL: ChannelChat = {
   messages: [],
   pending: null,
   streaming: false,
+  streamingSince: null,
+  lastActivity: null,
 };
 
 /** Fábrica de uma sessão vazia (sem canais, sem proposta). */
@@ -121,6 +139,21 @@ export const emptySession = (): SessionChat => ({
 
 function makeId(): string {
   return `bmsg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Condensa um chunk de `thought` numa linha curta de status para o indicador de
+ * digitação. Pega a primeira linha não-vazia, colapsa espaços e trunca. Retorna
+ * `null` se o chunk for só espaço em branco (mantém o status anterior).
+ */
+function summarizeActivity(delta: string): string | null {
+  const firstLine = delta
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (!firstLine) return null;
+  const collapsed = firstLine.replace(/\s+/g, " ");
+  return collapsed.length > 80 ? `${collapsed.slice(0, 79)}…` : collapsed;
 }
 
 /** Lê o estado de um canal específico, ou um canal vazio se ainda não existir. */
@@ -187,6 +220,13 @@ export const useBacklogChatStore = create<BacklogChatState>((set) => ({
         ...chan,
         messages,
         streaming: true,
+        streamingSince: chan.streamingSince ?? Date.now(),
+        // Um `thought` vira o status vivo; `output` (texto final) não sobrescreve
+        // o status — é a resposta em si, já visível na thread.
+        lastActivity:
+          kind === "thought"
+            ? summarizeActivity(delta) ?? chan.lastActivity
+            : chan.lastActivity,
       });
       return { bySession: { ...state.bySession, [sessionId]: next } };
     }),
@@ -225,6 +265,8 @@ export const useBacklogChatStore = create<BacklogChatState>((set) => ({
         messages,
         pending: question,
         streaming: false,
+        streamingSince: null,
+        lastActivity: null,
       });
       return { bySession: { ...state.bySession, [sessionId]: next } };
     }),
@@ -251,6 +293,8 @@ export const useBacklogChatStore = create<BacklogChatState>((set) => ({
         messages,
         pending: null,
         streaming: false,
+        streamingSince: null,
+        lastActivity: null,
       });
       return { bySession: { ...state.bySession, [sessionId]: next } };
     }),
@@ -277,6 +321,8 @@ export const useBacklogChatStore = create<BacklogChatState>((set) => ({
         ...chan,
         messages,
         streaming: false,
+        streamingSince: null,
+        lastActivity: null,
       });
       const next: SessionChat = { ...withProposalChannel, proposal };
       return { bySession: { ...state.bySession, [sessionId]: next } };
@@ -286,7 +332,14 @@ export const useBacklogChatStore = create<BacklogChatState>((set) => ({
     set((state) => {
       const session = state.bySession[sessionId] ?? emptySession();
       const chan = getChannel(session, channel);
-      const next = withChannel(session, channel, { ...chan, streaming });
+      const next = withChannel(session, channel, {
+        ...chan,
+        streaming,
+        // Ligar o streaming inicia o cronômetro (se ainda não iniciado);
+        // desligar limpa o cronômetro e o status vivo.
+        streamingSince: streaming ? (chan.streamingSince ?? Date.now()) : null,
+        lastActivity: streaming ? chan.lastActivity : null,
+      });
       return { bySession: { ...state.bySession, [sessionId]: next } };
     }),
 
@@ -334,7 +387,13 @@ export const useBacklogChatStore = create<BacklogChatState>((set) => ({
           }
         }
 
-        byChannel[channel] = { messages, pending, streaming: false };
+        byChannel[channel] = {
+          messages,
+          pending,
+          streaming: false,
+          streamingSince: null,
+          lastActivity: null,
+        };
       }
 
       const next: SessionChat = { byChannel, proposal };

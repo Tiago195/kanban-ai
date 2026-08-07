@@ -37,6 +37,16 @@ export interface ChatPanelProps {
   pending?: ChatPanelPending | null;
   /** Mostra o indicador "digitando…". */
   thinking?: boolean;
+  /**
+   * Status vivo do agente (ex.: última linha de "pensamento"). Exibido dentro do
+   * indicador de digitação para dar sinal de progresso em turnos longos.
+   */
+  activityLabel?: string | null;
+  /**
+   * Epoch (ms) em que o turno começou. Quando presente e `thinking`, o indicador
+   * mostra um cronômetro ("há Xs") para que turnos de minutos não pareçam travados.
+   */
+  since?: number | null;
   /** Desabilita o input/envio (ex.: enquanto uma resposta está em trânsito). */
   busy?: boolean;
   /**
@@ -81,6 +91,8 @@ export function ChatPanel({
   messages,
   pending = null,
   thinking = false,
+  activityLabel = null,
+  since = null,
   busy = false,
   inputMode = "always",
   placeholder = "Escreva uma mensagem…",
@@ -100,6 +112,24 @@ export function ChatPanel({
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, pending, thinking]);
+
+  // Cronômetro do turno: reavalia a cada segundo enquanto o agente trabalha, para
+  // que turnos longos (shell real no repo-alvo) mostrem progresso visível.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!thinking || since == null) return;
+    setNowTick(Date.now());
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [thinking, since]);
+  const elapsedSec =
+    thinking && since != null ? Math.max(0, Math.floor((nowTick - since) / 1000)) : null;
+  const elapsedLabel =
+    elapsedSec == null
+      ? null
+      : elapsedSec < 60
+        ? `há ${elapsedSec}s`
+        : `há ${Math.floor(elapsedSec / 60)}m${String(elapsedSec % 60).padStart(2, "0")}s`;
 
   const inputEnabled = inputMode === "always" ? !busy : Boolean(pending) && !busy;
 
@@ -148,7 +178,12 @@ export function ChatPanel({
             <span className="dot" />
             <span className="dot" />
             <span className="dot" />
-            <span className="chat-typing-label">agente digitando…</span>
+            <span className="chat-typing-label">
+              {activityLabel ? activityLabel : "agente trabalhando…"}
+              {elapsedLabel ? (
+                <span className="chat-typing-elapsed"> · {elapsedLabel}</span>
+              ) : null}
+            </span>
           </div>
         ) : null}
       </div>
@@ -169,6 +204,7 @@ export function ChatPanel({
                     key={opt}
                     type="button"
                     className="chat-chip"
+                    data-testid="chat-quick-reply"
                     onClick={() => quickReply(opt)}
                     disabled={busy}
                   >
@@ -182,6 +218,7 @@ export function ChatPanel({
         <div className="agent-chat-input-row">
           <input
             className="chat-input"
+            data-testid="chat-input"
             value={draft}
             placeholder={resolvedPlaceholder}
             disabled={!inputEnabled}
@@ -190,6 +227,7 @@ export function ChatPanel({
           />
           <button
             className="btn btn-primary btn-sm"
+            data-testid="chat-send"
             onClick={submit}
             disabled={!inputEnabled || draft.trim().length === 0}
           >

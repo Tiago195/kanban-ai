@@ -16,10 +16,15 @@ nvm use                # Node 22
 npm install            # resolve apps/web, apps/api, packages/shared
 cp .env.example .env   # ajuste se necessário
 docker compose up -d   # Postgres 16 em 127.0.0.1:5432
-npm run db:migrate     # aplica migrations
-npm run db:seed        # popula (seed portado do artifact)
+npm run db:setup       # migrate deploy + seed (fluxo determinístico p/ setup)
 npm run dev            # sobe web + api
 ```
+
+> `db:setup` usa `prisma migrate deploy` (aplica todas as migrations pendentes de
+> forma idempotente, sem prompts) e depois roda o seed. Em **desenvolvimento**, ao
+> criar novas migrations, use `npm run db:migrate` (`prisma migrate dev`). Se o
+> banco ficar desatualizado (schema drift), a API loga um erro claro no boot e
+> `GET /cards` responde **503 acionável** em vez de 500 opaco (ver bug-cards-500).
 
 ## Scripts (raiz)
 
@@ -28,7 +33,9 @@ npm run dev            # sobe web + api
 | `npm run dev` | sobe web + api em paralelo |
 | `npm run build` | build de todos os workspaces |
 | `npm run lint` | ESLint em todos os workspaces |
-| `npm run db:migrate` | aplica migrations do Prisma |
+| `npm run db:migrate` | aplica migrations (dev — `prisma migrate dev`) |
+| `npm run db:migrate:deploy` | aplica migrations pendentes (`prisma migrate deploy`) |
+| `npm run db:setup` | `db:migrate:deploy` + `db:seed` (setup/CI) |
 | `npm run db:seed` | roda `apps/api/prisma/seed.ts` |
 
 ## Convenções de código

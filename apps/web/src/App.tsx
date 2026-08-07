@@ -163,6 +163,7 @@ export default function App() {
             className="kb-btn kb-btn-ghost"
             type="button"
             title="Criar épicos e histórias conversando com a IA"
+            data-testid="open-backlog-chat"
             onClick={() => navigate("/backlog-chat")}
           >
             ✨ Criar backlog

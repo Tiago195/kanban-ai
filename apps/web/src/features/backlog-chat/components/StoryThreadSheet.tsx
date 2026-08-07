@@ -40,6 +40,8 @@ export function StoryThreadSheet({
     messages,
     pending,
     streaming,
+    streamingSince,
+    lastActivity,
     isSending,
     isAnswering,
     send,
@@ -157,6 +159,8 @@ export function StoryThreadSheet({
               messages={panelMessages}
               pending={pending ? { options: pending.options } : null}
               thinking={streaming}
+              activityLabel={lastActivity}
+              since={streamingSince}
               busy={busy}
               inputMode="always"
               placeholder={

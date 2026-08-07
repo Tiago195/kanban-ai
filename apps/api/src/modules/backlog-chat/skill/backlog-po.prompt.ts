@@ -143,7 +143,7 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
   lines.push(BACKLOG_PROPOSAL_MARKERS.open);
   lines.push('{');
   lines.push('  "version": 1,');
-  lines.push('  "epic": { "title": "<título do épico>", "description": "<2–4 linhas>", "points": 8 },');
+  lines.push('  "epic": { "title": "<título do épico>", "description": "<2–4 linhas>", "points": 8, "aiProject": "<caminho ABSOLUTO do repo-alvo, ex.: /home/user/dev/meu-projeto>" },');
   lines.push('  "stories": [');
   lines.push('    {');
   lines.push('      "title": "<story 1>",');
@@ -152,8 +152,7 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
   lines.push('      "aiNotes": "<opcional: notas técnicas, dependências, pontos de atenção>",');
   lines.push('      "points": 3,');
   lines.push('      "dod": [ "<critério objetivo e verificável 1>", "<critério 2>", "<critério 3>" ],');
-  lines.push('      "affectedFlows": [ { "name": "<fluxo/área afetada>", "files": ["<path 1>", "<path 2>"], "note": "<opcional>" } ],');
-  lines.push('      "tasks": [ { "title": "<task opcional 1>" }, { "title": "<task opcional 2>" } ]');
+  lines.push('      "affectedFlows": [ { "name": "<fluxo/área afetada>", "files": ["<path 1>", "<path 2>"], "note": "<opcional>" } ]');
   lines.push('    }');
   lines.push('  ],');
   lines.push('  "rationale": "<1 linha do porquê desta decomposição>"');
@@ -162,12 +161,13 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
   lines.push('');
   lines.push('Regras da proposta:');
   lines.push(`- \`version\`: use 1 na primeira proposta.`);
+  lines.push('- `epic.aiProject`: **importante** — preencha com o caminho ABSOLUTO do repositório-alvo onde o trabalho vai acontecer (o mesmo diretório que você inspecionou nesta sessão; rode `pwd` se estiver em dúvida). Sem ele, mover uma story para "In Progress" abre o modal "Falta o Projeto-alvo". As stories filhas herdam este valor automaticamente — não repita o path em cada story.');
   lines.push(`- \`points\`: apenas valores Fibonacci ∈ {${pointsList}}. Omita se não souber estimar. **Tasks não têm pontos.**`);
   lines.push('- `stories`: enxuto. Cada story é uma fatia de valor entregável, com descrição rica (2–5 linhas).');
   lines.push('- `aiSummary` / `aiNotes`: opcionais mas recomendados — dão contexto ao agente que vai executar a story depois.');
   lines.push('- `dod`: **recomendado** — 3–7 itens objetivos, verificáveis e escritos como resultado ("X está feito/testado/documentado"). É o único checklist (sem DoR/acceptance). Cada item vira um DodItem do card story ao aplicar.');
   lines.push('- `affectedFlows`: **opcional** — inclua quando já der para antecipar os fluxos/áreas do código que a story toca. Cada item tem `name` (fluxo/área), `files` (paths prováveis, pode ser lista vazia) e `note` (opcional). Omita o campo se não fizer sentido ainda.');
-  lines.push('- `tasks`: **OPCIONAL**. Só rascunhe tasks se o humano pedir OU se a decomposição for óbvia e agregar valor. Task tem só `title` (sem pontos, sem DoD). Elas viram cards `type:task` filhos da story quando o backlog for aplicado; o refinamento real e o DoD acontecem no board. Se não fizer sentido, deixe `tasks` fora.');
+  lines.push('- `tasks`: **OPCIONAL e SOB DEMANDA (padrão determinístico: NÃO rascunhe tasks).** Só inclua `tasks` numa story quando o humano **pedir explicitamente** tasks/subtarefas (ex.: "quebre em tasks", "adicione subtarefas"). **Não** decida por conta própria com base em "achou óbvio" — isso gera granularidade desigual entre stories. Sem pedido explícito, **omita o campo `tasks` em TODAS as stories** (a story é a unidade de valor; o refinamento em tasks e o DoD acontecem depois no board). Quando pedido, aplique a MESMA decisão a todas as stories da proposta (todas com tasks ou nenhuma), para granularidade consistente. Task tem só `title` (sem pontos, sem DoD); vira card `type:task` filho da story ao aplicar.');
   lines.push('- Não repita a proposta como texto solto fora do bloco — o bloco é a fonte da verdade.');
 
   // ── Fase de refinamento cirúrgico (só quando já há proposta) ────────────────
@@ -188,6 +188,7 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
     lines.push('  "baseVersion": <versão da proposta corrente>,');
     lines.push('  "ops": [');
     lines.push('    { "op": "replace", "path": "/epic/title", "value": "<novo título>" },');
+    lines.push('    { "op": "replace", "path": "/epic/aiProject", "value": "<caminho absoluto do repo-alvo>" },');
     lines.push('    { "op": "replace", "path": "/stories/0/points", "value": 5 },');
     lines.push('    { "op": "replace", "path": "/stories/0/aiNotes", "value": "<notas técnicas>" },');
     lines.push('    { "op": "replace", "path": "/stories/0/dod", "value": ["<critério 1>", "<critério 2>"] },');
@@ -201,7 +202,7 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
     lines.push('');
     lines.push('Regras do patch:');
     lines.push('- `baseVersion`: a versão da proposta corrente exibida acima.');
-    lines.push('- `path` válidos: `/epic/title`, `/epic/description`, `/epic/points`; por story: `/stories/<i>/title`, `/stories/<i>/description`, `/stories/<i>/aiSummary`, `/stories/<i>/aiNotes`, `/stories/<i>/points`, `/stories/<i>/dod` (array inteiro de strings), `/stories/<i>/affectedFlows` (array inteiro de flows). Para adicionar/remover story: `add` em `/stories/-` (fim) e `remove` em `/stories/<i>`. Para tasks de uma story: `replace` em `/stories/<i>/tasks` (array inteiro), `add` em `/stories/<i>/tasks/-` (fim) e `remove`/`replace` em `/stories/<i>/tasks/<j>`.');
+    lines.push('- `path` válidos: `/epic/title`, `/epic/description`, `/epic/points`, `/epic/aiProject`; por story: `/stories/<i>/title`, `/stories/<i>/description`, `/stories/<i>/aiSummary`, `/stories/<i>/aiNotes`, `/stories/<i>/points`, `/stories/<i>/dod` (array inteiro de strings), `/stories/<i>/affectedFlows` (array inteiro de flows). Para adicionar/remover story: `add` em `/stories/-` (fim) e `remove` em `/stories/<i>`. Para tasks de uma story: `replace` em `/stories/<i>/tasks` (array inteiro), `add` em `/stories/<i>/tasks/-` (fim) e `remove`/`replace` em `/stories/<i>/tasks/<j>`.');
     lines.push(`- \`points\` só Fibonacci ∈ {${pointsList}}. Task tem só \`title\` (sem pontos).`);
     lines.push('- Só inclua ops para o que o humano pediu. NÃO toque em itens não solicitados.');
     lines.push('- Se o humano pedir uma mudança grande que reestrutura tudo, aí sim emita um KANBAN_BACKLOG novo com `version` incrementado.');

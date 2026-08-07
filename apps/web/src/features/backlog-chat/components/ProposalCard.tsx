@@ -96,6 +96,7 @@ export function ProposalCard({
                 <button
                   type="button"
                   className="proposal-story-btn"
+                  data-testid="proposal-story"
                   onClick={() => onOpenStory?.(story)}
                   title="Abrir thread desta história"
                 >
@@ -120,6 +121,7 @@ export function ProposalCard({
           <button
             type="button"
             className="btn btn-primary btn-sm"
+            data-testid="proposal-apply"
             onClick={onApply}
             disabled={applying}
           >

@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { TASK_CREATION_COLUMNS, MISSING_REQUIRED_FIELDS } from '@kanban-ai/shared';
@@ -11,6 +12,7 @@ import type {
   CreateDependencyDto,
   CreateDodItemDto,
   CreateFlowDto,
+  ListCardsQueryDto,
   MoveCardDto,
   UpdateCardDto,
   UpdateDodItemDto,
@@ -41,22 +43,84 @@ export class CardsService {
     private readonly models: ModelsService,
   ) {}
 
-  async findAll(boardId?: string) {
-    const cards = await this.prisma.card.findMany({
-      where: boardId ? { boardId } : undefined,
-      orderBy: [{ type: 'asc' }, { position: 'asc' }],
-      include: {
-        labels: { select: { labelId: true } },
-        assignees: { select: { assigneeId: true } },
-      },
-    });
-    const summaries = cards.map(({ labels, assignees, ...card }) => ({
-      ...card,
-      labelIds: labels.map((l) => l.labelId),
-      assigneeIds: assignees.map((a) => a.assigneeId),
-    }));
-    await this.attachResolvedModel(summaries, boardId);
-    return this.attachEpicStatus(summaries);
+  async findAll(query: ListCardsQueryDto = {}) {
+    const { boardId, type, columnId, updatedSince, limit, cursor, fields } = query;
+    // Degrada com elegância em schema drift (bug-cards-500): se o health-check
+    // de boot detectou coluna(s) ausente(s), respondemos 503 com um aviso
+    // acionável em vez de deixar o Prisma estourar um 500 opaco (P2022).
+    const health = this.prisma.getSchemaHealth();
+    if (health && !health.ok) {
+      throw new ServiceUnavailableException({
+        message:
+          'Banco desatualizado (migrations pendentes). Rode `npm run db:migrate:deploy`.',
+        missingColumns: health.missing,
+      });
+    }
+    try {
+      // Filtros opcionais (todos retrocompatíveis: ausentes = comportamento antigo).
+      const where: Prisma.CardWhereInput = {};
+      if (boardId) where.boardId = boardId;
+      if (type) where.type = type;
+      if (columnId) {
+        // Uma coluna pode ser raia de board (stories) ou de task; casa em qualquer uma.
+        where.OR = [{ boardColumnId: columnId }, { taskColumnId: columnId }];
+      }
+      if (updatedSince) where.updatedAt = { gte: new Date(updatedSince) };
+
+      // Paginação por cursor: só ativa quando `limit` é passado. Buscamos
+      // `limit + 1` para saber se há próxima página sem um count extra.
+      const paginated = typeof limit === 'number';
+      const cards = await this.prisma.card.findMany({
+        where: Object.keys(where).length ? where : undefined,
+        orderBy: [{ type: 'asc' }, { position: 'asc' }, { id: 'asc' }],
+        include: {
+          labels: { select: { labelId: true } },
+          assignees: { select: { assigneeId: true } },
+        },
+        ...(paginated
+          ? {
+              take: limit + 1,
+              ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+            }
+          : {}),
+      });
+
+      let nextCursor: string | null = null;
+      let page = cards;
+      if (paginated && cards.length > limit) {
+        page = cards.slice(0, limit);
+        nextCursor = page[page.length - 1]?.id ?? null;
+      }
+
+      const summaries = page.map(({ labels, assignees, ...card }) => ({
+        ...card,
+        labelIds: labels.map((l) => l.labelId),
+        assigneeIds: assignees.map((a) => a.assigneeId),
+      }));
+      await this.attachResolvedModel(summaries, boardId);
+      const enriched = await this.attachEpicStatus(summaries);
+
+      // Projeção `summary`: campos essenciais para consumidores headless (MCP/LLM)
+      // não estourarem contexto. `full` (default) mantém retrocompatibilidade.
+      const projected = fields === 'summary' ? enriched.map(projectSummary) : enriched;
+
+      // Só embrulha em envelope quando paginado, preservando o contrato antigo
+      // (array puro) para o front-end e demais consumidores existentes.
+      return paginated ? { items: projected, nextCursor } : projected;
+    } catch (err) {
+      // Rede de segurança: se o health-check não pegou o drift (ex.: banco
+      // indisponível no boot) mas a query falha por coluna inexistente (P2022),
+      // traduzimos para 503 acionável em vez de vazar um 500 opaco.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2022') {
+        const column = (err.meta as { column?: string } | undefined)?.column;
+        throw new ServiceUnavailableException({
+          message:
+            'Banco desatualizado (migrations pendentes). Rode `npm run db:migrate:deploy`.',
+          missingColumns: column ? [column] : [],
+        });
+      }
+      throw err;
+    }
   }
 
   /**
@@ -283,6 +347,7 @@ export class CardsService {
           position,
           ...(dto.loopType !== undefined ? { loopType: dto.loopType } : {}),
           ...(dto.aiSummary !== undefined ? { aiSummary: dto.aiSummary } : {}),
+          ...(dto.aiProject !== undefined ? { aiProject: dto.aiProject } : {}),
           ...(dto.aiNotes !== undefined ? { aiNotes: dto.aiNotes } : {}),
           ...(dto.type === 'task'
             ? { taskColumnId }
@@ -725,4 +790,35 @@ export class CardsService {
     this.realtime.broadcast({ type: 'flow.changed', cardId, flows: flows as never });
     return this.findOne(cardId);
   }
+}
+
+/**
+ * Campos essenciais expostos no modo `fields=summary` do `GET /cards`. Mantém a
+ * resposta enxuta para consumidores headless (MCP/LLM) que só precisam navegar a
+ * lista — o detalhe completo continua disponível via `get_card`/`GET /cards/:id`.
+ */
+const SUMMARY_FIELDS = [
+  'id',
+  'key',
+  'boardId',
+  'type',
+  'title',
+  'parentId',
+  'boardColumnId',
+  'taskColumnId',
+  'position',
+  'points',
+  'blocked',
+  'needsHuman',
+  'execState',
+  'epicStatus',
+  'updatedAt',
+] as const;
+
+function projectSummary<T extends Record<string, unknown>>(card: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const f of SUMMARY_FIELDS) {
+    if (f in card) out[f as keyof T] = card[f as keyof T];
+  }
+  return out;
 }

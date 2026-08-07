@@ -8,6 +8,7 @@ import type { ValidationRunner } from './validators/validation.runner';
 import type { AgentRunner } from './runners/agent-runner.interface';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
 import { Orchestrator } from './orchestrator';
+import { BUILTIN_LOOP_PROFILES } from './loop-profiles/loop-profiles';
 
 /**
  * Testes de núcleo do loop engine (todo `testes-nucleo`, #4). Estratégia 1:
@@ -46,6 +47,7 @@ function makeConfig(overrides: Partial<AppConfig['agent']> = {}): AppConfig {
     hitlTimeoutMs: 600_000,
     maxValidationFailures: 3,
     maxIterationsPerTask: 30,
+    maxUnproductiveIterations: 0,
     maxDerivedDepth: 3,
     maxTaskDurationMs: 0,
     maxTaskTokens: 0,
@@ -198,6 +200,69 @@ test('enforceLoopGuards: cap de iterações atingido -> escala para humano', asy
   assert.ok(evt, 'deve emitir card.needs_human');
   assert.equal(evt?.taskId, 'task-1');
   assert.match(String((needsHumanUpdate!.data as { needsHumanReason: string }).needsHumanReason), /cap de itera/i);
+});
+
+test('enforceLoopGuards: N iterações improdutivas consecutivas (diff vazio) -> escala para humano', async () => {
+  const iterations = [
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'a', handoffNextStep: 'n', phase: 'implementation', diff: '' },
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'b', handoffNextStep: 'n', phase: 'implementation', diff: '   ' },
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'c', handoffNextStep: 'n', phase: 'implementation', diff: '' },
+  ];
+  const prisma = makePrisma({ iterationFindMany: async () => iterations });
+  const realtime = makeRealtime();
+  const { orch, sessions } = makeOrchestrator({
+    config: makeConfig({ maxIterationsPerTask: 0, maxUnproductiveIterations: 3 }),
+    prisma,
+    realtime,
+  });
+  sessions.start('story-1');
+
+  const escalated = await priv(orch).enforceLoopGuards('task-1', 'story-1');
+
+  assert.equal(escalated, true, 'deve escalar com 3 iterações improdutivas');
+  const needsHumanUpdate = prisma.updates.find(
+    (u) => (u.data as { needsHuman?: boolean }).needsHuman === true,
+  );
+  assert.ok(needsHumanUpdate, 'deve marcar needsHuman=true');
+  assert.match(
+    String((needsHumanUpdate!.data as { needsHumanReason: string }).needsHumanReason),
+    /improdutiv/i,
+  );
+});
+
+test('enforceLoopGuards: iteração produtiva recente ZERA a contagem de improdutivas', async () => {
+  const iterations = [
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'a', handoffNextStep: 'n', phase: 'implementation', diff: '' },
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'b', handoffNextStep: 'n', phase: 'implementation', diff: '' },
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'c', handoffNextStep: 'n', phase: 'implementation', diff: 'diff --git a/x b/x' },
+  ];
+  const prisma = makePrisma({ iterationFindMany: async () => iterations });
+  const { orch } = makeOrchestrator({
+    config: makeConfig({ maxIterationsPerTask: 0, maxUnproductiveIterations: 3 }),
+    prisma,
+    realtime: makeRealtime(),
+  });
+
+  const escalated = await priv(orch).enforceLoopGuards('task-1', 'story-1');
+  assert.equal(escalated, false, 'não escala: houve trabalho produtivo na última iteração');
+  assert.equal(prisma.updates.length, 0);
+});
+
+test('enforceLoopGuards: iterações sem diff fora da fase implementation NÃO contam', async () => {
+  const iterations = [
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'a', handoffNextStep: 'n', phase: 'analysis', diff: '' },
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'b', handoffNextStep: 'n', phase: 'reproduce', diff: '' },
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'c', handoffNextStep: 'n', phase: 'validation', diff: '' },
+  ];
+  const prisma = makePrisma({ iterationFindMany: async () => iterations });
+  const { orch } = makeOrchestrator({
+    config: makeConfig({ maxIterationsPerTask: 0, maxUnproductiveIterations: 3 }),
+    prisma,
+    realtime: makeRealtime(),
+  });
+
+  const escalated = await priv(orch).enforceLoopGuards('task-1', 'story-1');
+  assert.equal(escalated, false, 'fases não-implementation não disparam o cap improdutivo');
 });
 
 test('enforceLoopGuards: abaixo do cap -> NÃO escala', async () => {
@@ -488,4 +553,84 @@ test('reconcileOnBoot: story ativa -> retoma o loop (cria sessão e watchdog)', 
 
   // Encerra qualquer timer de auto-play/watchdog para não vazar entre testes.
   await orch.stop('story-boot', 'hard');
+});
+
+// ── (i) Isolamento do worktree no prompt (bug-hallucinated-loop) ────────────
+// O prompt injetado no agent NUNCA pode expor o path absoluto do repo-alvo
+// original — se expuser, o agent faz `cd` para lá e escreve FORA do worktree,
+// deixando o `git diff` do worktree vazio e impedindo o loop de convergir.
+// Estes testes fixam o contrato do `buildPrompt`.
+
+function makePromptContext(overrides: Record<string, unknown> = {}) {
+  return {
+    taskId: 'TK-1',
+    storyId: 'US-1',
+    taskTitle: 'Criar arquivo ping.js',
+    project: '/home/user/repo-alvo-original',
+    notes: '',
+    epicNotes: '',
+    files: [],
+    affectedFlows: [],
+    dodItems: [{ id: 'd1', text: 'ping.js existe', done: false }],
+    iterationHistory: [],
+    siblingHandoffs: [],
+    lastDiff: '',
+    ...overrides,
+  };
+}
+
+test('buildPrompt: usa o worktree (cwd) e NÃO expõe o path do repo-alvo original', () => {
+  const { orch } = makeOrchestrator();
+  const worktree = '/home/user/repo-alvo-original/apps/api/.agent-workspaces/US-1';
+  const prompt: string = priv(orch).buildPrompt(
+    'implementation',
+    BUILTIN_LOOP_PROFILES.feature,
+    makePromptContext(),
+    '',
+    worktree,
+  );
+
+  // O worktree (cwd) deve aparecer como diretório de trabalho.
+  assert.ok(prompt.includes(worktree), 'o prompt deve referir o worktree/cwd');
+  // O path do repo-alvo original NÃO pode aparecer isolado (só como prefixo do
+  // worktree, o que é aceitável). Verificamos que não há menção ao projeto puro
+  // seguida de fim de linha/espaço — heurística: a string do projeto sozinha
+  // como "Projeto-alvo (repo): <path>" foi removida.
+  assert.ok(
+    !prompt.includes('Projeto-alvo (repo): /home/user/repo-alvo-original'),
+    'o prompt não pode mais expor "Projeto-alvo (repo): <path original>"',
+  );
+});
+
+test('buildPrompt: proíbe explicitamente `cd` para outro caminho absoluto', () => {
+  const { orch } = makeOrchestrator();
+  const worktree = '/tmp/wt/US-2';
+  const prompt: string = priv(orch).buildPrompt(
+    'implementation',
+    BUILTIN_LOOP_PROFILES.feature,
+    makePromptContext(),
+    '',
+    worktree,
+  );
+  assert.match(
+    prompt,
+    /NÃO.*rode `cd`|não use `cd`|não rode `cd`/i,
+    'o prompt deve proibir `cd` para outro caminho',
+  );
+});
+
+test('buildPrompt: sem worktree, instrui a trabalhar só no cwd atual', () => {
+  const { orch } = makeOrchestrator();
+  const prompt: string = priv(orch).buildPrompt(
+    'implementation',
+    BUILTIN_LOOP_PROFILES.feature,
+    makePromptContext(),
+    '',
+    '',
+  );
+  assert.match(prompt, /diretório atual|`cwd`/i, 'sem worktree deve ancorar no cwd atual');
+  assert.ok(
+    !prompt.includes('/home/user/repo-alvo-original'),
+    'sem worktree também não pode vazar o path do repo-alvo',
+  );
 });

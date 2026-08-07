@@ -18,7 +18,9 @@
     "dev:api": "npm run dev -w @kanban-ai/api",
     "dev:web": "npm run dev -w @kanban-ai/web",
     "db:migrate": "npm run db:migrate -w @kanban-ai/api",
+    "db:migrate:deploy": "npm run db:migrate:deploy -w @kanban-ai/api",
     "db:seed": "npm run db:seed -w @kanban-ai/api",
+    "db:setup": "npm run db:migrate:deploy && npm run db:seed",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\""
   },

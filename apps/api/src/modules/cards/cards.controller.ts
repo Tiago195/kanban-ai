@@ -19,6 +19,7 @@ import {
   createDependencySchema,
   createDodItemSchema,
   createFlowSchema,
+  listCardsQuerySchema,
   moveCardSchema,
   updateCardSchema,
   updateDodItemSchema,
@@ -29,6 +30,7 @@ import {
   type CreateDependencyDto,
   type CreateDodItemDto,
   type CreateFlowDto,
+  type ListCardsQueryDto,
   type MoveCardDto,
   type UpdateCardDto,
   type UpdateDodItemDto,
@@ -39,8 +41,10 @@ export class CardsController {
   constructor(private readonly cards: CardsService) {}
 
   @Get('cards')
-  findAll(@Query('boardId') boardId?: string) {
-    return this.cards.findAll(boardId);
+  findAll(
+    @Query(new ZodValidationPipe(listCardsQuerySchema)) query: ListCardsQueryDto,
+  ) {
+    return this.cards.findAll(query);
   }
 
   @Get('cards/:id')
