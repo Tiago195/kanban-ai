@@ -19,6 +19,10 @@ export const createCardSchema = z.object({
   aiSummary: z.string().optional(),
   aiProject: z.string().optional(),
   aiNotes: z.string().optional(),
+  // Rastreio de origem: sessão do backlog-chat que materializou o card. Uso
+  // interno (apply do backlog-chat); não é preenchido em criações manuais via
+  // board. Ver ADR-0026.
+  backlogChatSessionId: z.string().uuid().optional(),
 });
 
 export type CreateCardDto = z.infer<typeof createCardSchema>;

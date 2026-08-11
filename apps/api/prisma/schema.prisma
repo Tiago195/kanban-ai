@@ -132,6 +132,13 @@ model Card {
   loopType  String? // id do loop profile (feature|bug|refactor|__default) ou custom
   execState ExecState? @default(idle)
 
+  // Rastreio de origem: sessão do backlog-chat que materializou este card
+  // (epic/story/task) no apply. `null` = card criado manualmente no board.
+  // Alimenta o "chat da story" (reusa a sessão original) e o apply incremental
+  // de tasks. Ver ADR-0026.
+  backlogChatSessionId String?
+  backlogChatSession   BacklogChatSession? @relation(fields: [backlogChatSessionId], references: [id], onDelete: SetNull)
+
   // Task derivada de uma falha de validação
   derivedFromId String?
   derivedFrom   Card?   @relation("Derivation", fields: [derivedFromId], references: [id], onDelete: SetNull)
@@ -161,6 +168,7 @@ model Card {
   @@index([boardId])
   @@index([parentId])
   @@index([type])
+  @@index([backlogChatSessionId])
 }
 
 // Aresta do grafo de dependências entre tasks.
@@ -319,6 +327,10 @@ model BacklogChatSession {
 
   messages  BacklogChatMessage[]
   revisions BacklogProposalRevision[]
+  // Cards (epic/story/task) materializados por esta sessão no apply. Rastreio
+  // que habilita o "chat da story" (reuso da sessão) e apply incremental de
+  // tasks. Ver ADR-0026.
+  cards     Card[]
 
   @@index([boardId])
 }

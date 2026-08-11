@@ -44,11 +44,24 @@ const MODEL_MAP = {
   })(),
 };
 
-const RAW_MODEL = process.env.AGENT_DEFAULT_MODEL || 'opus';
-// COPILOT_MODEL força um id explícito; senão traduz o alias do domínio.
-const MODEL =
-  process.env.COPILOT_MODEL ??
-  (RAW_MODEL in MODEL_MAP ? MODEL_MAP[RAW_MODEL] : RAW_MODEL);
+/**
+ * Resolve o valor final passado a `--model`, SEMPRE traduzindo aliases do
+ * domínio ('opus', 'gpt', ...) para ids reais — INDEPENDENTE da origem.
+ *
+ * BUG-A6: o orchestrator injeta o modelo resolvido em `COPILOT_MODEL`. Quando
+ * esse valor é o alias de fallback 'opus' (config.agent.defaultModel), a versão
+ * antiga usava `COPILOT_MODEL` VERBATIM (`process.env.COPILOT_MODEL ?? ...`),
+ * pulando o MODEL_MAP → o CLI rejeitava com 'Model "opus" ... is not available'
+ * em TODA iteração. Agora o alias é traduzido venha ele de COPILOT_MODEL ou de
+ * AGENT_DEFAULT_MODEL; ids reais (com '/') e desconhecidos passam direto.
+ */
+function resolveModel(value) {
+  if (value == null || value === '') return value ?? '';
+  return value in MODEL_MAP ? MODEL_MAP[value] : value;
+}
+
+const RAW_MODEL = process.env.COPILOT_MODEL ?? process.env.AGENT_DEFAULT_MODEL ?? 'opus';
+const MODEL = resolveModel(RAW_MODEL);
 
 function emit(event) {
   process.stdout.write(JSON.stringify(event) + '\n');
@@ -91,7 +104,17 @@ async function main() {
   // prompts multi-linha e evita depender de EOF do stdin). Só caímos no stdin
   // quando não há prompt em argv.
   const argvPrompt = process.argv.slice(2).join(' ').trim();
-  const prompt = argvPrompt || (await readPromptLine());
+  let prompt = argvPrompt || (await readPromptLine());
+  // Prompt transportado via stdin vem como uma única linha `B64:<base64>` (o
+  // runner codifica para suportar conteúdo multi-linha sem estourar limites de
+  // argv). Decodificamos de volta para o texto original.
+  if (prompt.startsWith('B64:')) {
+    try {
+      prompt = Buffer.from(prompt.slice(4), 'base64').toString('utf8');
+    } catch {
+      // Se falhar o decode, mantém o texto como veio (defensivo).
+    }
+  }
   if (!prompt) {
     emit({ kind: 'result', detail: 'Prompt vazio.', summary: 'noop', dodTouched: [], affectedFlows: [], nextStep: '', done: true });
     return;
@@ -151,8 +174,14 @@ async function main() {
   // partidos entre chunks de stdout.
   let lineBuf = '';
   let insideControlBlock = false;
-  const OPEN_RE = /<<<KANBAN_(QUESTION|RESULT|BACKLOG_PATCH|BACKLOG)>>>/;
-  const CLOSE_RE = /<<<END_KANBAN_(QUESTION|RESULT|BACKLOG_PATCH|BACKLOG)>>>/;
+  const OPEN_RE = /<<<KANBAN_(QUESTION|RESULT|BACKLOG_PATCH|BACKLOG|TASKS_PATCH|TASKS)>>>/;
+  const CLOSE_RE = /<<<END_KANBAN_(QUESTION|RESULT|BACKLOG_PATCH|BACKLOG|TASKS_PATCH|TASKS)>>>/;
+  // BUG-04: o `copilot` renderiza tool calls (ex.: `● query (sql) │ SELECT …
+  // └ 3 row(s) returned`) usando caracteres de "box-drawing" e bullets. Esse é
+  // ruído de TUI — NÃO é resposta para o humano — e vazava cru para o chat/
+  // transcript. Suprimimos linhas cujo primeiro caractere não-espaço é um
+  // desses marcadores de renderização de ferramenta.
+  const TOOL_RENDER_RE = /^\s*[●│└┌├┐┘┴┬┤─➜✔✗•]/u;
   const emitOutputLine = (raw) => {
     const t = raw.trimEnd();
     if (t.length === 0) return;
@@ -169,6 +198,7 @@ async function main() {
       insideControlBlock = !CLOSE_RE.test(t);
       return;
     }
+    if (TOOL_RENDER_RE.test(t)) return; // ruído de renderização de tool call
     emit({ kind: 'output', text: t });
   };
   child.stdout.on('data', (d) => {
@@ -186,6 +216,10 @@ async function main() {
 
   child.on('error', (e) => {
     clearInterval(heartbeat);
+    // BUG-A7: falha de SPAWN é erro de infraestrutura, não trabalho da AI. NÃO
+    // pode virar `done:true` (marcaria a task como concluída!) nem `done:false`
+    // silencioso (o loop iteraria até o cap). Sinalizamos `fatalError` para o
+    // orchestrator escalar a humano e PARAR o loop (fail-fast).
     emit({
       kind: 'result',
       detail: `Falha ao invocar ${COPILOT_BIN}: ${e.message}. Verifique se o Copilot CLI está instalado no PATH e autenticado.`,
@@ -193,12 +227,32 @@ async function main() {
       dodTouched: [],
       affectedFlows: [],
       nextStep: 'Instalar/autenticar o Copilot CLI no ambiente da API.',
-      done: true,
+      done: false,
+      fatalError: `spawn: ${e.message}`,
     });
   });
 
-  child.on('close', (code) => {
+  // O evento `close` só dispara quando TODOS os stdio streams do filho fecham.
+  // Ferramentas do `copilot --allow-all` podem spawnar subprocessos (shell) que
+  // herdam o stdout — se algum ficar aberto/em background, o pipe não fecha e
+  // `close` NUNCA dispara, deixando o adapter pendurado (o filho `copilot` já
+  // saiu) até o runner estourar o idle timeout. Para blindar, também escutamos
+  // `exit` (dispara na saída do PROCESSO, independente dos pipes) e finalizamos
+  // após uma pequena carência para o `close` chegar naturalmente (e drenar o
+  // stdout). `finalize` é idempotente.
+  let finalized = false;
+  const finalize = (code) => {
+    if (finalized) return;
+    finalized = true;
     clearInterval(heartbeat);
+    emitTerminalEvents(code);
+    // Após emitir o(s) evento(s) terminal(is), o adapter cumpriu seu papel
+    // one-shot. Encerramos explicitamente — se o `close` não veio (pipe preso
+    // por subprocesso órfão de uma tool), isto evita pendurar o runner.
+    process.exit(0);
+  };
+
+  const emitTerminalEvents = (code) => {
     // Flush da última linha incompleta do buffer de streaming (respeitando o
     // filtro de blocos de controle).
     if (lineBuf.length > 0) {
@@ -206,6 +260,20 @@ async function main() {
       lineBuf = '';
     }
     const text = out.trim();
+
+    // Chat da story (ADR-0026): proposta de TASKS estruturada. Tem precedência
+    // sobre os blocos de backlog (Epic+Stories), pois no chat da story o PO
+    // emite tasks, não um backlog novo. Patch cirúrgico antes da lista inteira.
+    const taskPatch = extractKanbanTasksPatch(text);
+    if (taskPatch) {
+      emit({ kind: 'task_patch', taskPatch });
+      return;
+    }
+    const taskProposal = extractKanbanTasks(text);
+    if (taskProposal) {
+      emit({ kind: 'task_proposal', taskProposal });
+      return;
+    }
 
     // Ecossistema "Chat de criação de Épicos/Histórias": se a AI emitiu um
     // bloco KANBAN_BACKLOG (proposta) ou KANBAN_BACKLOG_PATCH (refinamento
@@ -265,21 +333,73 @@ async function main() {
       return;
     }
     // Fallback: sem bloco estruturado, devolve o texto cru como antes.
+    // BUG-A7: distinguimos ERRO FATAL de infraestrutura (a CLI abortou sem
+    // produzir trabalho) de uma iteração normal inconclusa. Se a CLI saiu com
+    // código ≠ 0 e não houve NENHUM bloco estruturado, ou o texto casa com um
+    // padrão fatal conhecido (modelo indisponível, não autenticado, quota),
+    // marcamos `fatalError` para o orchestrator escalar a humano e parar o loop
+    // em vez de queimar iterações até o cap.
+    const fatalError = detectFatalError(code, text, err);
     emit({
       kind: 'result',
       detail: text || err.trim() || `Copilot CLI encerrou com código ${code}.`,
-      summary: (lastLine(text) || 'Iteração concluída pelo Copilot CLI.').slice(0, 240),
+      summary: (lastLine(text) || lastLine(err) || 'Iteração concluída pelo Copilot CLI.').slice(0, 240),
       dodTouched: [],
       affectedFlows: [],
       nextStep: '',
-      done: code === 0,
+      done: code === 0 && !fatalError,
+      ...(fatalError ? { fatalError } : {}),
     });
+  };
+
+  // `close`: caminho feliz — todos os pipes fecharam, stdout drenado.
+  child.on('close', (code) => finalize(code ?? 0));
+  // `exit`: rede de segurança — o processo `copilot` saiu, mas algum pipe pode
+  // seguir aberto (subprocesso de tool). Damos uma carência curta para o
+  // `close` chegar (e drenar o buffer); se não vier, finalizamos com o que há.
+  child.on('exit', (code) => {
+    setTimeout(() => finalize(code ?? 0), 1500).unref?.();
   });
 }
 
 /** Última linha não-vazia de um texto. */
 function lastLine(text) {
   return text.split('\n').filter(Boolean).slice(-1)[0] || '';
+}
+
+/**
+ * BUG-A7: detecta ERRO FATAL de infraestrutura na saída da CLI. Retorna uma
+ * string curta (motivo) quando o turno falhou de forma NÃO recuperável iterando
+ * — nesses casos o orchestrator escala a humano e PARA o loop, em vez de tratar
+ * como iteração normal (o que queimaria iterações até o cap, ou pior, marcaria
+ * a task como `done`). Retorna `null` para saídas normais.
+ *
+ * Fatal quando:
+ *  - a saída casa um padrão conhecido de falha dura (modelo indisponível, não
+ *    autenticado, sem permissão de credencial, quota/limite estourado); OU
+ *  - a CLI saiu com código ≠ 0 SEM ter produzido nenhum texto de trabalho útil
+ *    (só ruído/stderr) — sinal de crash/config, não de trabalho inconcluso.
+ */
+function detectFatalError(code, text, err) {
+  const haystack = `${text}\n${err}`.toLowerCase();
+  const FATAL_PATTERNS = [
+    /is not available/, // "Model \"x\" from --model flag is not available."
+    /model .* not (found|available)/,
+    /not authenticated|please (log|sign) ?in|authentication (failed|required)/,
+    /permission denied and could not request/,
+    /quota (exceeded|exhausted)|rate limit(ed)? exceeded|insufficient .*quota/,
+    /invalid api key|unauthorized|401 /,
+    /command not found|no such file or directory/,
+  ];
+  for (const re of FATAL_PATTERNS) {
+    const m = haystack.match(re);
+    if (m) return `fatal: ${lastLine(err) || lastLine(text) || m[0]}`.slice(0, 240);
+  }
+  // Saída não-zero sem qualquer conteúdo de trabalho é infra, não iteração.
+  if (code !== 0 && text.trim().length === 0) {
+    return `fatal: CLI saiu com código ${code}${err.trim() ? ` — ${lastLine(err)}` : ''}`.slice(0, 240);
+  }
+  return null;
 }
 
 /**
@@ -380,6 +500,54 @@ function extractKanbanBacklogPatch(text) {
   }
 }
 
+/**
+ * Extrai o bloco de PROPOSTA DE TASKS do chat da story (ADR-0026):
+ *
+ *   <<<KANBAN_TASKS>>>
+ *   { "version": 1, "tasks": [{ "title": "...", "description": "..." }], "rationale": "..." }
+ *   <<<END_KANBAN_TASKS>>>
+ *
+ * Retorna { version?, tasks[], rationale? } ou null. Tolerante a cercas ```json.
+ */
+function extractKanbanTasks(text) {
+  const m = text.match(/<<<KANBAN_TASKS>>>([\s\S]*?)<<<END_KANBAN_TASKS>>>/);
+  if (!m) return null;
+  let body = m[1].trim();
+  body = body.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  try {
+    const obj = JSON.parse(body);
+    if (!obj || typeof obj !== 'object' || !Array.isArray(obj.tasks)) return null;
+    return obj;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extrai o bloco de PATCH cirúrgico de uma proposta de tasks (thread task:<id>):
+ *
+ *   <<<KANBAN_TASKS_PATCH>>>
+ *   { "baseVersion": 1, "ops": [{ "op": "replace", "path": "/tasks/0/title", "value": "..." }] }
+ *   <<<END_KANBAN_TASKS_PATCH>>>
+ *
+ * Retorna { baseVersion?, ops[] } ou null.
+ */
+function extractKanbanTasksPatch(text) {
+  const m = text.match(
+    /<<<KANBAN_TASKS_PATCH>>>([\s\S]*?)<<<END_KANBAN_TASKS_PATCH>>>/,
+  );
+  if (!m) return null;
+  let body = m[1].trim();
+  body = body.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  try {
+    const obj = JSON.parse(body);
+    if (!obj || typeof obj !== 'object' || !Array.isArray(obj.ops)) return null;
+    return obj;
+  } catch {
+    return null;
+  }
+}
+
 /** Normaliza affectedFlows reportados pela AI. */
 function normalizeFlows(v) {
   if (!Array.isArray(v)) return [];
@@ -403,6 +571,7 @@ main().catch((e) => {
     dodTouched: [],
     affectedFlows: [],
     nextStep: '',
-    done: true,
+    done: false,
+    fatalError: `adapter: ${e?.message ?? e}`,
   });
 });

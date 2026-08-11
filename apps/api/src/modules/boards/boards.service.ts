@@ -21,10 +21,27 @@ export class BoardsService {
     private readonly realtime: RealtimeService,
   ) {}
 
-  findAll() {
-    return this.prisma.board.findMany({
+  /**
+   * OBS-01/06: o board tem DUAS raias de colunas que compartilham títulos
+   * (Backlog/To Do/In Progress/Review/Done) — a raia de board/story
+   * (`isTaskColumn:false`) e a raia de task (`isTaskColumn:true`). Via REST puro
+   * os títulos se repetem e parecem duplicados. Além do booleano `isTaskColumn`
+   * (fonte da verdade), expomos um campo derivado `lane` ('board' | 'task') para
+   * deixar a distinção óbvia a qualquer consumidor do endpoint.
+   */
+  private withLane<C extends { isTaskColumn: boolean }>(column: C): C & { lane: 'board' | 'task' } {
+    return { ...column, lane: column.isTaskColumn ? 'task' : 'board' };
+  }
+
+  private decorateColumns<T extends { columns: Array<{ isTaskColumn: boolean }> }>(board: T) {
+    return { ...board, columns: board.columns.map((c) => this.withLane(c)) };
+  }
+
+  async findAll() {
+    const boards = await this.prisma.board.findMany({
       include: { columns: { orderBy: { position: 'asc' } } },
     });
+    return boards.map((board) => this.decorateColumns(board));
   }
 
   async findOne(id: string) {
@@ -38,13 +55,13 @@ export class BoardsService {
       },
     });
     if (!board) return board;
-    return {
+    return this.decorateColumns({
       ...board,
       loopProfiles: board.loopProfiles.map((profile) => ({
         ...profile,
         validation: VALIDATION_TO_SHARED[profile.validation],
       })),
-    };
+    });
   }
 
   // TODO: create/update/delete board + colunas padrão.

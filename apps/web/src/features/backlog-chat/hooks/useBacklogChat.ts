@@ -5,6 +5,7 @@ import {
   BACKLOG_MAIN_CHANNEL,
   type BacklogChatMessage,
   type BacklogProposal,
+  type BacklogTaskProposal,
 } from "@kanban-ai/shared";
 
 import { apiClient } from "@/shared/services/apiClient";
@@ -20,6 +21,7 @@ export interface UseBacklogChatResult {
   messages: BacklogChatMessage[];
   pending: BacklogPending | null;
   proposal: BacklogProposal | null;
+  taskProposal: BacklogTaskProposal | null;
   streaming: boolean;
   /** Epoch (ms) em que o turno corrente começou, ou null se ocioso. */
   streamingSince: number | null;
@@ -63,6 +65,9 @@ export function useBacklogChat(
   );
   const proposal = useBacklogChatStore((s) =>
     sessionId ? (s.bySession[sessionId]?.proposal ?? null) : null,
+  );
+  const taskProposal = useBacklogChatStore((s) =>
+    sessionId ? (s.bySession[sessionId]?.taskProposal ?? null) : null,
   );
   const hydrate = useBacklogChatStore((s) => s.hydrate);
   const addMessage = useBacklogChatStore((s) => s.addMessage);
@@ -160,6 +165,7 @@ export function useBacklogChat(
     messages: chat?.messages ?? [],
     pending: chat?.pending ?? null,
     proposal,
+    taskProposal,
     streaming: chat?.streaming ?? false,
     streamingSince: chat?.streamingSince ?? null,
     lastActivity: chat?.lastActivity ?? null,

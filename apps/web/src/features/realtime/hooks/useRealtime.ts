@@ -95,6 +95,23 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
           return;
         }
 
+        if (event.type === "backlog.task_proposal") {
+          useBacklogChatStore
+            .getState()
+            .setTaskProposal(event.sessionId, event.taskProposal);
+          return;
+        }
+
+        // BUG-01: fim do turno de backlog → desliga o indicador "ainda
+        // trabalhando" do canal, mesmo que o turno não tenha emitido
+        // proposal/question (ex.: só `output`).
+        if (event.type === "backlog.turn_done") {
+          useBacklogChatStore
+            .getState()
+            .setStreaming(event.sessionId, event.channel, false);
+          return;
+        }
+
         // #2: fim de uma iteração → desliga o indicador "agente digitando" da
         // task. (A próxima iteração religa no primeiro agent.chunk.) Feito antes
         // do guard de boardId porque o chat vive em memória.

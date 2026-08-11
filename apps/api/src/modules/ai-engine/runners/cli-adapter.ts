@@ -35,6 +35,12 @@ export type CliEvent =
       done: boolean;
       /** #6: evidência de verificação — string livre (legado) ou estruturada. */
       evidence?: string | StructuredEvidence;
+      /**
+       * BUG-A7: erro FATAL de infraestrutura (spawn/modelo indisponível/não
+       * autenticado/crash). Quando presente, o orchestrator escala a humano e
+       * PARA o loop (fail-fast) em vez de contar como iteração normal.
+       */
+      fatalError?: string;
     };
 
 /** Como o processo deve ser spawnado. */
@@ -70,7 +76,13 @@ export class CliAdapter {
       const args = cliArgs.map((a) => a.replace('{prompt}', prompt));
       return { command: cliCommand, args, stdinPrompt: null };
     }
-    return { command: cliCommand, args: [...cliArgs], stdinPrompt: prompt };
+    // stdin: o adapter lê APENAS a primeira linha do stdin como prompt (o stdin
+    // permanece aberto para eventuais respostas de HITL). Um prompt multi-linha
+    // seria truncado no primeiro '\n'. Para transportar qualquer conteúdo
+    // (multi-linha, sem limite de tamanho — evita `spawn E2BIG` do modo 'arg'),
+    // enviamos o prompt como UMA linha `B64:<base64>`; o adapter decodifica.
+    const encoded = `B64:${Buffer.from(prompt, 'utf8').toString('base64')}`;
+    return { command: cliCommand, args: [...cliArgs], stdinPrompt: encoded };
   }
 
   /**
@@ -123,6 +135,10 @@ export class CliAdapter {
         nextStep: str(obj.nextStep),
         done: obj.done === true,
         evidence: parseEvidence(obj.evidence),
+        fatalError:
+          typeof obj.fatalError === 'string' && obj.fatalError.trim().length > 0
+            ? obj.fatalError
+            : undefined,
       };
     }
     // kind ausente/desconhecido → tratar como pensamento com o texto disponível.

@@ -1,9 +1,14 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import * as readline from 'node:readline';
 import type {
   BacklogProposal,
   BacklogProposalPatch,
+  BacklogTaskProposal,
+  BacklogTaskProposalPatch,
 } from '@kanban-ai/shared';
 import { APP_CONFIG, type AppConfig } from '../../../shared/config/config';
 
@@ -12,14 +17,18 @@ import { APP_CONFIG, type AppConfig } from '../../../shared/config/config';
  *
  * Reusa o mesmo transporte JSONL do loop engine, mas com kinds próprios do
  * domínio de backlog: além de `thought`/`output`/`question`, reconhece
- * `proposal` (proposta completa) e `patch` (refinamento cirúrgico).
+ * `proposal` (proposta completa) e `patch` (refinamento cirúrgico). No chat da
+ * story (ADR-0026) também reconhece `task_proposal` (lista de tasks) e
+ * `task_patch` (refinamento cirúrgico de uma task).
  */
 export type BacklogCliEvent =
   | { kind: 'thought'; text: string }
   | { kind: 'output'; text: string }
   | { kind: 'question'; id: string; prompt: string; options?: string[] }
   | { kind: 'proposal'; proposal: BacklogProposal }
-  | { kind: 'patch'; patch: BacklogProposalPatch };
+  | { kind: 'patch'; patch: BacklogProposalPatch }
+  | { kind: 'task_proposal'; taskProposal: BacklogTaskProposal }
+  | { kind: 'task_patch'; taskPatch: BacklogTaskProposalPatch };
 
 /** Callbacks de streaming/HITL de uma execução do chat de backlog. */
 export interface BacklogRunHandlers {
@@ -27,6 +36,8 @@ export interface BacklogRunHandlers {
   onQuestion?: (q: { id: string; prompt: string; options?: string[] }) => Promise<string>;
   onProposal?: (proposal: BacklogProposal) => Promise<void> | void;
   onPatch?: (patch: BacklogProposalPatch) => Promise<void> | void;
+  onTaskProposal?: (taskProposal: BacklogTaskProposal) => Promise<void> | void;
+  onTaskPatch?: (taskPatch: BacklogTaskProposalPatch) => Promise<void> | void;
 }
 
 /** Entrada de uma execução (um turno da conversa). */
@@ -57,20 +68,50 @@ export class BacklogCliRunner {
 
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
+  /**
+   * Diretório de trabalho ISOLADO do chat de backlog. BUG-05/03/02: rodar o
+   * `copilot` com `cwd = process.cwd()` (a raiz do próprio kanban-ai) fazia o
+   * agent herdar o `AGENTS.md`/custom instructions do repo — passava a se
+   * comportar como "PO de Kanban" e a procurar uma tabela `inbox_entries`,
+   * ignorando a tarefa do chat. O chat de backlog é PLANEJAMENTO puro (não
+   * edita repo nenhum), então o spawnamos num diretório neutro e vazio, sem
+   * qualquer `AGENTS.md`, para que só o prompt do backlog governe o agent.
+   */
+  private isolatedCwd: string | null = null;
+
+  private async ensureIsolatedCwd(): Promise<string> {
+    if (this.isolatedCwd) return this.isolatedCwd;
+    this.isolatedCwd = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'kanban-backlog-chat-'),
+    );
+    this.logger.log(`cwd isolado do backlog-chat: ${this.isolatedCwd}`);
+    return this.isolatedCwd;
+  }
+
   async run(input: BacklogRunInput): Promise<void> {
     const { cliCommand, cliArgs, promptMode } = this.config.agent;
     const useArg = promptMode === 'arg';
     const args = useArg
       ? cliArgs.map((a) => a.replace('{prompt}', input.prompt))
       : [...cliArgs];
-    const stdinPrompt = useArg ? null : input.prompt;
+    // Em modo stdin, o adapter lê UMA única linha e resolve no primeiro '\n'.
+    // O prompt do backlog é multi-linha, então precisamos enviá-lo como
+    // `B64:<base64>` (mesma convenção do loop engine em cli-adapter.ts). Sem
+    // isso, só a PRIMEIRA linha do prompt chegava ao CLI e todo o resto (a
+    // persona/regras do PO) era descartado — fazendo o agent cair nas
+    // instruções globais e virar "PO do E-mail Pro Premium" varrendo inbox.
+    const stdinPrompt = useArg
+      ? null
+      : `B64:${Buffer.from(input.prompt, 'utf8').toString('base64')}`;
+
+    const cwd = await this.ensureIsolatedCwd();
 
     this.logger.log(
-      `spawn: ${cliCommand} ${args.join(' ')} (backlog-chat turn)`,
+      `spawn: ${cliCommand} ${args.join(' ')} (backlog-chat turn, cwd=${cwd})`,
     );
 
     const child = spawn(cliCommand, args, {
-      cwd: process.cwd(),
+      cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: input.cliSessionId
         ? { ...process.env, COPILOT_SESSION_ID: input.cliSessionId }
@@ -222,6 +263,12 @@ export class BacklogCliRunner {
       case 'patch':
         await h.onPatch?.(event.patch);
         return;
+      case 'task_proposal':
+        await h.onTaskProposal?.(event.taskProposal);
+        return;
+      case 'task_patch':
+        await h.onTaskPatch?.(event.taskPatch);
+        return;
     }
   }
 
@@ -270,6 +317,18 @@ export class BacklogCliRunner {
     }
     if (kind === 'patch' && isObj(obj.patch)) {
       return { kind: 'patch', patch: obj.patch as unknown as BacklogProposalPatch };
+    }
+    if (kind === 'task_proposal' && isObj(obj.taskProposal)) {
+      return {
+        kind: 'task_proposal',
+        taskProposal: obj.taskProposal as unknown as BacklogTaskProposal,
+      };
+    }
+    if (kind === 'task_patch' && isObj(obj.taskPatch)) {
+      return {
+        kind: 'task_patch',
+        taskPatch: obj.taskPatch as unknown as BacklogTaskProposalPatch,
+      };
     }
     return { kind: 'thought', text: str(obj.text) || trimmed };
   }

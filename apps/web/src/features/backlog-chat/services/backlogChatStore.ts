@@ -3,6 +3,7 @@ import {
   BACKLOG_MAIN_CHANNEL,
   type BacklogChatMessage,
   type BacklogProposal,
+  type BacklogTaskProposal,
 } from "@kanban-ai/shared";
 
 /**
@@ -63,6 +64,12 @@ export interface ChannelChat {
 export interface SessionChat {
   byChannel: Record<string, ChannelChat>;
   proposal: BacklogProposal | null;
+  /**
+   * Proposta de TASKS corrente do chat da story (ADR-0026), session-level
+   * (compartilhada entre canais como a `proposal`). Alimentada pelo evento
+   * `backlog.task_proposal` e pela hidratação (`openStorySession.taskProposal`).
+   */
+  taskProposal: BacklogTaskProposal | null;
 }
 
 interface BacklogChatState {
@@ -89,6 +96,12 @@ interface BacklogChatState {
    * `kind=proposal` gerada é anexada ao canal `main`.
    */
   setProposal: (sessionId: string, proposal: BacklogProposal) => void;
+  /**
+   * Atualiza a proposta de TASKS corrente da sessão (session-level) e anexa uma
+   * mensagem `kind=task_proposal` ao canal `main` — o front renderiza a lista
+   * clicável de tasks. Ver ADR-0026.
+   */
+  setTaskProposal: (sessionId: string, taskProposal: BacklogTaskProposal) => void;
   /** Liga/desliga o indicador de streaming de um canal. */
   setStreaming: (sessionId: string, channel: string, streaming: boolean) => void;
   /**
@@ -102,6 +115,7 @@ interface BacklogChatState {
     sessionId: string,
     history: BacklogChatMessage[],
     proposal: BacklogProposal | null,
+    taskProposal?: BacklogTaskProposal | null,
   ) => void;
   reset: (sessionId: string) => void;
 }
@@ -135,6 +149,7 @@ const EMPTY_CHANNEL: ChannelChat = {
 export const emptySession = (): SessionChat => ({
   byChannel: {},
   proposal: null,
+  taskProposal: null,
 });
 
 function makeId(): string {
@@ -328,6 +343,39 @@ export const useBacklogChatStore = create<BacklogChatState>((set) => ({
       return { bySession: { ...state.bySession, [sessionId]: next } };
     }),
 
+  setTaskProposal: (sessionId, taskProposal) =>
+    set((state) => {
+      const session = state.bySession[sessionId] ?? emptySession();
+      // Idempotência: se já temos exatamente esta versão, não re-injeta a msg.
+      if (session.taskProposal && session.taskProposal.version === taskProposal.version) {
+        return state;
+      }
+      const channel = BACKLOG_MAIN_CHANNEL;
+      const chan = getChannel(session, channel);
+      const messages: BacklogChatMessage[] = [
+        ...chan.messages,
+        {
+          id: `btp-${taskProposal.version}-${Date.now()}`,
+          sessionId,
+          channel,
+          role: "ai",
+          kind: "task_proposal",
+          text: "",
+          taskProposal,
+          ts: Date.now(),
+        },
+      ];
+      const withTaskChannel = withChannel(session, channel, {
+        ...chan,
+        messages,
+        streaming: false,
+        streamingSince: null,
+        lastActivity: null,
+      });
+      const next: SessionChat = { ...withTaskChannel, taskProposal };
+      return { bySession: { ...state.bySession, [sessionId]: next } };
+    }),
+
   setStreaming: (sessionId, channel, streaming) =>
     set((state) => {
       const session = state.bySession[sessionId] ?? emptySession();
@@ -343,7 +391,7 @@ export const useBacklogChatStore = create<BacklogChatState>((set) => ({
       return { bySession: { ...state.bySession, [sessionId]: next } };
     }),
 
-  hydrate: (sessionId, history, proposal) =>
+  hydrate: (sessionId, history, proposal, taskProposal) =>
     set((state) => {
       const existing = state.bySession[sessionId];
 
@@ -396,7 +444,24 @@ export const useBacklogChatStore = create<BacklogChatState>((set) => ({
         };
       }
 
-      const next: SessionChat = { byChannel, proposal };
+      // Deriva a proposta de tasks corrente: a passada explicitamente (do
+      // openStorySession) tem precedência; senão, a última msg task_proposal do
+      // transcript; senão, mantém a que já existir no store.
+      let resolvedTaskProposal: BacklogTaskProposal | null =
+        taskProposal ?? existing?.taskProposal ?? null;
+      if (!taskProposal) {
+        for (const m of history) {
+          if (m.kind === "task_proposal" && m.taskProposal) {
+            resolvedTaskProposal = m.taskProposal;
+          }
+        }
+      }
+
+      const next: SessionChat = {
+        byChannel,
+        proposal,
+        taskProposal: resolvedTaskProposal,
+      };
       return { bySession: { ...state.bySession, [sessionId]: next } };
     }),
 

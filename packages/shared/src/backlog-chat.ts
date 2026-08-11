@@ -32,6 +32,47 @@ export function parseBacklogStoryChannel(channel: string): string | null {
   return channel.startsWith('story:') ? channel.slice('story:'.length) : null;
 }
 
+/**
+ * Monta a chave de canal de uma thread focada numa **task** (dentro do chat da
+ * story). Segue o mesmo espírito de `story:<id>` (ADR-0023): mesma sessão do
+ * Copilot, transcript particionado por canal. `taskId` pode ser o id estável do
+ * rascunho de task na proposta (`BacklogProposalTask.id`) ou o id do card
+ * `type:task` já materializado. Ver ADR-0026.
+ */
+export function backlogTaskChannel(taskId: string): string {
+  return `task:${taskId}`;
+}
+
+/** Extrai o taskId de uma chave de canal `task:<id>`, ou null caso contrário. */
+export function parseBacklogTaskChannel(channel: string): string | null {
+  return channel.startsWith('task:') ? channel.slice('task:'.length) : null;
+}
+
+/**
+ * DTO de retorno de "abrir (ou reusar) a sessão de chat de uma story". Ver
+ * ADR-0026 e o endpoint `POST /backlog-chat/story/:storyId/session`.
+ */
+export interface StoryChatSession {
+  /** Id da `BacklogChatSession` (reusada ou recém-criada) da story. */
+  sessionId: string;
+  /** Board ao qual a sessão/story pertence. */
+  boardId: string;
+  /** Id estável da story dentro da proposta — âncora do canal `story:<id>`. */
+  storyId: string;
+  /**
+   * `true` quando a story veio de um backlog-chat e a sessão original foi
+   * **reusada** (mesmo transcript/contexto); `false` quando a story era manual
+   * e uma sessão **zerada** foi criada e vinculada. Ver ADR-0026.
+   */
+  reused: boolean;
+  /**
+   * Snapshot da proposta de tasks corrente desta story (se já houver), para o
+   * front reidratar a lista clicável de tasks sem esperar um novo turno da AI.
+   * Ver {@link BacklogTaskProposal} e ADR-0026.
+   */
+  taskProposal?: BacklogTaskProposal;
+}
+
 /** Situação do ciclo de vida de uma sessão de chat de backlog. */
 export type BacklogChatSessionStatus = 'open' | 'applied' | 'archived';
 
@@ -68,7 +109,7 @@ export interface BacklogChatMessage {
    */
   channel: string;
   /** `proposal` marca a mensagem que carrega uma proposta de backlog. */
-  kind?: 'thought' | 'output' | 'proposal';
+  kind?: 'thought' | 'output' | 'proposal' | 'task_proposal';
   text: string;
   /** Vincula pergunta (role=ai) e resposta (role=user) do mesmo par HITL. */
   questionId?: string;
@@ -76,6 +117,8 @@ export interface BacklogChatMessage {
   options?: string[];
   /** Quando `kind=proposal`: snapshot da proposta na versão corrente. */
   proposal?: BacklogProposal;
+  /** Quando `kind=task_proposal`: snapshot da proposta de tasks da story. */
+  taskProposal?: BacklogTaskProposal;
   ts: number;
 }
 
@@ -141,6 +184,60 @@ export interface BacklogProposalTask {
   id: string;
   title: string;
 }
+
+/**
+ * Um item de uma **proposta de tasks do chat da story** (ADR-0026). É o mesmo
+ * conceito de task do board (vira um card `type:task` ao materializar), mas aqui
+ * carrega um pouco mais de contexto que o humano pode refinar numa thread
+ * dedicada (`task:<id>`) antes de materializar. Task não tem story points nem
+ * DoD (invariantes do domínio — ADR-0007).
+ */
+export interface BacklogTaskProposalItem {
+  /**
+   * Id estável do item dentro da proposta de tasks; gerado/preservado pelo
+   * backend ao persistir. É a **âncora do canal `task:<id>`** — sobrevive a
+   * reordenação/patch para a thread de refinamento continuar apontando à mesma
+   * task. Ver ADR-0026.
+   */
+  id: string;
+  /** Título curto e acionável da task (o que vira o título do card). */
+  title: string;
+  /** Detalhamento opcional (o que fazer / critérios) refinado na thread. */
+  description?: string;
+}
+
+/**
+ * Proposta estruturada de **tasks** emitida pelo PO dentro do **chat da story**
+ * (ADR-0026). Diferente de {@link BacklogProposal} (Epic + Stories), esta é
+ * escopada a UMA story: uma lista de tasks acionáveis que o humano revisa, refina
+ * task-a-task (thread `task:<id>`) e materializa como cards `type:task` em To Do.
+ *
+ * NÃO é persistida como revisão versionada em tabela própria: o snapshot corrente
+ * vive numa `BacklogChatMessage` (`kind:'task_proposal'`, JSON em `proposal`) —
+ * sem migração. É **versionada** logicamente pelo campo `version` (incrementa a
+ * cada refinamento cirúrgico).
+ */
+export interface BacklogTaskProposal {
+  /** Versão da proposta de tasks; incrementa a cada patch aplicado. */
+  version: number;
+  /** Lista de tasks propostas (ordem = ordem de materialização). */
+  tasks: BacklogTaskProposalItem[];
+  /** 1 linha do porquê desta decomposição (opcional). */
+  rationale?: string;
+}
+
+/**
+ * Patch cirúrgico sobre uma {@link BacklogTaskProposal}. A AI emite estas ops
+ * (em vez de reemitir a lista inteira) quando o humano refina UMA task numa
+ * thread `task:<id>`. `path` aponta para: `/tasks/<i>/title`,
+ * `/tasks/<i>/description`, `/rationale`; `add` em `/tasks/-` e `remove` em
+ * `/tasks/<i>`.
+ */
+export interface BacklogTaskProposalPatch {
+  baseVersion: number;
+  ops: BacklogPatchOp[];
+}
+
 
 /**
  * Proposta estruturada de backlog (Epic + Stories) que a AI emite e o humano
@@ -214,4 +311,20 @@ export const BACKLOG_PROPOSAL_MARKERS = {
 export const BACKLOG_PATCH_MARKERS = {
   open: '<<<KANBAN_BACKLOG_PATCH>>>',
   close: '<<<END_KANBAN_BACKLOG_PATCH>>>',
+} as const;
+
+/**
+ * Marcadores do bloco de **proposta de tasks** do chat da story (ADR-0026). O PO
+ * emite a lista estruturada de tasks (em vez de texto puro) para o front renderizar
+ * cada task como um item clicável com thread própria de refinamento.
+ */
+export const BACKLOG_TASKS_MARKERS = {
+  open: '<<<KANBAN_TASKS>>>',
+  close: '<<<END_KANBAN_TASKS>>>',
+} as const;
+
+/** Marcadores do patch cirúrgico de uma proposta de tasks (thread `task:<id>`). */
+export const BACKLOG_TASKS_PATCH_MARKERS = {
+  open: '<<<KANBAN_TASKS_PATCH>>>',
+  close: '<<<END_KANBAN_TASKS_PATCH>>>',
 } as const;

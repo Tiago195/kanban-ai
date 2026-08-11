@@ -37,3 +37,21 @@ export const backlogApplySchema = z.object({
   version: z.number().int().positive(),
 });
 export type BacklogApplyDto = z.infer<typeof backlogApplySchema>;
+
+/**
+ * Materializa (cria no board) tasks rascunhadas no chat de uma story existente,
+ * como cards `type:task` filhos em To Do. Ver ADR-0026.
+ */
+export const materializeStoryTasksSchema = z.object({
+  titles: z.array(z.string().min(1)).min(1),
+});
+export type MaterializeStoryTasksDto = z.infer<typeof materializeStoryTasksSchema>;
+
+/**
+ * Resolve o card `type:story` do board materializado por uma sessão applied,
+ * casando pelo título da story da proposta. Ver bug tasks-fantasma / ADR-0026.
+ */
+export const resolveStoryCardSchema = z.object({
+  title: z.string().min(1),
+});
+export type ResolveStoryCardDto = z.infer<typeof resolveStoryCardSchema>;

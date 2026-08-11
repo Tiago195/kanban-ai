@@ -8,8 +8,16 @@ import type {
   BacklogProposalPatch,
   BacklogProposalStory,
   BacklogAppliedCard,
+  BacklogTaskProposal,
+  BacklogTaskProposalItem,
+  BacklogTaskProposalPatch,
+  StoryChatSession,
 } from '@kanban-ai/shared';
-import { BACKLOG_MAIN_CHANNEL, parseBacklogStoryChannel } from '@kanban-ai/shared';
+import {
+  BACKLOG_MAIN_CHANNEL,
+  parseBacklogStoryChannel,
+  parseBacklogTaskChannel,
+} from '@kanban-ai/shared';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { CardsService } from '../cards/cards.service';
@@ -380,6 +388,20 @@ export class BacklogChatOrchestrator implements OnModuleInit {
     // (proposta ainda inexistente ou story removida), omite — trata como main.
     const focusStory = this.resolveFocusStory(channel, current);
 
+    // Chat da story (ADR-0026): se ESTA sessão está ancorada numa story-card do
+    // board (via `Card.backlogChatSessionId`), injeta o contexto real da story —
+    // assim a IA já conhece a história e ajuda a decompô-la em tasks, sem
+    // perguntar "qual é a história?". Funciona tanto para story manual (sessão
+    // zerada) quanto para sessão reusada de um backlog-chat.
+    const storyCard = await this.resolveStoryCardContext(sessionId);
+
+    // Chat da story (ADR-0026): a proposta de TASKS é escopada a esta sessão de
+    // story. Injeta a proposta corrente (para refinamento cirúrgico) e, se o
+    // canal é uma thread task:<id>, o item em foco — assim a IA edita apenas
+    // aquela task via KANBAN_TASKS_PATCH.
+    const currentTasks = await this.getCurrentTaskProposal(sessionId);
+    const focusTask = this.resolveFocusTask(channel, currentTasks);
+
     const prompt = buildBacklogPrompt({
       boardTitle: board?.title ?? '(board)',
       history,
@@ -388,10 +410,18 @@ export class BacklogChatOrchestrator implements OnModuleInit {
         ? JSON.stringify(current, null, 2)
         : undefined,
       focusStory,
+      storyCard,
+      currentTaskProposalJson: currentTasks
+        ? JSON.stringify(currentTasks, null, 2)
+        : undefined,
+      focusTask,
     });
 
     // Buffer de consolidação de chunks (persiste o transcript por kind).
     let chunkBuffer: { kind: 'thought' | 'output'; text: string } | null = null;
+    // BUG-01: quando true, o turno cedeu lugar a um re-spawn HITL e NÃO deve
+    // emitir `backlog.turn_done` (o novo turno segue o streaming).
+    let hitlRespawn = false;
     const flushChunk = async () => {
       if (!chunkBuffer || chunkBuffer.text.trim().length === 0) {
         chunkBuffer = null;
@@ -487,6 +517,14 @@ export class BacklogChatOrchestrator implements OnModuleInit {
             await flushChunk();
             await this.applyPatch(sessionId, patch);
           },
+          onTaskProposal: async (taskProposal) => {
+            await flushChunk();
+            await this.persistTaskProposal(sessionId, taskProposal);
+          },
+          onTaskPatch: async (taskPatch) => {
+            await flushChunk();
+            await this.applyTaskPatch(sessionId, taskPatch);
+          },
         },
       });
     } catch (err) {
@@ -497,12 +535,24 @@ export class BacklogChatOrchestrator implements OnModuleInit {
         this.logger.debug(
           `turno HITL encerrado para re-spawn (sessão ${sessionId}).`,
         );
+        hitlRespawn = true;
         return;
       }
       throw err;
     } finally {
       await flushChunk();
       this.running.delete(sessionId);
+      // BUG-01: um turno que encerra sem `proposal`/`question` deixaria o
+      // indicador de streaming ligado para sempre. Emitimos `backlog.turn_done`
+      // no fim de TODO turno — exceto quando ele apenas cede lugar a um re-spawn
+      // HITL (nesse caso o novo turno continua o streaming).
+      if (!hitlRespawn) {
+        this.realtime.broadcast({
+          type: 'backlog.turn_done',
+          sessionId,
+          channel,
+        });
+      }
     }
   }
 
@@ -541,6 +591,77 @@ export class BacklogChatOrchestrator implements OnModuleInit {
       points: story.points,
       tasks: story.tasks,
       index,
+    };
+  }
+
+  /**
+   * Resolve o contexto da story-card do board ancorada a ESTA sessão de chat
+   * (via `Card.backlogChatSessionId`, tipo `story`). Retorna o shape que o
+   * prompt usa para o "chat da story" (ADR-0026): título, descrição, contexto
+   * de AI, DoD, épico-pai e tasks já existentes. Retorna `undefined` quando a
+   * sessão não é o chat de uma story (ex.: backlog-chat geral que ainda não foi
+   * aplicado, ou sessão sem card vinculado).
+   *
+   * IMPORTANTE: se uma sessão de backlog-chat foi aplicada, ela pode ter
+   * MÚLTIPLAS stories-cards vinculadas (todas carimbadas no `apply`). Nesse
+   * caso NÃO há uma única "story em foco" — o chat é geral, não o de uma story.
+   * Só tratamos como "chat da story" quando existe EXATAMENTE uma story-card
+   * vinculada (o caso do `openStorySession`: manual zerada, ou reuso de um
+   * backlog-chat de story única).
+   */
+  private async resolveStoryCardContext(sessionId: string): Promise<
+    | {
+        key: string;
+        title: string;
+        description?: string;
+        aiSummary?: string;
+        aiNotes?: string;
+        points?: number;
+        dod?: string[];
+        epicTitle?: string;
+        existingTasks?: string[];
+      }
+    | undefined
+  > {
+    const stories = await this.prisma.card.findMany({
+      where: { backlogChatSessionId: sessionId, type: 'story' },
+      select: {
+        id: true,
+        key: true,
+        title: true,
+        description: true,
+        aiSummary: true,
+        aiNotes: true,
+        points: true,
+        parent: { select: { title: true, type: true } },
+      },
+    });
+    if (stories.length !== 1) return undefined;
+    const story = stories[0];
+
+    const [dodItems, taskCards] = await Promise.all([
+      this.prisma.dodItem.findMany({
+        where: { cardId: story.id },
+        orderBy: { position: 'asc' },
+        select: { text: true },
+      }),
+      this.prisma.card.findMany({
+        where: { parentId: story.id, type: 'task' },
+        orderBy: { position: 'asc' },
+        select: { title: true },
+      }),
+    ]);
+
+    return {
+      key: story.key,
+      title: story.title,
+      description: story.description ?? undefined,
+      aiSummary: story.aiSummary ?? undefined,
+      aiNotes: story.aiNotes ?? undefined,
+      points: story.points ?? undefined,
+      dod: dodItems.map((d) => d.text),
+      epicTitle: story.parent?.type === 'epic' ? story.parent.title : undefined,
+      existingTasks: taskCards.map((t) => t.title),
     };
   }
 
@@ -627,6 +748,163 @@ export class BacklogChatOrchestrator implements OnModuleInit {
     this.realtime.broadcast({ type: 'backlog.proposal', sessionId, proposal });
   }
 
+  // ── Proposta de TASKS do chat da story (ADR-0026) ───────────────────────
+
+  /**
+   * Resolve o item em foco quando o canal é uma thread `task:<id>`. Retorna o
+   * task correspondente na proposta corrente + seu índice, ou undefined.
+   */
+  private resolveFocusTask(
+    channel: string,
+    current: BacklogTaskProposal | null,
+  ):
+    | { id: string; title: string; description?: string; index: number }
+    | undefined {
+    const taskId = parseBacklogTaskChannel(channel);
+    if (!taskId || !current) return undefined;
+    const index = current.tasks.findIndex((t) => t.id === taskId);
+    if (index < 0) return undefined;
+    const task = current.tasks[index];
+    return {
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      index,
+    };
+  }
+
+  /**
+   * Recupera a proposta de tasks corrente da sessão: a última mensagem
+   * `kind:'task_proposal'` (a coluna `proposal Json?` guarda o JSON). Retorna
+   * null se ainda não houve proposta de tasks.
+   */
+  async getCurrentTaskProposal(
+    sessionId: string,
+  ): Promise<BacklogTaskProposal | null> {
+    const last = await this.prisma.backlogChatMessage.findFirst({
+      where: { sessionId, kind: 'task_proposal' },
+      orderBy: { ts: 'desc' },
+    });
+    if (!last || last.proposal == null) return null;
+    return last.proposal as unknown as BacklogTaskProposal;
+  }
+
+  /**
+   * Persiste uma proposta de tasks: atribui ids estáveis (âncora das threads
+   * `task:<id>`), incrementa a versão, grava uma `BacklogChatMessage`
+   * `kind:'task_proposal'` e reemite via WS. NÃO cria cards — a materialização
+   * é explícita (`materializeStoryTasks`). Sem migração de schema (reusa a
+   * coluna `proposal Json?`).
+   */
+  private async persistTaskProposal(
+    sessionId: string,
+    proposal: BacklogTaskProposal,
+  ): Promise<void> {
+    const prev = await this.getCurrentTaskProposal(sessionId);
+    const nextVersion = (prev?.version ?? 0) + 1;
+    const tasks: BacklogTaskProposalItem[] = (proposal.tasks ?? []).map((t) => ({
+      ...t,
+      id: t.id && t.id.length > 0 ? t.id : randomUUID(),
+    }));
+    const normalized: BacklogTaskProposal = {
+      ...proposal,
+      version: nextVersion,
+      tasks,
+    };
+    await this.prisma.backlogChatMessage.create({
+      data: {
+        sessionId,
+        role: 'ai',
+        kind: 'task_proposal',
+        text: proposal.rationale ?? 'Tasks sugeridas',
+        proposal: normalized as unknown as object,
+        channel: BACKLOG_MAIN_CHANNEL,
+      },
+    });
+    this.realtime.broadcast({
+      type: 'backlog.task_proposal',
+      sessionId,
+      taskProposal: normalized,
+    });
+  }
+
+  /**
+   * Aplica um patch cirúrgico sobre a proposta de tasks corrente. Suporta ops
+   * `replace`/`add`/`remove` sobre `title`/`description` de uma task (endereçada
+   * por `/tasks/<idx>/<field>`). Persiste como nova proposta (+1 versão).
+   */
+  async applyTaskPatch(
+    sessionId: string,
+    patch: BacklogTaskProposalPatch,
+  ): Promise<void> {
+    const current = await this.getCurrentTaskProposal(sessionId);
+    if (!current) {
+      this.logger.warn(
+        `task_patch recebido sem proposta de tasks corrente (session=${sessionId})`,
+      );
+      return;
+    }
+    const tasks = current.tasks.map((t) => ({ ...t }));
+    let rationale = current.rationale;
+    for (const op of patch.ops ?? []) {
+      const path = op.path ?? '';
+      // /rationale
+      if (path === '/rationale') {
+        rationale = op.op === 'remove' ? undefined : String(op.value ?? '');
+        continue;
+      }
+      // add nova task em /tasks/-
+      if (path === '/tasks/-' && op.op === 'add' && op.value && typeof op.value === 'object') {
+        const v = op.value as { id?: string; title?: string; description?: string };
+        tasks.push({
+          id: v.id && v.id.length > 0 ? v.id : randomUUID(),
+          title: String(v.title ?? ''),
+          description: v.description,
+        });
+        continue;
+      }
+      // remove task inteira em /tasks/<i>
+      const rm = /^\/tasks\/(\d+)$/.exec(path);
+      if (rm && op.op === 'remove') {
+        const idx = Number(rm[1]);
+        if (idx >= 0 && idx < tasks.length) tasks.splice(idx, 1);
+        continue;
+      }
+      // replace/add/remove de campo em /tasks/<i>/<field>
+      const m = /^\/tasks\/(\d+)\/(title|description)$/.exec(path);
+      if (!m) continue;
+      const idx = Number(m[1]);
+      const field = m[2] as 'title' | 'description';
+      if (idx < 0 || idx >= tasks.length) continue;
+      if (op.op === 'remove') {
+        if (field === 'description') delete tasks[idx].description;
+      } else if (typeof op.value === 'string') {
+        tasks[idx][field] = op.value;
+      }
+    }
+    const next: BacklogTaskProposal = {
+      ...current,
+      version: (current.version ?? 0) + 1,
+      tasks,
+      rationale,
+    };
+    await this.prisma.backlogChatMessage.create({
+      data: {
+        sessionId,
+        role: 'ai',
+        kind: 'task_proposal',
+        text: current.rationale ?? 'Tasks refinadas',
+        proposal: next as unknown as object,
+        channel: BACKLOG_MAIN_CHANNEL,
+      },
+    });
+    this.realtime.broadcast({
+      type: 'backlog.task_proposal',
+      sessionId,
+      taskProposal: next,
+    });
+  }
+
   // ── Apply: materializa Epic + Stories via CardsService ──────────────────
 
   async apply(
@@ -659,6 +937,7 @@ export class BacklogChatOrchestrator implements OnModuleInit {
       description: proposal.epic.description ?? '',
       points: proposal.epic.points,
       parentId: null,
+      backlogChatSessionId: sessionId,
       ...(epicAiProject ? { aiProject: epicAiProject } : {}),
     });
     created.push({
@@ -680,6 +959,7 @@ export class BacklogChatOrchestrator implements OnModuleInit {
         parentId: epic.id,
         aiSummary: story.aiSummary,
         aiNotes: story.aiNotes,
+        backlogChatSessionId: sessionId,
       });
       created.push({
         id: s.id,
@@ -724,6 +1004,7 @@ export class BacklogChatOrchestrator implements OnModuleInit {
           title: task.title,
           description: '',
           parentId: s.id,
+          backlogChatSessionId: sessionId,
         });
         created.push({
           id: t.id,
@@ -741,6 +1022,180 @@ export class BacklogChatOrchestrator implements OnModuleInit {
     });
 
     return { cards: created };
+  }
+
+  /**
+   * Resolve o card `type:story` do board que foi materializado por uma sessão
+   * de backlog-chat já aplicada, casando pelo título da story da proposta.
+   *
+   * Usado pelo fluxo "sugerir tasks numa sessão applied" (bug tasks-fantasma):
+   * a thread da proposta (`StoryThreadSheet`) só tem a story da PROPOSTA (id
+   * instável), mas o board já tem o card real (carimbado com
+   * `backlogChatSessionId = sessionId` no `apply`). Casamos pelo título para
+   * redirecionar o usuário ao "chat da story", onde a materialização
+   * incremental (`materializeStoryTasks`) cria as tasks de fato — em vez de
+   * apenas rascunhá-las na proposta (que não vira card e gera "tasks fantasma").
+   *
+   * @returns o `StoryChatSession` da story-card resolvida, ou `null` se nenhum
+   *          card correspondente existir (ex.: sessão ainda não aplicada).
+   */
+  async resolveAppliedStoryCard(
+    sessionId: string,
+    title: string,
+  ): Promise<StoryChatSession | null> {
+    const wanted = title?.trim();
+    if (!wanted) return null;
+    const stories = await this.prisma.card.findMany({
+      where: { backlogChatSessionId: sessionId, type: 'story' },
+      select: { id: true, title: true, boardId: true },
+    });
+    // Casa primeiro por título exato (trim); nenhuma outra âncora estável existe
+    // entre a story da proposta e o card do board.
+    const match =
+      stories.find((s) => s.title.trim() === wanted) ??
+      (stories.length === 1 ? stories[0] : undefined);
+    if (!match) return null;
+    return {
+      sessionId,
+      boardId: match.boardId,
+      storyId: match.id,
+      reused: true,
+    };
+  }
+
+  // ── Chat da story: abrir (ou reusar) a sessão de uma story ──────────────
+
+  /**
+   * Abre (ou reusa) a `BacklogChatSession` do "chat da story" para um card
+   * `type:story` existente no board. Ver ADR-0026.
+   *
+   * Regra de origem:
+   * - Se a story tem `backlogChatSessionId` (veio de um backlog-chat), **reusa**
+   *   essa sessão — mesmo transcript/contexto — focando no canal `story:<id>`.
+   * - Se a story é manual (`backlogChatSessionId=null`), cria uma
+   *   `BacklogChatSession` **zerada** dedicada e já a vincula ao card via
+   *   `backlogChatSessionId` (rastreio consistente para materializações futuras).
+   *
+   * @param storyId id do card `type:story` (não é o id estável da proposta).
+   */
+  async openStorySession(storyId: string): Promise<StoryChatSession> {
+    const story = await this.prisma.card.findUnique({
+      where: { id: storyId },
+      select: { id: true, type: true, title: true, boardId: true, backlogChatSessionId: true },
+    });
+    if (!story) throw new NotFoundException('story inexistente');
+    if (story.type !== 'story') {
+      throw new ConflictException('o chat da story só existe para cards do tipo story');
+    }
+
+    // Caminho A: story veio de um backlog-chat → reusa a sessão original.
+    if (story.backlogChatSessionId) {
+      const existing = await this.prisma.backlogChatSession.findUnique({
+        where: { id: story.backlogChatSessionId },
+      });
+      if (existing) {
+        return {
+          sessionId: existing.id,
+          boardId: story.boardId,
+          storyId: story.id,
+          reused: true,
+          taskProposal:
+            (await this.getCurrentTaskProposal(existing.id)) ?? undefined,
+        };
+      }
+      // Sessão original foi apagada (SetNull deixou o vínculo pendurado): cai no
+      // caminho manual e recria uma sessão zerada.
+    }
+
+    // Caminho B: story manual (ou sessão original inexistente) → cria uma
+    // sessão zerada e vincula ao card. Não usamos createSession() porque
+    // queremos um título derivado da story e o vínculo imediato.
+    const session = await this.prisma.backlogChatSession.create({
+      data: { boardId: story.boardId, title: story.title },
+    });
+    await this.prisma.card.update({
+      where: { id: story.id },
+      data: { backlogChatSessionId: session.id },
+    });
+
+    return {
+      sessionId: session.id,
+      boardId: story.boardId,
+      storyId: story.id,
+      reused: false,
+    };
+  }
+
+  /**
+   * Materializa as tasks rascunhadas de uma story-card como cards `type:task`
+   * filhos, em To Do. Ver ADR-0026.
+   *
+   * Reusa `CardsService.create` (invariante "task só em Backlog/To Do" e "task
+   * sem pontos" já garantidos lá). Ao criar ≥1 task, limpa o flag `needsHuman`
+   * do card story (BUG-08/09) — o board fica consistente para o loop retomar; o
+   * broadcast `card.updated`/retomada de loop já é emitido por
+   * `CardsService.create` → `maybeResumeLoopOnTaskAdded`.
+   *
+   * @param storyCardId id do card `type:story` que recebe as tasks.
+   * @param titles      títulos das tasks a criar (vazios são ignorados).
+   */
+  async materializeStoryTasks(
+    storyCardId: string,
+    titles: string[],
+  ): Promise<{ cards: BacklogAppliedCard[] }> {
+    const story = await this.prisma.card.findUnique({
+      where: { id: storyCardId },
+      select: { id: true, type: true, boardId: true, backlogChatSessionId: true },
+    });
+    if (!story) throw new NotFoundException('story inexistente');
+    if (story.type !== 'story') {
+      throw new ConflictException('só é possível materializar tasks numa story');
+    }
+
+    const clean = titles.map((t) => t?.trim()).filter((t): t is string => !!t);
+    const created: BacklogAppliedCard[] = [];
+    for (const title of clean) {
+      const t = await this.cards.create({
+        boardId: story.boardId,
+        type: 'task',
+        title,
+        description: '',
+        parentId: story.id,
+        ...(story.backlogChatSessionId
+          ? { backlogChatSessionId: story.backlogChatSessionId }
+          : {}),
+      });
+      created.push({ id: t.id, key: t.key, type: 'task', title: t.title, parentId: story.id });
+    }
+
+    // Ao ganhar ≥1 task, a story não está mais "sem o que executar": limpa o
+    // badge "Precisa de você" se ainda estiver setado. (CardsService.create já
+    // faz isso quando a story está em In Progress via maybeResumeLoopOnTaskAdded;
+    // aqui garantimos o mesmo mesmo fora de In Progress — outra US cuida do badge
+    // na UI, aqui garantimos o backend consistente.)
+    if (created.length > 0) {
+      await this.clearStoryNeedsHuman(story.id);
+    }
+
+    return { cards: created };
+  }
+
+  /**
+   * Limpa `needsHuman`/`needsHumanReason` do card story (se setado) e emite
+   * `card.updated` para o badge sumir no board. Idempotente.
+   */
+  private async clearStoryNeedsHuman(storyId: string): Promise<void> {
+    const story = await this.prisma.card.findUnique({
+      where: { id: storyId },
+      select: { needsHuman: true },
+    });
+    if (!story?.needsHuman) return;
+    await this.prisma.card.update({
+      where: { id: storyId },
+      data: { needsHuman: false, needsHumanReason: null },
+    });
+    const full = await this.prisma.card.findUnique({ where: { id: storyId } });
+    this.realtime.broadcast({ type: 'card.updated', cardId: storyId, card: full as never });
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────
@@ -776,7 +1231,7 @@ export class BacklogChatOrchestrator implements OnModuleInit {
       orderBy: { ts: 'asc' },
     });
     return rows
-      .filter((r) => r.kind !== 'proposal') // proposta vai via currentProposalJson
+      .filter((r) => r.kind !== 'proposal' && r.kind !== 'task_proposal') // propostas vão via *ProposalJson
       .map((r) => ({
         role: r.role as BacklogPromptTurn['role'],
         text: r.text,

@@ -2,6 +2,11 @@
 
 <!-- Stories de correção derivadas do QA rodada 2 (2026-08-06). Prioridade: 🔴 crítico > 🟠 alto > 🟡 médio > 🟢 baixo -->
 
+- [ ] Precisamos melhorar o chat de conversa do backlog-chat
+
+- [ ] tentar disponibilizar tudo em docker
+
+- [ ] Gravar um video de como usar a ferramenta
 # in progress
 
 
@@ -9,22 +14,16 @@
 # done
 <!-- apenas ultimas 2 tarefas, para n poluir o arquivo -->
 
-- [x] 🟢 **US: Verificar/consertar drag-and-drop por teclado (dnd-kit) no board** _(finding: obs-dnd-keyboard)_ — **CONCLUÍDA 2026-08-07 (KeyboardSensor + coordinateGetter horizontal custom; validado empiricamente via Playwright + DB)**
-  - **Causa-raiz:** o `BoardView` registrava apenas `PointerSensor` — **faltava o `KeyboardSensor`**, então não havia dnd por teclado. Ao adicionar o `KeyboardSensor` com o `sortableKeyboardCoordinates` padrão do dnd-kit (otimizado p/ listas **verticais**), ArrowLeft/Right miravam o card vizinho mais próximo — quase sempre na **mesma coluna** — e o card nunca trocava de coluna. Além disso, retornar a coordenada como **centro** da coluna fazia o `collisionRect` (que o dnd-kit ancora pelo **canto superior-esquerdo**) invadir a coluna seguinte, resolvendo `over` para um card distante.
-  - **O que foi feito** (`apps/web/src/features/board/components/BoardView.tsx`, só front, sem tocar contrato):
-    - Adicionado `KeyboardSensor` aos **dois** `useSensors` (board principal de stories e task-board).
-    - Implementado `boardKeyboardCoordinates` (`KeyboardCoordinateGetter` custom): ArrowLeft/Right navegam entre as **colunas droppable** (`column:<id>`) — detecta a coluna atual pela posição do card e salta para a **borda esquerda** da coluna vizinha (alinhando o `collisionRect` dentro dela, sem invadir a próxima). ArrowUp/Down delegam ao `sortableKeyboardCoordinates` padrão (reordenar dentro da coluna).
-  - **Validação empírica (Playwright + DB real):**
-    - Card focável: `role=button`, `tabindex=0`, `aria-roledescription=sortable` ✔.
-    - **Backlog → To Do só pelo teclado** (focus + Space + ArrowRight + Space): live region "dropped over **To Do**"; DB confirmou `US-274` mudou de `Backlog` → `To Do` ✔.
-    - **To Do → Backlog** (ArrowLeft): DB confirmou retorno a `Backlog` ✔ (card restaurado ao estado original).
-    - Movimento é de **exatamente uma coluna** por seta (colisão resolve só para a coluna-alvo) ✔.
-    - `tsc web` ✔, `eslint` ✔, **`npm run build` + `npm run lint` na raiz verdes** (fundação intacta) ✔.
+- [x] 🟠 **Tasks estruturadas clicáveis no chat da story (paridade com backlog-chat)** — **CONCLUÍDO 2026-08-11 (build+lint verdes; 26/26 specs backlog-chat)**
+  - **Problema:** o chat da story emitia as tasks como **texto puro**; queríamos o MESMO comportamento do backlog-chat (cartão com tasks clicáveis → thread dedicada por task para refinar só ela).
+  - **Protocolo `KANBAN_TASKS`/`KANBAN_TASKS_PATCH`** (espelha `KANBAN_BACKLOG`) em `packages/shared` (`BacklogTaskProposal`/`Item`/`Patch`, markers, evento WS `backlog.task_proposal`).
+  - **Adapter** (`docker/copilot-cli-adapter.mjs`): extrai os blocos em `emitTerminalEvents` (patch antes de proposta) → `{kind:'task_proposal'|'task_patch'}`; blocos suprimidos do transcript.
+  - **Runner/Orchestrator:** handlers `onTaskProposal`/`onTaskPatch`; `getCurrentTaskProposal`, `persistTaskProposal` (ids estáveis + `version`), `applyTaskPatch` (ops JSON-Patch cirúrgicas), `resolveFocusTask` (canal `task:<id>`); prompt injeta `KANBAN_TASKS`/`focusTask`/`currentTaskProposalJson`. **Persistência SEM migração** (reusa `BacklogChatMessage.proposal`).
+  - **Front:** `TaskProposalCard` (espelha `ProposalCard`) render via `renderMessageBody` no `StoryChatSheet`; clique → thread `task:<id>`; "Materializar em To Do" usa os títulos da proposta corrente (textarea manual removida); `openStorySession` devolve a `taskProposal` corrente semeada no store. ADR-0026 (adendo).
 
-
-- [x] 🟢 **US: Normalizar granularidade da decomposição de proposta do PO** _(finding: bug-proposal-decomp-inconsistent)_ — **CONCLUÍDA 2026-08-07 (prompt do PO tornado determinístico; validado via render do prompt)**
-  - **Causa-raiz:** o prompt do PO (`apps/api/src/modules/backlog-chat/skill/backlog-po.prompt.ts`) tratava `tasks` como "OPCIONAL — rascunhe se o humano pedir **OU se a decomposição for óbvia**". A cláusula subjetiva ("óbvia") + o `tasks` no JSON-template de exemplo faziam o modelo decidir caso a caso → EP-324 veio com tasks por story, EP-340/EP-344 sem tasks (granularidade desigual, não-determinística). Contraria ainda o ADR-0024, que define tasks como **sob demanda** (botão "✨ Sugerir tasks"), com refinamento no board.
-  - **O que foi feito** (mudança só de prompt, sem tocar contrato/schema):
-    - Regra de `tasks` reescrita para **determinística e alinhada ao ADR-0024**: padrão = **NÃO rascunhar tasks**; só incluir quando o humano **pedir explicitamente**; removida a cláusula "óbvia". Quando pedido, aplicar a MESMA decisão a **todas** as stories (todas com tasks ou nenhuma) → granularidade consistente.
-    - Removido o campo `"tasks"` do **JSON-template de exemplo** (era um nudge que induzia o modelo a incluí-lo); `affectedFlows` passou a ser o último campo (sem trailing comma).
-  - **Validação empírica:** render do prompt (`buildBacklogPrompt`) confirma: regra determinística "SOB DEMANDA" **presente**; template **não** mostra mais `"tasks"`; string "óbvia" **ausente**; JSON-template **estruturalmente válido** (sem trailing comma). `tsc api` ✔, `eslint` backlog-chat ✔, specs backlog-chat **10/10** ✔.
+- [x] 🟠 **Épico: Story sem tasks → In Progress (Caminho E + A) + rastreio Card↔Session** — **CONCLUÍDO 2026-08-10 (fleet: 4 tarefas; build+lint verdes; 62/62 specs backlog-chat+ai-engine)**
+  - **US Caminho E — badge "Precisa de você" no board:** o backend já marcava `needsHuman`/`needsHumanReason` + broadcast `card.needs_human`; o gap real era que o **`StoryCardContent`** (card de story no board principal) **não exibia o badge** (só o `MiniCardContent` exibia) — por isso "nada aparecia" ao puxar a story para In Progress. Adicionado o badge com o motivo acionável em `apps/web/src/features/board/components/BoardView.tsx`; clicar no card abre o `StoryModal` (que hospeda o "💬 Chat da história"). `useRealtime` já invalida `card`/`cards`/`loopState` no evento → re-render sem F5.
+  - **US Chat da story (Caminho A) + rastreio:** criado `Card.backlogChatSessionId` (migration `20260810182331_card_backlog_chat_session`, aplicada) preenchido no `apply` para épico/story/task; endpoints `POST /backlog-chat/story/:storyId/session` (reusa a sessão original se a story veio de backlog-chat, senão cria zerada) e `POST /backlog-chat/story/:storyId/tasks` (materializa tasks incrementais em To Do + limpa `needsHuman`). Threads por task (`task:<id>`) em `packages/shared`. UI `StoryChatSheet`/`useStoryChat` + botão "💬 Chat da história" no `StoryModal`. ADR-0026.
+  - **US Modal ao aprovar épico:** em `BacklogChatView.tsx`, ao aprovar, se houver stories sem tasks abre modal (Dialog) listando-as com "Criar tasks agora" (abre o chat/thread da story) ou "Aprovar mesmo assim" (com alerta do que acontece). Se todas têm tasks, aplica direto.
+  - **BUG tasks fantasma (sessão applied):** o guard do `apply` total continua bloqueando reaplicação; em sessão `applied` o "✨ Sugerir tasks" virou **"✨ Materializar tasks"** e redireciona ao `StoryChatSheet`, que cria cards reais via `/story/:id/tasks` (sem duplicar épico/stories) e invalida o board. "Aprovar" fica oculto em `applied`. Novo `resolveAppliedStoryCard(sessionId, title)` liga a story da proposta à story-card real do board.
+  - **FOLLOW-UP (2026-08-11) — 2 bugs do chat da story:** (1) **clique fechava tudo:** o overlay `modal-layer` fechava com qualquer clique borbulhado; como o `StoryChatSheet` (Radix Sheet em portal) é filho JSX do `StoryModal`, os eventos React sobem a árvore até o overlay. Fix: guard `backdropClose` (`event.target === event.currentTarget`) em todos os `modal-layer` de `BoardView.tsx` + os 2 de `App.tsx`. (2) **chat abria sem conhecer a story** (PO perguntava "qual é a história?"): sessão de story manual/zerada (Caminho B) não tinha history/proposta/focus. Fix: `resolveStoryCardContext(sessionId)` no orchestrator (resolve a única story-card vinculada via `Card.backlogChatSessionId`, com DoD/épico/tasks existentes) injetada como `storyCard` no `buildBacklogPrompt`, que agora renderiza o bloco "CHAT DE UMA STORY QUE JÁ EXISTE" instruindo o PO a **não** perguntar e já decompor em tasks. +4 specs (22/22 backlog-chat verdes); build+lint verdes.

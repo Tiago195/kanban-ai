@@ -12,6 +12,7 @@ import type {
   BacklogChatMessage,
   BacklogChatSessionSummary,
   BacklogProposal,
+  StoryChatSession,
 } from '@kanban-ai/shared';
 import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
 import { BacklogChatOrchestrator } from './backlog-chat.orchestrator';
@@ -20,10 +21,14 @@ import {
   backlogApplySchema,
   backlogMessageSchema,
   createBacklogSessionSchema,
+  materializeStoryTasksSchema,
+  resolveStoryCardSchema,
   type BacklogAnswerDto,
   type BacklogApplyDto,
   type BacklogMessageDto,
   type CreateBacklogSessionDto,
+  type MaterializeStoryTasksDto,
+  type ResolveStoryCardDto,
 } from './backlog-chat.schema';
 
 /**
@@ -98,5 +103,53 @@ export class BacklogChatController {
     @Body(new ZodValidationPipe(backlogApplySchema)) dto: BacklogApplyDto,
   ): Promise<{ cards: BacklogAppliedCard[] }> {
     return this.orchestrator.apply(cid, dto.version);
+  }
+
+  /**
+   * Resolve o card `type:story` do board materializado por esta sessão (já
+   * applied), casando pelo título da story da proposta. Habilita o redirect da
+   * thread da proposta para o "chat da story", onde a materialização de tasks
+   * cria cards de verdade (fecha o bug de "tasks fantasma"). Retorna 404 se
+   * nenhuma story-card correspondente existir.
+   */
+  @Post(':cid/story-card')
+  async resolveStoryCard(
+    @Param('cid') cid: string,
+    @Body(new ZodValidationPipe(resolveStoryCardSchema)) dto: ResolveStoryCardDto,
+  ): Promise<StoryChatSession> {
+    const resolved = await this.orchestrator.resolveAppliedStoryCard(cid, dto.title);
+    if (!resolved) throw new NotFoundException('story-card não encontrada para esta sessão');
+    return resolved;
+  }
+}
+
+/**
+ * Endpoints do "chat da story" (ADR-0026) — ancorados numa story-card do board,
+ * não numa sessão. Reusam o `BacklogChatOrchestrator`.
+ */
+@Controller('backlog-chat/story')
+export class BacklogStoryChatController {
+  constructor(private readonly orchestrator: BacklogChatOrchestrator) {}
+
+  /**
+   * Abre (ou reusa) a sessão de chat de uma story. Reusa a sessão original se a
+   * story veio de um backlog-chat; cria uma sessão zerada e vincula se a story é
+   * manual. Ver ADR-0026.
+   */
+  @Post(':storyId/session')
+  openSession(@Param('storyId') storyId: string): Promise<StoryChatSession> {
+    return this.orchestrator.openStorySession(storyId);
+  }
+
+  /**
+   * Materializa tasks rascunhadas no chat da story como cards `type:task` filhos
+   * em To Do. Limpa `needsHuman` da story ao criar ≥1 task. Ver ADR-0026.
+   */
+  @Post(':storyId/tasks')
+  materializeTasks(
+    @Param('storyId') storyId: string,
+    @Body(new ZodValidationPipe(materializeStoryTasksSchema)) dto: MaterializeStoryTasksDto,
+  ): Promise<{ cards: BacklogAppliedCard[] }> {
+    return this.orchestrator.materializeStoryTasks(storyId, dto.titles);
   }
 }

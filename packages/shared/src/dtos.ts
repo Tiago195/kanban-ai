@@ -19,6 +19,14 @@ export interface CreateCardDto {
   /** Coluna do mini-kanban (task) — obrigatória p/ task. */
   taskColumnId?: string;
   points?: StoryPoints | null;
+  /** Story: caminho absoluto do repositório-alvo (aiProject) do loop engine. */
+  aiProject?: string;
+  /** Story: resumo de contexto de AI. */
+  aiSummary?: string;
+  /** Story: notas de AI. */
+  aiNotes?: string;
+  /** Loop profile do card (validado contra profiles builtin/custom). */
+  loopType?: string;
 }
 
 /** Payload para mover um card entre colunas (PATCH /cards/:id/move). */

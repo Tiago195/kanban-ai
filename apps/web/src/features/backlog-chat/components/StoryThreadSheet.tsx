@@ -16,6 +16,18 @@ export interface StoryThreadSheetProps {
   story: BacklogProposalStory | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * `true` quando a sessão já foi aplicada no board. Nesse estado, rascunhar
+   * tasks na proposta não materializa nada (bug "tasks fantasma"): a thread
+   * redireciona para o "chat da story" via {@link onMaterializeTasks}.
+   */
+  applied?: boolean;
+  /**
+   * Solicita abrir o "chat da story" para materializar tasks de verdade numa
+   * sessão applied. O consumidor resolve a story-card do board (pelo título) e
+   * abre o `StoryChatSheet`. Recebe o título da story da proposta.
+   */
+  onMaterializeTasks?: (story: BacklogProposalStory) => void;
 }
 
 /**
@@ -33,6 +45,8 @@ export function StoryThreadSheet({
   story,
   open,
   onOpenChange,
+  applied,
+  onMaterializeTasks,
 }: StoryThreadSheetProps) {
   const channel = backlogStoryChannel(story?.id ?? "");
 
@@ -66,7 +80,15 @@ export function StoryThreadSheet({
   };
 
   const handleSuggestTasks = () => {
-    if (busy || !story) return;
+    if (!story) return;
+    // Sessão applied: rascunhar tasks na proposta NÃO cria cards (tasks
+    // fantasma). Redireciona para o "chat da story", onde a materialização
+    // incremental cria cards type:task de verdade em To Do.
+    if (applied) {
+      onMaterializeTasks?.(story);
+      return;
+    }
+    if (busy) return;
     // Pede à IA para decompor ESTA story em tasks. O prompt (thread focada) já
     // instrui a preferir um PATCH cirúrgico em /stories/<i>/tasks, então a
     // proposta reflete as tasks em tempo real (via backlog.proposal WS).
@@ -130,10 +152,15 @@ export function StoryThreadSheet({
                 <button
                   type="button"
                   className="story-detail-suggest"
-                  disabled={busy}
+                  disabled={applied ? false : busy}
                   onClick={handleSuggestTasks}
+                  title={
+                    applied
+                      ? "Materializar tasks desta história no board (chat da story)"
+                      : "Pedir à IA para rascunhar tasks nesta história"
+                  }
                 >
-                  ✨ Sugerir tasks
+                  {applied ? "✨ Materializar tasks" : "✨ Sugerir tasks"}
                 </button>
               </div>
               {story?.tasks && story.tasks.length > 0 ? (
@@ -147,8 +174,9 @@ export function StoryThreadSheet({
                 </ul>
               ) : (
                 <p className="story-detail-empty">
-                  Nenhuma task rascunhada. As tasks viram cards no board ao aplicar o backlog;
-                  o DoD é montado depois, direto no board.
+                  {applied
+                    ? "Esta sessão já virou cards no board. Para criar novas tasks nesta história, use “✨ Materializar tasks” — elas viram cards type:task em To Do."
+                    : "Nenhuma task rascunhada. As tasks viram cards no board ao aplicar o backlog; o DoD é montado depois, direto no board."}
                 </p>
               )}
             </section>

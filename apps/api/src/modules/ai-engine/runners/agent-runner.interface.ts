@@ -115,6 +115,14 @@ export interface AgentRunResult {
    * `detail` da iteração para rastreabilidade.
    */
   evidence?: string | StructuredEvidence;
+  /**
+   * BUG-A7: erro FATAL de infraestrutura (spawn falhou, modelo indisponível,
+   * não autenticado, crash da CLI). Quando presente, esta "iteração" NÃO
+   * representa trabalho da AI: o orchestrator deve escalar a humano e PARAR o
+   * loop (fail-fast), em vez de contá-la como iteração normal (que queimaria o
+   * cap) ou como `done` (que fecharia a task por engano).
+   */
+  fatalError?: string;
 }
 
 /** Interface plugável do runner. */

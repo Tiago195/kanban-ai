@@ -349,6 +349,9 @@ export class CardsService {
           ...(dto.aiSummary !== undefined ? { aiSummary: dto.aiSummary } : {}),
           ...(dto.aiProject !== undefined ? { aiProject: dto.aiProject } : {}),
           ...(dto.aiNotes !== undefined ? { aiNotes: dto.aiNotes } : {}),
+          ...(dto.backlogChatSessionId !== undefined
+            ? { backlogChatSessionId: dto.backlogChatSessionId }
+            : {}),
           ...(dto.type === 'task'
             ? { taskColumnId }
             : { boardColumnId }),
@@ -357,7 +360,50 @@ export class CardsService {
     });
 
     this.realtime.broadcast({ type: 'card.created', card: card as never });
+
+    // BUG-09: quando uma task é adicionada a uma story que JÁ está em In Progress,
+    // o loop engine precisa retomar — antes ele ficava parado (a story tinha 0
+    // tasks quando entrou em In Progress, ou o auto-play já havia encerrado
+    // graceful). Detectamos esse caso e re-disparamos o loop (idempotente).
+    if (dto.type === 'task' && card.parentId) {
+      await this.maybeResumeLoopOnTaskAdded(card.parentId);
+    }
+
     return card;
+  }
+
+  /**
+   * BUG-09: se a story-pai está numa coluna "In Progress" do board (lane de
+   * board, não de task), reativa o loop engine ao ganhar uma nova task. Também
+   * limpa o flag `needsHuman` que o guard de "story sem tasks" (BUG-08) possa
+   * ter setado, para que a retomada não fique presa no badge "Precisa de você".
+   * `onStoryEnterInProgress` é idempotente (se já houver sessão ativa, é no-op).
+   */
+  private async maybeResumeLoopOnTaskAdded(storyId: string): Promise<void> {
+    const story = await this.prisma.card.findUnique({
+      where: { id: storyId },
+      select: {
+        id: true,
+        type: true,
+        needsHuman: true,
+        boardColumn: { select: { isTaskColumn: true, title: true } },
+      },
+    });
+    if (!story || story.type !== 'story') return;
+
+    const inProgress =
+      story.boardColumn?.isTaskColumn === false &&
+      story.boardColumn?.title === 'In Progress';
+    if (!inProgress) return;
+
+    if (story.needsHuman) {
+      await this.prisma.card.update({
+        where: { id: storyId },
+        data: { needsHuman: false, needsHumanReason: null },
+      });
+    }
+
+    await this.orchestrator.onStoryEnterInProgress(storyId);
   }
 
   /**
@@ -454,6 +500,16 @@ export class CardsService {
       const isTaskBoard = toColumn.isTaskColumn;
       const fromColumnId = isTaskBoard ? card.taskColumnId : card.boardColumnId;
 
+      // BUG-A8: capturamos o título da coluna de origem para detectar quando uma
+      // story SAI de "In Progress" — assim o orchestrator pode liberar a sessão
+      // e destravar a serialização por aiProject (hook simétrico ao enter).
+      const fromColumn = fromColumnId
+        ? await tx.column.findUnique({
+            where: { id: fromColumnId },
+            select: { title: true, isTaskColumn: true },
+          })
+        : null;
+
       // Coleta os cards atuais da coluna de destino (exceto o próprio), ordenados.
       const destCards = await tx.card.findMany({
         where: isTaskBoard
@@ -507,7 +563,7 @@ export class CardsService {
         }
       }
 
-      return { card, toColumn, fromColumnId, isTaskBoard, everInProgress };
+      return { card, toColumn, fromColumn, fromColumnId, isTaskBoard, everInProgress };
     });
 
     this.realtime.broadcast({
@@ -529,6 +585,19 @@ export class CardsService {
       this.realtime.broadcast({ type: 'story.entered_in_progress', storyId: id });
       // Acorda o loop engine (auto-play server-side).
       await this.orchestrator.onStoryEnterInProgress(id);
+    }
+
+    // BUG-A8: story SAIU de "In Progress" (movida para Done/Review/To Do/Backlog).
+    // Libera a sessão em memória e destrava a serialização por aiProject, para
+    // que outra story do mesmo repo-alvo não fique bloqueada por uma sessão
+    // fantasma. Hook simétrico ao onStoryEnterInProgress.
+    if (
+      !result.isTaskBoard &&
+      result.card.type === 'story' &&
+      result.fromColumn?.title?.trim().toLowerCase() === 'in progress' &&
+      result.toColumn.title.trim().toLowerCase() !== 'in progress'
+    ) {
+      this.orchestrator.onStoryLeaveInProgress(id);
     }
 
     // Recomputa e emite o status do epic pai (para stories).

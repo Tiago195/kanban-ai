@@ -171,4 +171,15 @@ export class AgentSessionManager {
   get activeCount(): number {
     return [...this.sessions.values()].filter((s) => s.state === 'running').length;
   }
+
+  /**
+   * Ids de todas as stories com sessão ativa (qualquer estado exceto dead).
+   * Usado pela SERIALIZAÇÃO do orchestrator para detectar duas stories rodando
+   * sobre o mesmo repo-alvo (aiProject).
+   */
+  activeStoryIds(): string[] {
+    return [...this.sessions.values()]
+      .filter((s) => s.state !== 'dead')
+      .map((s) => s.storyId);
+  }
 }

@@ -335,7 +335,12 @@ function AgentsModal({ boardId, onClose }: { boardId: string | null; onClose: ()
   };
 
   return (
-    <div className="modal-layer" onClick={onClose}>
+    <div
+      className="modal-layer"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <div className="modal-panel" onClick={(event) => event.stopPropagation()}>
         <div className="kb-modal">
           <div className="modal-header">
@@ -584,7 +589,12 @@ function LoopsModal({ boardId, onClose }: { boardId: string | null; onClose: () 
   };
 
   return (
-    <div className="modal-layer" onClick={onClose}>
+    <div
+      className="modal-layer"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <div className="modal-panel" onClick={(event) => event.stopPropagation()} style={{ maxWidth: 640 }}>
         <div className="kb-modal">
           <div className="modal-header">

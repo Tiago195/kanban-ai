@@ -8,7 +8,7 @@
 
 import type { AgentSessionState, ExecState } from './enums';
 import type { AffectedFlow, Card, Iteration } from './domain';
-import type { BacklogProposal } from './backlog-chat';
+import type { BacklogProposal, BacklogTaskProposal } from './backlog-chat';
 
 /** Status derivado de um epic a partir das stories filhas. */
 export type EpicDerivedStatus = 'todo' | 'inprogress' | 'done';
@@ -245,6 +245,32 @@ export interface BacklogProposalEvent {
   proposal: BacklogProposal;
 }
 
+/**
+ * A AI emitiu (ou atualizou via patch) a **proposta de tasks** de uma story
+ * dentro do chat da story (ADR-0026). Carrega a versão corrente completa; o front
+ * renderiza/atualiza a lista de tasks clicáveis in-place. Escopada por sessão de
+ * story (`Card.backlogChatSessionId`).
+ */
+export interface BacklogTaskProposalEvent {
+  type: 'backlog.task_proposal';
+  sessionId: string;
+  taskProposal: BacklogTaskProposal;
+}
+
+/**
+ * O turno do chat de backlog TERMINOU (o subprocesso da CLI encerrou), sem
+ * necessariamente ter emitido `proposal`/`question`. Marca o fim do streaming
+ * daquele canal para que a UI possa desligar o indicador "ainda trabalhando".
+ * Sem este evento, um turno que emite apenas `output` deixaria o `streaming`
+ * ligado para sempre. Ver relatório de QA (BUG-01).
+ */
+export interface BacklogTurnDoneEvent {
+  type: 'backlog.turn_done';
+  sessionId: string;
+  /** Canal (thread) cujo turno terminou: `main` ou `story:<id>`. */
+  channel: string;
+}
+
 /** Keep-alive. */
 export interface PingEvent {
   type: 'ping';
@@ -307,6 +333,8 @@ export type ServerEvent =
   | BacklogQuestionEvent
   | BacklogAnsweredEvent
   | BacklogProposalEvent
+  | BacklogTaskProposalEvent
+  | BacklogTurnDoneEvent
   | CommentCreatedEvent
   | BoardUpdatedEvent
   | CardNeedsHumanEvent

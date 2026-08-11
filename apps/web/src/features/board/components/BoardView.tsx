@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -27,6 +27,7 @@ import type { ChatPanelMessage } from "@/features/ai-engine";
 import { useAgentChatStore } from "@/features/ai-engine/services/agentChatStore";
 import { useBoard, useCards, useCreateCard, useDeleteCard, useModels, useMoveCard, usePrimaryBoardId } from "@/features/board/hooks";
 import { useBoardUiStore } from "@/features/board/services";
+import { StoryChatSheet } from "@/features/backlog-chat";
 import { useCardLabels, LABEL_PALETTE } from "@/features/labels";
 import { useCard, useDodMutations, useFlows, useUpdateCard } from "@/features/stories";
 import {
@@ -229,6 +230,14 @@ function StoryCardContent({ card }: { card: ApiCardSummary }) {
         <span className="card-key">{card.key}</span>
         {card.blocked ? <span className="blocked-flag">⛔</span> : null}
         {card.points != null ? <span className="points-badge">{card.points}</span> : null}
+        {card.needsHuman ? (
+          <span
+            className="needs-human-badge"
+            title={card.needsHumanReason ?? "Precisa de você — abra a história para criar tasks no chat da story."}
+          >
+            🙋 precisa de você
+          </span>
+        ) : null}
       </div>
       <div className="card-title">{card.title}</div>
       {hasDescription ? (
@@ -696,6 +705,19 @@ function ActivitySection({ card }: { card: ApiCardDetails }) {
   );
 }
 
+/**
+ * Handler para o overlay (backdrop) de um modal: só fecha quando o clique é no
+ * próprio backdrop, não em eventos que borbulham de filhos. Portais do Radix
+ * (Sheet/Dialog/Select) renderizam no `body` mas mantêm o bubbling pela árvore
+ * React até o overlay — sem este guard, interagir com um Sheet/dropdown dentro
+ * do modal fecharia o modal. Ver ADR-0026.
+ */
+function backdropClose(onClose: () => void) {
+  return (event: MouseEvent) => {
+    if (event.target === event.currentTarget) onClose();
+  };
+}
+
 function ModalPanel({ level, children }: { level?: "epic" | "task"; children: ReactNode }) {
   const cls = level === "epic" ? "modal-panel lvl-epic" : level === "task" ? "modal-panel lvl-task" : "modal-panel";
   return (
@@ -864,6 +886,7 @@ function EpicModal({
         <div className="modal-title-row">
           <input
             className="card-title-input"
+            data-testid="epic-title-input"
             value={title}
             placeholder="Título do épico"
             onChange={(event) => setTitle(event.target.value)}
@@ -880,6 +903,7 @@ function EpicModal({
           <div className="modal-section-title">Descrição</div>
           <textarea
             className="card-desc-input"
+            data-testid="epic-desc-input"
             rows={3}
             value={description}
             placeholder="Descreva o objetivo do épico…"
@@ -987,7 +1011,7 @@ function CreateEpicModal({
   };
 
   return (
-    <div className="modal-layer" onClick={onClose}>
+    <div className="modal-layer" onClick={backdropClose(onClose)}>
       <div className="modal-panel lvl-epic" onClick={(event) => event.stopPropagation()}>
         <div className="kb-modal">
           <div className="modal-header">
@@ -999,6 +1023,7 @@ function CreateEpicModal({
               <input
                 ref={titleRef}
                 className="card-title-input"
+                data-testid="create-epic-title"
                 value={title}
                 placeholder="Título do épico (obrigatório)"
                 onChange={(event) => setTitle(event.target.value)}
@@ -1019,6 +1044,7 @@ function CreateEpicModal({
               <div className="modal-section-title">Descrição</div>
               <textarea
                 className="card-desc-input"
+                data-testid="create-epic-desc"
                 rows={4}
                 value={description}
                 placeholder="Descreva o objetivo do épico…"
@@ -1047,6 +1073,7 @@ function CreateStoryModal({
   boardColumns,
   columnId,
   parentId,
+  epics,
   onClose,
   onCreated,
 }: {
@@ -1054,6 +1081,7 @@ function CreateStoryModal({
   boardColumns: ApiBoardColumn[];
   columnId: string;
   parentId: string | null;
+  epics: ApiCardSummary[];
   onClose: () => void;
   onCreated: (storyId: string) => void;
 }) {
@@ -1062,8 +1090,16 @@ function CreateStoryModal({
     (column) => !column.isTaskColumn && (column.title === "Backlog" || column.title === "To Do"),
   );
 
+  // BUG-A5: quando a história é criada a partir do board (não de dentro de um
+  // épico), `parentId` chega null e a story nasce órfã, violando a hierarquia
+  // Epic→Story. Só oferecemos o seletor de épico nesse caso; quando aberto de
+  // dentro de um épico, `parentId` já vem fixado.
+  const fixedParent = parentId != null;
+  const [selectedEpic, setSelectedEpic] = useState<string>(parentId ?? "");
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [aiProject, setAiProject] = useState("");
   const [points, setPoints] = useState<StoryPoints>(1);
   const [selectedColumn, setSelectedColumn] = useState<string>(columnId || creatableColumns[0]?.id || "");
 
@@ -1076,15 +1112,17 @@ function CreateStoryModal({
 
   const submit = () => {
     if (!canSubmit) return;
+    const effectiveParent = fixedParent ? parentId : selectedEpic || undefined;
     createCard.mutate(
       {
         dto: {
           boardId,
           type: "story",
-          parentId: parentId ?? undefined,
+          parentId: effectiveParent ?? undefined,
           columnId: selectedColumn,
           title: title.trim(),
           description: description.trim() || undefined,
+          aiProject: aiProject.trim() || undefined,
           points,
         },
       },
@@ -1095,7 +1133,7 @@ function CreateStoryModal({
   };
 
   return (
-    <div className="modal-layer" onClick={onClose}>
+    <div className="modal-layer" onClick={backdropClose(onClose)}>
       <div className="modal-panel lvl-story" onClick={(event) => event.stopPropagation()}>
         <div className="kb-modal">
           <div className="modal-header">
@@ -1107,6 +1145,7 @@ function CreateStoryModal({
               <input
                 ref={titleRef}
                 className="card-title-input"
+                data-testid="create-story-title"
                 value={title}
                 placeholder="Título da história (obrigatório)"
                 onChange={(event) => setTitle(event.target.value)}
@@ -1117,7 +1156,7 @@ function CreateStoryModal({
                   }
                 }}
               />
-              <button className="modal-close" onClick={onClose} aria-label="Fechar">
+              <button className="modal-close" data-testid="modal-close" onClick={onClose} aria-label="Fechar">
                 ✕
               </button>
             </div>
@@ -1125,6 +1164,24 @@ function CreateStoryModal({
           <div className="modal-body">
             <div className="modal-section">
               <div className="field-row">
+                {!fixedParent ? (
+                  <div className="field">
+                    <label>Épico (pai)</label>
+                    <select
+                      className="select-inline"
+                      data-testid="create-story-epic"
+                      value={selectedEpic}
+                      onChange={(event) => setSelectedEpic(event.target.value)}
+                    >
+                      <option value="">— sem épico —</option>
+                      {epics.map((epic) => (
+                        <option key={epic.id} value={epic.id}>
+                          {epic.key} · {epic.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
                 <div className="field">
                   <label>Coluna</label>
                   <select
@@ -1159,10 +1216,21 @@ function CreateStoryModal({
               <div className="modal-section-title">Descrição</div>
               <textarea
                 className="card-desc-input"
+                data-testid="create-story-desc"
                 rows={4}
                 value={description}
                 placeholder="Como um <usuário>, quero <objetivo>, para <benefício>…"
                 onChange={(event) => setDescription(event.target.value)}
+              />
+            </div>
+            <div className="modal-section">
+              <div className="modal-section-title">Projeto de AI (aiProject)</div>
+              <input
+                className="card-title-input"
+                data-testid="create-story-aiproject"
+                value={aiProject}
+                placeholder="Caminho absoluto do repositório-alvo (opcional; herdado do épico se vazio)"
+                onChange={(event) => setAiProject(event.target.value)}
               />
             </div>
             <div className="modal-section">
@@ -1235,7 +1303,7 @@ function CreateTaskModal({
   };
 
   return (
-    <div className="modal-layer depth-3" onClick={onClose}>
+    <div className="modal-layer depth-3" onClick={backdropClose(onClose)}>
       <div className="modal-panel lvl-task" onClick={(event) => event.stopPropagation()}>
         <div className="kb-modal">
           <div className="modal-header">
@@ -1247,6 +1315,7 @@ function CreateTaskModal({
               <input
                 ref={titleRef}
                 className="card-title-input"
+                data-testid="create-task-title"
                 value={title}
                 placeholder="Título da task (obrigatório)"
                 onChange={(event) => setTitle(event.target.value)}
@@ -1286,6 +1355,7 @@ function CreateTaskModal({
               <div className="modal-section-title">Descrição</div>
               <textarea
                 className="card-desc-input"
+                data-testid="create-task-desc"
                 rows={4}
                 value={description}
                 placeholder="Descreva o que a task precisa entregar…"
@@ -1338,6 +1408,7 @@ function StoryModal({
   const [aiNotes, setAiNotes] = useState("");
   const [flowName, setFlowName] = useState("");
   const [createTaskColumnId, setCreateTaskColumnId] = useState<string | null | undefined>(undefined);
+  const [chatOpen, setChatOpen] = useState(false);
 
   useEffect(() => {
     if (!story) return;
@@ -1395,6 +1466,7 @@ function StoryModal({
         <div className="modal-title-row">
           <input
             className="card-title-input"
+            data-testid="story-title-input"
             value={title}
             placeholder="Título da história"
             onChange={(event) => setTitle(event.target.value)}
@@ -1441,6 +1513,7 @@ function StoryModal({
           <div className="modal-section-title">Descrição</div>
           <textarea
             className="card-desc-input"
+            data-testid="story-desc-input"
             rows={3}
             value={description}
             placeholder="Como um <usuário>, quero <objetivo>, para <benefício>…"
@@ -1539,6 +1612,14 @@ function StoryModal({
             <button className="kb-btn kb-btn-ghost kb-btn-sm" style={{ marginLeft: "auto" }} data-testid="board-add-task" onClick={createTask}>
               + Task
             </button>
+            <button
+              className="kb-btn kb-btn-ghost kb-btn-sm"
+              data-testid="story-open-chat"
+              title="Refine e crie tasks conversando com a IA nesta história"
+              onClick={() => setChatOpen(true)}
+            >
+              💬 Chat da história
+            </button>
           </div>
           <MiniKanban
             boardId={boardId}
@@ -1563,6 +1644,13 @@ function StoryModal({
         <DangerZoneSection boardId={boardId} card={story} onDeleted={onClose} />
       </div>
     </ModalPanel>
+      <StoryChatSheet
+        storyId={chatOpen ? story.id : null}
+        storyTitle={story.title}
+        boardId={boardId}
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+      />
       {createTaskColumnId !== undefined ? (
         <CreateTaskModal
           boardId={boardId}
@@ -1749,6 +1837,7 @@ function TaskModal({
         <div className="modal-title-row">
           <input
             className="card-title-input"
+            data-testid="task-title-input"
             value={title}
             placeholder="Título da task"
             onChange={(event) => setTitle(event.target.value)}
@@ -1764,6 +1853,7 @@ function TaskModal({
           <div className="modal-section-title">Descrição</div>
           <textarea
             className="card-desc-input"
+            data-testid="task-desc-input"
             rows={3}
             value={description}
             placeholder="Descrição da task…"
@@ -2154,7 +2244,7 @@ export function BoardView() {
       </DndContext>
 
       {openModals > 0 ? (
-        <div className={modalLayerClass} onClick={closeAllModals}>
+        <div className={modalLayerClass} onClick={backdropClose(closeAllModals)}>
           {modals.epicId ? (
             <EpicModal
               boardId={boardId}
@@ -2209,6 +2299,7 @@ export function BoardView() {
           boardColumns={board?.columns ?? []}
           columnId={createStoryCtx.columnId}
           parentId={createStoryCtx.parentId}
+          epics={epics}
           onClose={() => setCreateStoryCtx(null)}
           onCreated={(storyId) => {
             setCreateStoryCtx(null);

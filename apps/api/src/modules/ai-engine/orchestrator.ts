@@ -107,6 +107,24 @@ export class Orchestrator implements OnModuleInit {
       return;
     }
 
+    // SERIALIZAÇÃO por aiProject: como o agent agora coda DIRETO no working tree
+    // do repo-alvo (sem worktree isolado), duas stories apontando para o mesmo
+    // aiProject se sobrescreveriam. Se já houver outra story ativa no mesmo
+    // repo-alvo, adiamos esta — só uma story In Progress por aiProject.
+    const conflictStoryId = await this.findActiveStoryOnSameProject(storyId);
+    if (conflictStoryId) {
+      this.logger.warn(
+        `Serialização: story=${storyId} compartilha aiProject com story=${conflictStoryId} ` +
+          '(já ativa). Adiando até a outra concluir.',
+      );
+      await this.log(
+        storyId,
+        `aguardando serialização — outra story (${conflictStoryId}) já está trabalhando no mesmo ` +
+          'repositório-alvo (aiProject). Esta story iniciará quando a anterior sair de In Progress.',
+      );
+      return;
+    }
+
     const session = this.sessions.start(storyId);
     this.realtime.broadcast({
       type: 'agent.session.state_changed',
@@ -117,7 +135,94 @@ export class Orchestrator implements OnModuleInit {
 
     this.startWatchdog(storyId);
     await this.log(storyId, 'história em In Progress — motor de AI acordado');
+
+    // BUG-08 / IMP-01: uma story SEM tasks filhas faria o auto-play encerrar
+    // graceful e silencioso (stepStory retorna false com tasks.length===0),
+    // dando a impressão de que "nada aconteceu". Em vez disso, damos feedback
+    // explícito: marcamos a story como `needsHuman` e emitimos `card.needs_human`
+    // para a UI exibir o badge "Precisa de você" com um motivo acionável.
+    // Encerramos limpo, sem gastar tokens numa iteração impossível.
+    const tasks = await this.loadStoryTasks(storyId);
+    if (tasks.length === 0) {
+      const reason =
+        'Story sem tasks: o loop engine não tem o que executar. ' +
+        'Adicione ao menos uma task (nas colunas Backlog/To Do) e mova a story ' +
+        'para In Progress novamente.';
+      await this.prisma.card.update({
+        where: { id: storyId },
+        data: { needsHuman: true, needsHumanReason: reason },
+      });
+      this.realtime.broadcast({
+        type: 'card.needs_human',
+        taskId: storyId,
+        storyId,
+        reason,
+      });
+      await this.log(storyId, reason);
+      this.finishAuto(storyId, 'graceful');
+      return;
+    }
+
     this.startAuto(storyId);
+  }
+
+  /**
+   * Disparado quando uma story SAI de "In Progress" (arrastada para Done,
+   * Review, To Do, Backlog, etc.). BUG-A8: sem este hook simétrico ao
+   * `onStoryEnterInProgress`, a sessão em memória permanecia no registry mesmo
+   * após a story sair de In Progress (o `finishAuto` só era chamado pelo próprio
+   * loop ao concluir todas as tasks ou pelo watchdog). Uma story concluída e
+   * movida para Done — ou qualquer saída manual — deixava a sessão "fantasma"
+   * viva, e `findActiveStoryOnSameProject` bloqueava indefinidamente qualquer
+   * outra story do mesmo aiProject até reiniciar a API.
+   *
+   * Agora liberamos o slot explicitamente: `finishAuto` para o auto-play,
+   * remove a sessão, limpa o watchdog e destrava (via `resumeDeferredForProject`)
+   * a próxima story pendente do mesmo repo-alvo. Idempotente: se não houver
+   * sessão/timer, é no-op.
+   */
+  onStoryLeaveInProgress(storyId: string): void {
+    const hasSession = !!this.sessions.get(storyId);
+    const hasTimer = this.autoTimers.has(storyId);
+    if (!hasSession && !hasTimer) return; // nada a liberar
+    this.finishAuto(storyId, 'graceful');
+  }
+
+  /**
+   * Retorna o id de uma story que já está em execução (sessão ativa) no mesmo
+   * repo-alvo (aiProject) da `storyId` dada, ou `null` se não houver conflito.
+   * Sem aiProject resolvido, não há como colidir — retorna null.
+   */
+  private async findActiveStoryOnSameProject(storyId: string): Promise<string | null> {
+    const target = await this.resolveStoryProject(storyId);
+    if (!target) return null;
+    for (const activeId of this.sessions.activeStoryIds()) {
+      if (activeId === storyId) continue;
+      const otherTarget = await this.resolveStoryProject(activeId);
+      if (otherTarget && otherTarget === target) return activeId;
+    }
+    return null;
+  }
+
+  /**
+   * Resolve o caminho absoluto do repo-alvo (aiProject) de uma story, herdando
+   * do épico pai quando a story não tem aiProject próprio (mesma regra do
+   * buildContext). Retorna null se não houver aiProject.
+   */
+  private async resolveStoryProject(storyId: string): Promise<string | null> {
+    const story = await this.prisma.card.findUnique({
+      where: { id: storyId },
+      select: { aiProject: true, parentId: true },
+    });
+    let raw = story?.aiProject ?? '';
+    if (!raw && story?.parentId) {
+      const epic = await this.prisma.card.findUnique({
+        where: { id: story.parentId },
+        select: { aiProject: true },
+      });
+      raw = epic?.aiProject ?? '';
+    }
+    return this.workspaces.resolveTargetRepo(raw);
   }
 
   // ── Loop core ───────────────────────────────────────────────────────────────
@@ -192,32 +297,35 @@ export class Orchestrator implements OnModuleInit {
       files: context.files,
     };
 
-    // #8: worktree ISOLADO no repo-alvo (aiProject). Se o projeto-alvo não
-    // estiver definido/for inválido, RECUSAMOS rodar — o agent nunca pode
-    // trabalhar no repo do kanban-ai. A task fica em blocked-dep com log claro.
+    // Diretório de trabalho do agent = o PRÓPRIO repo-alvo (aiProject). O agent
+    // coda direto na branch já aberta, sem worktree isolado nem branch/commit —
+    // deixando as mudanças no working tree do projeto. A colisão entre stories
+    // concorrentes do mesmo repo é resolvida por SERIALIZAÇÃO em
+    // onStoryEnterInProgress (uma story In Progress por aiProject). Se o
+    // projeto-alvo não estiver definido/for inválido, RECUSAMOS rodar — o agent
+    // nunca pode trabalhar no repo do kanban-ai. A task fica em blocked-dep.
     let cwd = '';
     try {
-      cwd = await this.workspaces.ensureWorktree(storyId, context.project);
+      cwd = await this.workspaces.resolveWorkdir(storyId, context.project);
     } catch (err) {
       const msg = (err as Error).message;
       if (err instanceof TargetProjectError) {
         await this.log(
           taskId,
           `iteração recusada — projeto-alvo inválido/ausente: ${msg}. ` +
-            'Defina o repositório-alvo (aiProject) da story para o agent poder trabalhar isolado.',
+            'Defina o repositório-alvo (aiProject) da story para o agent poder trabalhar.',
         );
         await this.setExecState(taskId, 'blocked-dep');
         return false;
       }
-      // Qualquer outra falha ao preparar o worktree (ex.: erro do git) também
-      // impede o agent de trabalhar isolado. NUNCA seguimos com cwd vazio — isso
-      // rodaria o agent no diretório da API (apps/api) e causaria "Permission
-      // denied" ao tocar no projeto-alvo. Recusamos e deixamos a task bloqueada.
-      this.logger.warn(`Falha ao preparar worktree para story=${storyId}: ${msg}`);
+      // Qualquer outra falha ao resolver o workdir (ex.: erro do git) também
+      // impede o agent de trabalhar. NUNCA seguimos com cwd vazio — isso rodaria
+      // o agent no diretório da API (apps/api). Recusamos e bloqueamos a task.
+      this.logger.warn(`Falha ao resolver workdir para story=${storyId}: ${msg}`);
       await this.log(
         taskId,
-        `iteração recusada — falha ao preparar workspace isolado: ${msg}. ` +
-          'O agent não pode rodar sem um worktree do repositório-alvo.',
+        `iteração recusada — falha ao resolver o diretório de trabalho: ${msg}. ` +
+          'O agent não pode rodar sem o repositório-alvo válido.',
       );
       await this.setExecState(taskId, 'blocked-dep');
       return false;
@@ -343,6 +451,36 @@ export class Orchestrator implements OnModuleInit {
     // em ambos os call sites de appendIteration abaixo.
     const iterationDiff = await this.captureDiff(cwd);
 
+    // BUG-A7: ERRO FATAL de infraestrutura (spawn falhou, modelo indisponível,
+    // não autenticado, crash da CLI). Esta "iteração" NÃO é trabalho da AI —
+    // não pode virar `done` (fecharia a task por engano) nem iteração `ok`
+    // silenciosa (o loop iteraria até o cap, mascarando a causa raiz). Fail-fast:
+    // registramos a iteração como falha explícita, escalamos a humano com o
+    // motivo real e PARAMOS o loop.
+    if (runResult.fatalError) {
+      const reason = `Erro fatal de execução do agente: ${runResult.fatalError}`;
+      await this.appendIteration(taskId, {
+        phase,
+        agentId,
+        detail: runResult.detail,
+        summary: runResult.summary || 'erro fatal de execução',
+        dodTouched: [],
+        handoff: {
+          state: 'blocked',
+          nextStep: 'Resolver o erro de infraestrutura/execução e reprocessar.',
+          files: context.files,
+          dodIds: [],
+        },
+        evidence: evidenceToString(runResult.evidence),
+        diff: iterationDiff,
+        durationMs: Date.now() - iterationStartedAt,
+        outcome: 'error',
+      });
+      await this.log(taskId, reason);
+      await this.escalateToHuman(taskId, storyId, reason, reason);
+      return false;
+    }
+
     // DOD nasce na ANÁLISE. Se a task ainda não tem checklist, criamos os
     // DodItems a partir do que a AI propôs (`runResult.proposedDod`). Se a AI
     // não propôs nada (ex.: mock), aplicamos um fallback determinístico para
@@ -456,14 +594,14 @@ export class Orchestrator implements OnModuleInit {
       return true;
     }
 
-    // Guard anti-bypass do worktree (bug-hallucinated-loop): na fase de
-    // implementação, se a AI relata progresso (marcou DOD, declarou `done` ou
-    // listou `affectedFlows`) mas o `git diff` do worktree está VAZIO, então o
-    // trabalho não aterrissou no worktree isolado — sintoma de o agent ter
-    // escrito FORA do `cwd` (ex.: `cd` para o repo-alvo original). Nesse caso
-    // NÃO aceitamos o progresso: ignoramos o DOD reportado e registramos um
-    // desvio, para o loop corrigir em vez de avançar sobre trabalho fantasma.
-    // (runner mock não produz diff real — só aplicamos ao runner de verdade.)
+    // Guard anti-progresso-fantasma: na fase de implementação, se a AI relata
+    // progresso (marcou DOD, declarou `done` ou listou `affectedFlows`) mas o
+    // `git diff` do repo-alvo está VAZIO, então nenhuma mudança aterrissou no
+    // working tree — o "progresso" é alucinado. Nesse caso NÃO aceitamos:
+    // ignoramos o DOD reportado e registramos um desvio, para o loop corrigir
+    // em vez de avançar sobre trabalho inexistente. O agent coda direto no
+    // repo-alvo (sem worktree), então um diff vazio é sinal confiável de que
+    // nada foi escrito. (runner mock não produz diff real — só aplicamos ao real.)
     const reportedProgress =
       (runResult.dodTouched ?? []).filter(Boolean).length > 0 ||
       runResult.done === true ||
@@ -476,9 +614,9 @@ export class Orchestrator implements OnModuleInit {
     if (emptyWorktreeBypass) {
       await this.log(
         taskId,
-        'desvio detectado: a AI relatou progresso mas o git diff do worktree está VAZIO. ' +
-          'Provável escrita FORA do diretório de trabalho (cwd). O progresso foi IGNORADO — ' +
-          'faça todas as mudanças no diretório atual (não use `cd` para outro caminho).',
+        'desvio detectado: a AI relatou progresso mas o git diff do repo-alvo está VAZIO. ' +
+          'Nenhuma mudança foi escrita nos arquivos. O progresso foi IGNORADO — ' +
+          'edite de fato os arquivos do projeto no diretório atual antes de marcar DOD.',
       );
     }
 
@@ -803,8 +941,57 @@ export class Orchestrator implements OnModuleInit {
     }
     this.stopRequested.delete(storyId);
     this.realtime.broadcast({ type: 'auto.stopped', storyId, mode });
-    // b6: story concluída/parada — limpa o worktree isolado.
+    // Story concluída/parada: libera o slot (sessão + watchdog) para que a
+    // SERIALIZAÇÃO possa iniciar uma story pendente do mesmo aiProject. Não há
+    // worktree a destruir — o agent codou direto no repo-alvo e o trabalho
+    // permanece no working tree (comportamento desejado). O cleanupWorktree
+    // apenas solta o tracking em memória.
+    this.sessions.remove(storyId);
+    this.clearWatchdog(storyId);
     void this.workspaces.cleanupWorktree(storyId).catch(() => undefined);
+    // SERIALIZAÇÃO: destrava a próxima story que estava aguardando este repo.
+    void this.resumeDeferredForProject(storyId).catch(() => undefined);
+  }
+
+  /**
+   * SERIALIZAÇÃO: ao liberar um repo-alvo, procura stories que estão em "In
+   * Progress" no board mas SEM sessão ativa (foram adiadas por compartilhar o
+   * aiProject) e reinicia o loop de UMA delas. Chamado quando uma story termina.
+   *
+   * @param finishedStoryId story que acabou de liberar o slot (ignorada na busca).
+   */
+  private async resumeDeferredForProject(finishedStoryId: string): Promise<void> {
+    const freedProject = await this.resolveStoryProject(finishedStoryId);
+    if (!freedProject) return;
+
+    // Stories em colunas "In Progress" do board, sem sessão ativa.
+    const inProgressCols = await this.prisma.column.findMany({
+      where: { isTaskColumn: false, title: 'In Progress' },
+      select: { id: true },
+    });
+    if (inProgressCols.length === 0) return;
+    const candidates = await this.prisma.card.findMany({
+      where: {
+        type: 'story',
+        boardColumnId: { in: inProgressCols.map((c) => c.id) },
+      },
+      orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+      select: { id: true },
+    });
+
+    for (const cand of candidates) {
+      if (cand.id === finishedStoryId) continue;
+      if (this.sessions.get(cand.id)) continue; // já ativa
+      const candProject = await this.resolveStoryProject(cand.id);
+      if (candProject && candProject === freedProject) {
+        await this.log(
+          cand.id,
+          'serialização liberada — o repositório-alvo ficou livre; iniciando o loop desta story.',
+        );
+        await this.onStoryEnterInProgress(cand.id);
+        return; // uma por vez
+      }
+    }
   }
 
   /**
@@ -902,7 +1089,8 @@ export class Orchestrator implements OnModuleInit {
       if (!story) return;
 
       const doneTasks = story.children.filter((t) => t.execState === 'done');
-      const lines: string[] = [];
+      const marker = `<!-- story-summary:${storyId} -->`;
+      const lines: string[] = [marker];
       lines.push(`✅ Story concluída: ${story.key} — ${story.title}`);
       if (doneTasks.length) {
         lines.push('');
@@ -918,9 +1106,25 @@ export class Orchestrator implements OnModuleInit {
         lines.push(`Fluxos afetados: ${story.affectedFlows.map((f) => f.name).join(', ')}`);
       }
 
-      await this.prisma.comment.create({
-        data: { cardId: epicId, authorId: 'ai', text: lines.join('\n') },
+      // Idempotência: uma story só deixa UM resumo por épico. Sem isso, cada
+      // re-conclusão (ou um loop de encadeamento) acumularia comentários
+      // duplicados no épico, inflando o prompt cross-story até estourar o
+      // limite de argv do runner (spawn E2BIG). Se já houver um resumo desta
+      // story, atualizamos em vez de criar outro.
+      const existing = await this.prisma.comment.findFirst({
+        where: { cardId: epicId, text: { startsWith: marker } },
+        select: { id: true },
       });
+      if (existing) {
+        await this.prisma.comment.update({
+          where: { id: existing.id },
+          data: { text: lines.join('\n') },
+        });
+      } else {
+        await this.prisma.comment.create({
+          data: { cardId: epicId, authorId: 'ai', text: lines.join('\n') },
+        });
+      }
       this.realtime.broadcast({ type: 'comment.created', cardId: epicId, parentId: null });
       await this.log(epicId, `Resumo da story ${story.key} registrado no épico.`);
     } catch (err) {
@@ -971,11 +1175,15 @@ export class Orchestrator implements OnModuleInit {
       const inProgress = cols.find((c) => c.title.trim().toLowerCase() === 'in progress');
       if (!inProgress) return;
 
-      // Próxima story ainda não em Done e não já em In Progress.
+      // Próxima story ainda pendente de trabalho: não pode estar em Done, nem
+      // em In Progress, nem em Review. "Review" significa que o agent já
+      // concluiu e está aguardando revisão humana — reencadeá-la criaria um
+      // ciclo (promote→advance→promote). Só encadeamos stories que ainda não
+      // começaram (Backlog / To Do).
       const next = stories.find((s) => {
         if (s.id === finishedStoryId) return false;
         const title = s.boardColumnId ? byId.get(s.boardColumnId) : undefined;
-        return title !== 'done' && title !== 'in progress';
+        return title !== 'done' && title !== 'in progress' && title !== 'review';
       });
       if (!next) {
         await this.log(epicId, 'Épico sem próxima story pendente para encadear.');
@@ -1897,7 +2105,11 @@ export class Orchestrator implements OnModuleInit {
       }
     }
 
-    // #10c: lastro cross-story — comments de resumo acumulados no épico.
+    // #10c: lastro cross-story — resumos das stories já concluídas, acumulados
+    // como comments no épico. Só consideramos os comments de RESUMO (marcados
+    // com `<!-- story-summary:<id> -->`), deduplicamos por story (o mais
+    // recente vence) e limitamos a quantidade, para o lastro NÃO inflar o
+    // prompt sem limite (o que estoura o argv do runner — spawn E2BIG).
     const epicNotes: string[] = [];
     if (story?.parentId) {
       const comments = await this.prisma.comment.findMany({
@@ -1905,7 +2117,22 @@ export class Orchestrator implements OnModuleInit {
         orderBy: { ts: 'asc' },
         select: { text: true },
       });
-      for (const c of comments) epicNotes.push(c.text);
+      const MARKER = /^<!-- story-summary:([^\s]+) -->\n?/;
+      const byStory = new Map<string, string>();
+      const plain: string[] = [];
+      for (const c of comments) {
+        const m = c.text.match(MARKER);
+        if (m) {
+          byStory.set(m[1], c.text.replace(MARKER, '').trimStart());
+        } else {
+          plain.push(c.text);
+        }
+      }
+      // No máximo os 20 resumos de story mais recentes + 5 comments avulsos.
+      const MAX_STORY_SUMMARIES = 20;
+      const summaries = [...byStory.values()];
+      epicNotes.push(...summaries.slice(-MAX_STORY_SUMMARIES));
+      epicNotes.push(...plain.slice(-5));
     }
 
     return {
@@ -1935,7 +2162,7 @@ export class Orchestrator implements OnModuleInit {
     profile: LoopProfileDef,
     context: Awaited<ReturnType<Orchestrator['buildContext']>>,
     agentInstructions = '',
-    worktreePath = '',
+    workdir = '',
   ): string {
     const lines: string[] = [];
 
@@ -1967,23 +2194,23 @@ export class Orchestrator implements OnModuleInit {
     lines.push(`## Task: ${context.taskTitle}`);
     if (context.notes) lines.push(`- Notas / efeitos colaterais: ${context.notes}`);
 
-    // #7/#8: escopo e projeto-alvo — a AI trabalha DENTRO do worktree isolado
-    // (o `cwd` do processo). NUNCA expomos o path do repo-alvo original aqui:
-    // se o agent visse esse caminho absoluto ele faria `cd` para lá e escreveria
-    // FORA do worktree — anulando o isolamento, deixando o `git diff` do worktree
-    // vazio e fazendo stories concorrentes colidirem no mesmo working tree
-    // (bug-hallucinated-loop). Referimos SEMPRE o worktree/`cwd`.
+    // Escopo e projeto-alvo — a AI trabalha DIRETO no working tree do repo-alvo
+    // (o `cwd` do processo), na branch que já estiver aberta. NÃO há worktree
+    // isolado: as mudanças ficam no próprio projeto (comportamento desejado). A
+    // colisão entre stories concorrentes é evitada por SERIALIZAÇÃO no engine
+    // (uma story por aiProject), então o agent pode e deve editar os arquivos
+    // reais do projeto no diretório atual.
     lines.push('');
     lines.push('## Escopo e diretório de trabalho (LEIA COM ATENÇÃO)');
-    if (worktreePath) {
+    if (workdir) {
       lines.push(
-        `- Seu diretório de trabalho (\`cwd\`) é \`${worktreePath}\`. Ele JÁ É uma branch/worktree ` +
-          'isolada do repositório-alvo. **Faça TODAS as mudanças AQUI, no diretório atual.**',
+        `- Seu diretório de trabalho (\`cwd\`) é \`${workdir}\` — é o repositório-alvo, na branch ` +
+          'que já está aberta. **Faça TODAS as mudanças AQUI, editando os arquivos reais do projeto.**',
       );
       lines.push(
-        '- **NÃO** rode `cd` para outro caminho absoluto, nem edite arquivos fora deste ' +
-          'diretório. Trabalhe SEMPRE relativo ao `cwd` (ex.: `./ping.js`, `test/x.test.js`). ' +
-          'Escrever fora do worktree corrompe o isolamento e faz o loop nunca convergir.',
+        '- Trabalhe relativo ao `cwd` (ex.: `./ping.js`, `test/x.test.js`). Não rode `cd` para ' +
+          'outro caminho nem edite arquivos fora deste diretório. As mudanças devem aparecer no ' +
+          '`git diff` do projeto — se você não editar arquivos de fato, o loop não converge.',
       );
     } else {
       lines.push(
@@ -1996,12 +2223,13 @@ export class Orchestrator implements OnModuleInit {
         '(este é a ferramenta, não o produto). Entregue estritamente o que a task pede, no projeto-alvo.',
     );
 
-    // Proibição de operações git. O worktree/branch é gerenciado EXCLUSIVAMENTE
-    // pelo loop engine. Se o agent commitar ou trocar de branch, o worktree que
-    // o gate de validação inspeciona fica dessincronizado do trabalho real, a
-    // verificação de arquivos falha e uma task de correção é derivada em loop.
+    // Proibição de operações git que ALTERAM estado. O agent deve deixar as
+    // mudanças no working tree, NÃO commitadas — o engine não cria branch nem
+    // commit; a integração é feita depois pelo humano. Se o agent commitar/trocar
+    // de branch, o `git diff` que o gate de validação inspeciona fica
+    // dessincronizado do trabalho real e o loop diverge.
     lines.push('');
-    lines.push('## ❌ PROIBIDO — operações de git (NÃO NEGOCIÁVEL)');
+    lines.push('## ❌ PROIBIDO — operações de git que alteram estado (NÃO NEGOCIÁVEL)');
     lines.push(
       '- Você **NÃO PODE** rodar `git commit`, `git add`, `git branch`, `git checkout`, ' +
         '`git switch`, `git merge`, `git rebase`, `git reset`, `git stash`, `git push`, ' +
@@ -2009,13 +2237,12 @@ export class Orchestrator implements OnModuleInit {
     );
     lines.push(
       '- **Apenas EDITE os arquivos** no diretório atual (leia/escreva/crie arquivos normalmente). ' +
-        'Deixe as mudanças no working tree, NÃO commitadas.',
+        'Deixe as mudanças no working tree, NÃO commitadas — a integração é feita depois por um humano.',
     );
     lines.push(
-      '- O worktree e a branch são criados e gerenciados pelo loop engine. Se você commitar ' +
-        'ou criar/trocar branch, o gate de validação passa a inspecionar um snapshot ' +
-        'dessincronizado do seu trabalho real — os arquivos que você declara em `affectedFlows` ' +
-        'aparecem como "inexistentes" e o sistema deriva tasks de correção duplicadas em loop infinito.',
+      '- Se você commitar ou criar/trocar branch, o `git diff` que o gate de validação inspeciona ' +
+        'fica dessincronizado do seu trabalho real — os arquivos que você declara em `affectedFlows` ' +
+        'podem aparecer como "inexistentes" e o sistema deriva tasks de correção em loop.',
     );
     lines.push(
       '- Comandos git de LEITURA (`git status`, `git diff`, `git log`) são permitidos apenas ' +

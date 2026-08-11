@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BacklogChatMessage, BacklogProposalStory } from "@kanban-ai/shared";
 
@@ -8,7 +8,16 @@ import { showToast } from "@/shared/services/toastStore";
 import { useBacklogChat } from "@/features/backlog-chat/hooks/useBacklogChat";
 import { ProposalCard } from "@/features/backlog-chat/components/ProposalCard";
 import { StoryThreadSheet } from "@/features/backlog-chat/components/StoryThreadSheet";
+import { StoryChatSheet } from "@/features/backlog-chat/components/StoryChatSheet";
 import { SessionSidebar } from "@/features/backlog-chat/components/SessionSidebar";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/shared/components/ui/dialog";
 
 export interface BacklogChatViewProps {
   boardId: string | null;
@@ -44,11 +53,34 @@ export function BacklogChatView({
   const queryClient = useQueryClient();
   const [openStorySnapshot, setOpenStorySnapshot] =
     useState<BacklogProposalStory | null>(null);
+  const [applyModalOpen, setApplyModalOpen] = useState(false);
+  const [skipTasksWarning, setSkipTasksWarning] = useState(false);
+  // Story-card do board resolvida a partir de uma story da proposta numa sessão
+  // já aplicada — abre o `StoryChatSheet` (materialização real de tasks).
+  const [storyChat, setStoryChat] = useState<{
+    storyId: string;
+    title: string;
+  } | null>(null);
 
   const createSession = useMutation({
     mutationFn: (bid: string) => apiClient.createBacklogSession(bid),
     onSuccess: (res) => onSessionCreated(res.id),
     onError: () => showToast("Falha ao iniciar o chat de backlog"),
+  });
+
+  // Numa sessão applied, "✨ Materializar tasks" na thread da proposta resolve a
+  // story-card real do board (pelo título) e abre o chat da story, onde a
+  // materialização incremental cria cards type:task de verdade (fecha o bug de
+  // "tasks fantasma").
+  const resolveStoryCard = useMutation({
+    mutationFn: (vars: { sessionId: string; story: BacklogProposalStory }) =>
+      apiClient.resolveAppliedStoryCard(vars.sessionId, vars.story.title),
+    onSuccess: (res, vars) => {
+      setOpenStorySnapshot(null);
+      setStoryChat({ storyId: res.storyId, title: vars.story.title });
+    },
+    onError: () =>
+      showToast("Não localizei esta história no board para materializar tasks"),
   });
 
   const createMutate = createSession.mutate;
@@ -94,6 +126,12 @@ export function BacklogChatView({
   } = useBacklogChat(sessionId, boardId);
 
   const currentVersion = proposal?.version ?? null;
+
+  const storiesWithoutTasks = useMemo(
+    () =>
+      proposal?.stories.filter((story) => !story.tasks || story.tasks.length === 0) ?? [],
+    [proposal],
+  );
 
   // Status da sessão (compartilha a query com a SessionSidebar via mesma key).
   // Usado para NÃO oferecer "Aprovar" numa sessão que já virou cards no board
@@ -143,6 +181,31 @@ export function BacklogChatView({
     }
     // A 1ª mensagem faz a sessão aparecer/renomear na lista lateral.
     setTimeout(refreshSessions, 400);
+  };
+
+  const handleApplyRequest = () => {
+    if (storiesWithoutTasks.length === 0) {
+      apply();
+      return;
+    }
+    setSkipTasksWarning(false);
+    setApplyModalOpen(true);
+  };
+
+  const handleSuggestTasksNow = () => {
+    const firstStoryWithoutTasks = storiesWithoutTasks[0];
+    if (!firstStoryWithoutTasks) return;
+    setApplyModalOpen(false);
+    setSkipTasksWarning(false);
+    // TODO(story-chat-threads): quando existir alvo dedicado no fluxo de thread,
+    // encaminhar para ele em vez de apenas abrir o sheet da story.
+    setOpenStorySnapshot(firstStoryWithoutTasks);
+  };
+
+  const handleConfirmApplyAnyway = () => {
+    apply();
+    setApplyModalOpen(false);
+    setSkipTasksWarning(false);
   };
 
   return (
@@ -204,7 +267,7 @@ export function BacklogChatView({
                     isCurrent={proposalMsg.proposal.version === currentVersion}
                     applied={alreadyApplied}
                     applying={isApplying}
-                    onApply={apply}
+                    onApply={handleApplyRequest}
                     onOpenStory={setOpenStorySnapshot}
                   />
                 );
@@ -219,12 +282,69 @@ export function BacklogChatView({
           sessionId={sessionId}
           boardId={boardId}
           story={openStory}
+          applied={alreadyApplied}
+          onMaterializeTasks={(story) => {
+            if (!sessionId) return;
+            resolveStoryCard.mutate({ sessionId, story });
+          }}
           open
           onOpenChange={(o) => {
             if (!o) setOpenStorySnapshot(null);
           }}
         />
       ) : null}
+      {storyChat ? (
+        <StoryChatSheet
+          storyId={storyChat.storyId}
+          storyTitle={storyChat.title}
+          boardId={boardId}
+          open
+          onOpenChange={(o) => {
+            if (!o) setStoryChat(null);
+          }}
+        />
+      ) : null}
+      <Dialog open={applyModalOpen} onOpenChange={setApplyModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Stories sem tasks</DialogTitle>
+            <DialogDescription>
+              As seguintes stories ainda não têm tasks:
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="list-disc pl-5 text-sm">
+            {storiesWithoutTasks.map((story) => (
+              <li key={story.id}>{story.title}</li>
+            ))}
+          </ul>
+          {skipTasksWarning ? (
+            <p className="text-sm text-amber-700">
+              Stories sem tasks entram no board, mas ao serem puxadas para In Progress o loop
+              não terá o que executar e elas serão marcadas como "Precisa de você" até que
+              tasks sejam criadas (via chat da story).
+            </p>
+          ) : null}
+          <DialogFooter>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={handleSuggestTasksNow}>
+              Criar tasks agora
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => {
+                if (!skipTasksWarning) {
+                  setSkipTasksWarning(true);
+                  return;
+                }
+                handleConfirmApplyAnyway();
+              }}
+              disabled={isApplying}
+            >
+              {skipTasksWarning ? (isApplying ? "Criando…" : "Confirmar aprovação") : "Aprovar mesmo assim"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

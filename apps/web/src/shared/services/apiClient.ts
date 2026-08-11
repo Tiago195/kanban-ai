@@ -7,6 +7,7 @@ import type {
   BacklogChatMessage,
   BacklogChatSessionSummary,
   BacklogProposal,
+  StoryChatSession,
   CreateCardDto,
   CreateDodItemDto,
   CreateFlowDto,
@@ -408,6 +409,44 @@ export const apiClient = {
         body: JSON.stringify({ version }),
       },
     );
+  },
+
+  /**
+   * Resolve o card `type:story` do board materializado por uma sessão já
+   * aplicada, casando pelo título da story da proposta. Usado para redirecionar
+   * a thread da proposta ao "chat da story" (onde tasks viram cards de verdade).
+   */
+  resolveAppliedStoryCard(sessionId: string, title: string): Promise<StoryChatSession> {
+    return request<StoryChatSession>(`/backlog-chat/sessions/${sessionId}/story-card`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    });
+  },
+
+  // ── Chat da story (ADR-0026) ──────────────────────────────────────────────
+
+  /**
+   * Abre (ou reusa) a sessão de chat de uma story-card. Reusa a sessão original
+   * se a story veio de um backlog-chat; cria uma zerada e vincula se for manual.
+   */
+  openStoryChatSession(storyId: string): Promise<StoryChatSession> {
+    return request<StoryChatSession>(`/backlog-chat/story/${storyId}/session`, {
+      method: "POST",
+    });
+  },
+
+  /**
+   * Materializa tasks rascunhadas no chat da story como cards `type:task` filhos
+   * em To Do (limpa o badge "Precisa de você" da story ao criar ≥1 task).
+   */
+  materializeStoryTasks(
+    storyId: string,
+    titles: string[],
+  ): Promise<{ cards: BacklogAppliedCard[] }> {
+    return request<{ cards: BacklogAppliedCard[] }>(`/backlog-chat/story/${storyId}/tasks`, {
+      method: "POST",
+      body: JSON.stringify({ titles }),
+    });
   },
 };
 

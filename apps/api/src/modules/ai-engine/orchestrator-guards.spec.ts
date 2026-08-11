@@ -63,7 +63,8 @@ function makeConfig(overrides: Partial<AppConfig['agent']> = {}): AppConfig {
 /** Workspaces fake: nenhuma operação de FS real. */
 function makeWorkspaces(): WorkspaceService {
   return {
-    ensureWorktree: async () => '/wt',
+    resolveWorkdir: async () => '/repo',
+    resolveTargetRepo: (p?: string | null) => (p ? p : null),
     cleanupWorktree: async () => undefined,
     fileExistsInWorktree: async () => true,
     findRelatedTestFiles: async () => [],
@@ -538,7 +539,27 @@ test('reconcileOnBoot: sem stories ativas -> no-op (nenhuma sessão criada)', as
 
 test('reconcileOnBoot: story ativa -> retoma o loop (cria sessão e watchdog)', async () => {
   const prisma = makePrisma({
-    cardFindMany: async (args) => (args?.where?.type === 'story' ? [{ id: 'story-boot' }] : []),
+    cardFindMany: async (args) => {
+      if (args?.where?.type === 'story') return [{ id: 'story-boot' }];
+      // BUG-08: uma story ativa retomada precisa de ao menos uma task, senão o
+      // guard de "story sem tasks" escala para humano e encerra o loop. Este
+      // mock representa uma story ativa REAL (com trabalho pendente).
+      if (args?.where?.type === 'task') {
+        return [
+          {
+            id: 'task-boot',
+            type: 'task',
+            execState: null,
+            createdAt: new Date(),
+            needsHuman: false,
+            dependsOn: [],
+            iterations: [],
+            dodItems: [],
+          },
+        ];
+      }
+      return [];
+    },
   });
   const realtime = makeRealtime();
   const { orch, sessions } = makeOrchestrator({ prisma, realtime });
@@ -555,18 +576,18 @@ test('reconcileOnBoot: story ativa -> retoma o loop (cria sessão e watchdog)', 
   await orch.stop('story-boot', 'hard');
 });
 
-// ── (i) Isolamento do worktree no prompt (bug-hallucinated-loop) ────────────
-// O prompt injetado no agent NUNCA pode expor o path absoluto do repo-alvo
-// original — se expuser, o agent faz `cd` para lá e escreve FORA do worktree,
-// deixando o `git diff` do worktree vazio e impedindo o loop de convergir.
-// Estes testes fixam o contrato do `buildPrompt`.
+// ── (i) Contrato do prompt: cwd = repo-alvo, sem git de escrita ─────────────
+// No modelo atual o agent coda DIRETO no working tree do repo-alvo (sem
+// worktree isolado). O prompt DEVE referir o cwd (que é o próprio repo-alvo) e
+// PROIBIR operações git que alterem estado (commit/branch/etc.) — as mudanças
+// ficam não-commitadas no working tree. Estes testes fixam esse contrato.
 
 function makePromptContext(overrides: Record<string, unknown> = {}) {
   return {
     taskId: 'TK-1',
     storyId: 'US-1',
     taskTitle: 'Criar arquivo ping.js',
-    project: '/home/user/repo-alvo-original',
+    project: '/home/user/repo-alvo',
     notes: '',
     epicNotes: '',
     files: [],
@@ -579,47 +600,50 @@ function makePromptContext(overrides: Record<string, unknown> = {}) {
   };
 }
 
-test('buildPrompt: usa o worktree (cwd) e NÃO expõe o path do repo-alvo original', () => {
+test('buildPrompt: usa o cwd (repo-alvo) como diretório de trabalho', () => {
   const { orch } = makeOrchestrator();
-  const worktree = '/home/user/repo-alvo-original/apps/api/.agent-workspaces/US-1';
+  const workdir = '/home/user/repo-alvo';
   const prompt: string = priv(orch).buildPrompt(
     'implementation',
     BUILTIN_LOOP_PROFILES.feature,
     makePromptContext(),
     '',
-    worktree,
+    workdir,
   );
 
-  // O worktree (cwd) deve aparecer como diretório de trabalho.
-  assert.ok(prompt.includes(worktree), 'o prompt deve referir o worktree/cwd');
-  // O path do repo-alvo original NÃO pode aparecer isolado (só como prefixo do
-  // worktree, o que é aceitável). Verificamos que não há menção ao projeto puro
-  // seguida de fim de linha/espaço — heurística: a string do projeto sozinha
-  // como "Projeto-alvo (repo): <path>" foi removida.
-  assert.ok(
-    !prompt.includes('Projeto-alvo (repo): /home/user/repo-alvo-original'),
-    'o prompt não pode mais expor "Projeto-alvo (repo): <path original>"',
+  // O cwd (repo-alvo) deve aparecer como diretório de trabalho.
+  assert.ok(prompt.includes(workdir), 'o prompt deve referir o cwd/repo-alvo');
+  // Deve deixar claro que o agent edita os arquivos reais do projeto.
+  assert.match(
+    prompt,
+    /arquivos reais do projeto|edite os arquivos/i,
+    'o prompt deve instruir a editar os arquivos reais do projeto',
   );
 });
 
-test('buildPrompt: proíbe explicitamente `cd` para outro caminho absoluto', () => {
+test('buildPrompt: proíbe operações git que alteram estado (commit/branch)', () => {
   const { orch } = makeOrchestrator();
-  const worktree = '/tmp/wt/US-2';
+  const workdir = '/tmp/repo/US-2';
   const prompt: string = priv(orch).buildPrompt(
     'implementation',
     BUILTIN_LOOP_PROFILES.feature,
     makePromptContext(),
     '',
-    worktree,
+    workdir,
   );
   assert.match(
     prompt,
-    /NÃO.*rode `cd`|não use `cd`|não rode `cd`/i,
-    'o prompt deve proibir `cd` para outro caminho',
+    /`git commit`/i,
+    'o prompt deve proibir git commit',
+  );
+  assert.match(
+    prompt,
+    /NÃO commitadas|não commitadas/i,
+    'o prompt deve orientar a deixar as mudanças não-commitadas',
   );
 });
 
-test('buildPrompt: sem worktree, instrui a trabalhar só no cwd atual', () => {
+test('buildPrompt: sem workdir, instrui a trabalhar só no cwd atual', () => {
   const { orch } = makeOrchestrator();
   const prompt: string = priv(orch).buildPrompt(
     'implementation',
@@ -628,9 +652,144 @@ test('buildPrompt: sem worktree, instrui a trabalhar só no cwd atual', () => {
     '',
     '',
   );
-  assert.match(prompt, /diretório atual|`cwd`/i, 'sem worktree deve ancorar no cwd atual');
-  assert.ok(
-    !prompt.includes('/home/user/repo-alvo-original'),
-    'sem worktree também não pode vazar o path do repo-alvo',
+  assert.match(prompt, /diretório atual|`cwd`/i, 'sem workdir deve ancorar no cwd atual');
+});
+
+// ── BUG-A8: hook simétrico de saída de In Progress libera o slot ─────────────
+
+test('onStoryLeaveInProgress: remove a sessão e libera o aiProject (BUG-A8)', async () => {
+  // Duas stories no MESMO aiProject: story-1 ativa, story-2 pendente.
+  const prisma = makePrisma({
+    cardFindUnique: async (args) => {
+      // resolveStoryProject: ambas apontam para o mesmo repo-alvo.
+      if (args.where.id === 'story-1' || args.where.id === 'story-2') {
+        return { aiProject: '/repo/target', parentId: null };
+      }
+      return { aiProject: '/repo/target', parentId: null };
+    },
+  });
+  const { orch, sessions } = makeOrchestrator({ prisma });
+
+  // story-1 em execução ocupa o slot do repo.
+  sessions.start('story-1');
+  assert.ok(sessions.get('story-1'), 'pré-condição: story-1 tem sessão ativa');
+
+  // Enquanto story-1 está ativa, story-2 (mesmo aiProject) está bloqueada.
+  const blockedBefore = await priv(orch).findActiveStoryOnSameProject('story-2');
+  assert.equal(blockedBefore, 'story-1', 'story-2 deve estar bloqueada por story-1 antes do fix');
+
+  // story-1 sai de In Progress (arrastada p/ Done): o hook deve liberar o slot.
+  orch.onStoryLeaveInProgress('story-1');
+  assert.equal(sessions.get('story-1'), undefined, 'a sessão de story-1 deve ser removida');
+
+  // Agora story-2 não colide mais — o repo-alvo está livre.
+  const blockedAfter = await priv(orch).findActiveStoryOnSameProject('story-2');
+  assert.equal(blockedAfter, null, 'story-2 não deve mais estar bloqueada após a saída de story-1');
+});
+
+test('onStoryLeaveInProgress: idempotente quando não há sessão/timer (BUG-A8)', () => {
+  const { orch, sessions, realtime } = makeOrchestrator();
+  // Sem sessão nem timer para story-x: deve ser no-op silencioso.
+  orch.onStoryLeaveInProgress('story-x');
+  assert.equal(sessions.get('story-x'), undefined);
+  // Não deve emitir auto.stopped (nada a parar).
+  assert.equal(
+    realtime.events.some((e) => e.type === 'auto.stopped'),
+    false,
+    'no-op não deve emitir auto.stopped',
   );
+});
+
+// ── BUG-A7: erro fatal do runner → fail-fast (escala + para o loop) ──────────
+
+test('runIteration: fatalError do runner escala a humano, grava outcome=error e NÃO itera (BUG-A7)', async () => {
+  const prisma = makePrisma({
+    cardFindUnique: async (args) => {
+      // loadTask/raw card lookups: task viva, story própria.
+      return {
+        id: args.where.id,
+        title: 'task fatal',
+        type: 'task',
+        loopType: 'feature',
+        model: null,
+        parentId: null,
+        boardId: 'b1',
+        assignees: [],
+        execState: 'analyzing',
+        derivedDepth: 0,
+      };
+    },
+  });
+  // Runner que SIMULA um erro fatal de infraestrutura (ex.: modelo indisponível).
+  const fatalRunner = {
+    id: 'fatal',
+    run: async () => ({
+      detail: 'Error: Model "opus" from --model flag is not available.',
+      summary: 'erro',
+      dodTouched: [],
+      done: false,
+      fatalError: 'fatal: Model "opus" ... is not available',
+    }),
+  } as unknown as AgentRunner;
+
+  const config = makeConfig();
+  const sessions = new AgentSessionManager(config);
+  const realtime = makeRealtime();
+  const orch = new Orchestrator(
+    prisma.svc,
+    sessions,
+    makeValidation(),
+    makeWorkspaces(),
+    realtime.svc,
+    fatalRunner,
+    config,
+  );
+
+  // Stubs mínimos dos pré-requisitos privados para o controle chegar à branch
+  // de erro fatal sem depender de todo o pipeline (buildContext/DB completos).
+  const p = priv(orch);
+  p.loadTask = async () => ({
+    id: 'task-fatal',
+    execState: 'analyzing',
+    phases: ['implementation', 'validation'],
+    derivedDepth: 0,
+    dependsOn: [],
+    dodDone: [],
+    type: 'task',
+  });
+  p.loadSiblingsById = async () => new Map();
+  p.buildContext = async () => ({
+    taskTitle: 'task fatal',
+    project: '/repo/target',
+    notes: '',
+    flowNames: [],
+    files: [],
+    storyId: 'story-fatal',
+    affectedFlows: [],
+    dodItems: [{ id: 'd1', text: 'x', done: false }],
+    iterationHistory: [],
+    siblingHandoffs: [],
+  });
+  p.enforceLoopGuards = async () => false;
+  p.resolveCardModel = async () => 'valid-model';
+  p.captureDiff = async () => '';
+  p.buildPrompt = () => 'prompt';
+
+  let escalated: { taskId: string; storyId: string; reason: string } | null = null;
+  p.escalateToHuman = async (taskId: string, storyId: string, reason: string) => {
+    escalated = { taskId, storyId, reason };
+  };
+  const appended: Array<Record<string, unknown>> = [];
+  p.appendIteration = async (_taskId: string, it: Record<string, unknown>) => {
+    appended.push(it);
+  };
+  p.log = async () => undefined;
+
+  const ran = await orch.runIteration('task-fatal');
+
+  assert.equal(ran, false, 'runIteration deve retornar false (não iterou trabalho útil)');
+  assert.ok(escalated, 'deve escalar a humano no erro fatal');
+  assert.match((escalated as unknown as { reason: string }).reason, /fatal|not available/i);
+  assert.equal(appended.length, 1, 'deve gravar exatamente uma iteração (a de erro)');
+  assert.equal(appended[0].outcome, 'error', 'a iteração de erro deve ter outcome=error');
 });

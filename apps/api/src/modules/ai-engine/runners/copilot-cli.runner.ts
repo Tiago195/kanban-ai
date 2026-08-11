@@ -252,6 +252,7 @@ export class CopilotCliRunner implements AgentRunner {
           nextStep: event.nextStep,
           done: event.done,
           evidence: event.evidence,
+          fatalError: event.fatalError,
         });
         return;
     }

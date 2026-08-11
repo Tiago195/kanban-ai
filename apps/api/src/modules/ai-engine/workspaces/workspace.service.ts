@@ -35,16 +35,23 @@ export class WorkspaceService {
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
   /**
-   * Prepara um diretório de trabalho ISOLADO para o agent, criado como git
-   * worktree DENTRO do repo-alvo (`targetRepoPath`, vindo de `story.aiProject`),
-   * numa branch dedicada `kanban/<key>`. Nunca usa o repo do kanban-ai (`/app`)
-   * como base — ver problema #8. Se o projeto-alvo não for um repo git válido,
-   * lança `TargetProjectError` (o orchestrator recusa rodar).
+   * Resolve e valida o diretório de trabalho do agent. Diferente do modelo
+   * antigo (worktree isolado + branch efêmera, que era destruído no cleanup e
+   * fazia o trabalho nunca aterrissar no repo), o agent agora trabalha
+   * **diretamente no working tree do repo-alvo (`aiProject`), na branch que já
+   * estiver aberta**, sem criar branch/worktree e sem commitar — deixando os
+   * arquivos alterados no próprio projeto. A colisão entre stories concorrentes
+   * do mesmo repo é resolvida por SERIALIZAÇÃO no orchestrator (uma story In
+   * Progress por aiProject), não por isolamento em worktree.
    *
-   * @param key            chave estável (storyId) para nomear worktree/branch.
+   * Mantém os mesmos guard-rails do modelo anterior: recusa aiProject vazio,
+   * dentro do próprio kanban-ai, inexistente ou que não seja repo git. Lança
+   * `TargetProjectError` nesses casos (o orchestrator recusa rodar).
+   *
+   * @param key            chave estável (storyId), usada só para logs/tracking.
    * @param targetRepoPath caminho absoluto do repo-alvo (aiProject).
    */
-  async ensureWorktree(key: string, targetRepoPath?: string | null): Promise<string> {
+  async resolveWorkdir(key: string, targetRepoPath?: string | null): Promise<string> {
     const safeKey = this.sanitizeKey(key);
     const target = (targetRepoPath ?? '').trim();
 
@@ -77,40 +84,27 @@ export class WorkspaceService {
 
     this.targetRepoByKey.set(safeKey, resolvedTarget);
 
-    // Repo recém-criado (`git init`) tem HEAD "unborn": não há nenhum commit e
-    // `HEAD` é uma referência inválida, então `git worktree add ... HEAD` falha
-    // com "invalid reference: HEAD". Garantimos um commit inicial vazio para que
-    // o worktree possa ser criado a partir dele.
+    // Repo recém-criado (`git init`) tem HEAD "unborn": o `git diff HEAD` do
+    // captureDiff falha até existir um commit. Garantimos um commit inicial
+    // vazio (sem tocar arquivos do usuário) para o diff funcionar. No-op se já
+    // houver commits.
     await this.ensureInitialCommit(resolvedTarget);
 
-    const baseDir = await this.ensureBaseDir();
-    const worktreePath = path.join(baseDir, safeKey);
-    const branch = `kanban/${safeKey}`;
+    this.logger.log(
+      `workdir do agent resolvido para o repo-alvo (sem worktree): ${resolvedTarget} (key=${safeKey})`,
+    );
+    return resolvedTarget;
+  }
 
-    if (await this.pathExists(worktreePath)) {
-      return worktreePath;
-    }
-
-    try {
-      // Cria o worktree do REPO-ALVO numa branch dedicada. `-B` reaproveita a
-      // branch se já existir (retomada de story).
-      await this.runGit(
-        ['worktree', 'add', '-B', branch, worktreePath, 'HEAD'],
-        resolvedTarget,
-      );
-      this.logger.log(
-        `worktree isolado criado: ${worktreePath} (repo-alvo=${resolvedTarget}, branch=${branch})`,
-      );
-      return worktreePath;
-    } catch (error: unknown) {
-      if (await this.pathExists(worktreePath)) {
-        this.logger.warn(
-          `Falha ao criar worktree para key=${safeKey}, mas o diretório já existe. Reutilizando: ${worktreePath}`,
-        );
-        return worktreePath;
-      }
-      throw error;
-    }
+  /**
+   * Retorna o caminho absoluto do repo-alvo (aiProject) resolvido para `key`,
+   * ou `null` se ainda não resolvido. Usado pela SERIALIZAÇÃO do orchestrator
+   * para detectar duas stories apontando para o mesmo repo.
+   */
+  resolveTargetRepo(targetRepoPath?: string | null): string | null {
+    const target = (targetRepoPath ?? '').trim();
+    if (!target) return null;
+    return path.resolve(target);
   }
 
   /** True se `candidate` está dentro (ou é) a raiz do repo do kanban-ai. */
@@ -244,14 +238,35 @@ export class WorkspaceService {
       return { name: 'test:flow', ran: false, passed: true, exitCode: null, output: '' };
     }
     const testScript = await this.readTestScriptCommand(worktreePath);
-    if (!testScript || !this.isPositionalPathRunner(testScript)) {
-      // Runner desconhecido ou que não aceita paths posicionais com segurança.
+    if (!testScript) {
       return {
         name: 'test:flow',
         ran: false,
         passed: true,
         exitCode: null,
-        output: `runner de teste não determinado com segurança (script test="${testScript ?? ''}")`,
+        output: 'runner de teste não determinado com segurança (script test="")',
+      };
+    }
+
+    // BUG-10/10b: runners baseados em `node` (frequentemente encadeados, ex.:
+    // `node a.test.js && node b.test.js`) NÃO aceitam paths posicionais com
+    // segurança — o `npm test -- <arquivos>` só chegaria ao ÚLTIMO comando da
+    // cadeia e o quebraria. Mas a suite ainda EXERCITA os specs co-located do
+    // fluxo. Nesse caso rodamos a suite `test` inteira, sem posicionais, e
+    // consideramos o fluxo exercitado (ran:true) — em vez de pular por
+    // "runner não determinado". Determinístico: só quando o script é `node`.
+    if (this.isNodeRunner(testScript) && !this.isPositionalPathRunner(testScript)) {
+      return this.runNpmScript(worktreePath, 'test', [], 'test:flow');
+    }
+
+    if (!this.isPositionalPathRunner(testScript)) {
+      // Runner desconhecido e sem paths posicionais seguros.
+      return {
+        name: 'test:flow',
+        ran: false,
+        passed: true,
+        exitCode: null,
+        output: `runner de teste não determinado com segurança (script test="${testScript}")`,
       };
     }
     // vitest sem subcomando entra em watch mode; força rodada única com `run`.
@@ -280,6 +295,15 @@ export class WorkspaceService {
    */
   private isPositionalPathRunner(testScript: string): boolean {
     return /\b(vitest|jest)\b/.test(testScript);
+  }
+
+  /**
+   * True se o script `test` executa specs via `node` (inclui cadeias como
+   * `node a.test.js && node b.test.js`). Esses runners rodam a suite inteira;
+   * não aceitam paths posicionais, mas ainda exercitam os specs do fluxo.
+   */
+  private isNodeRunner(testScript: string): boolean {
+    return /\bnode\b/.test(testScript);
   }
 
 
@@ -331,6 +355,14 @@ export class WorkspaceService {
     });
   }
 
+  /**
+   * Limpeza de fim de story. No modelo atual o agent trabalha DIRETO no repo-alvo
+   * (sem worktree), então NÃO há working tree isolado a destruir — as mudanças
+   * ficam no próprio projeto, exatamente o comportamento desejado. Este método
+   * apenas solta o tracking em memória e remove eventuais diretórios de fallback
+   * antigos. Nunca toca no repo-alvo (não roda `git worktree remove`, que
+   * apagaria o trabalho do agent).
+   */
   async cleanupWorktree(key: string): Promise<void> {
     const safeKey = this.sanitizeKey(key);
 
@@ -340,45 +372,7 @@ export class WorkspaceService {
       this.fallbackDirsByKey.delete(safeKey);
     }
 
-    const worktreePath = path.join(path.resolve(this.config.agent.workspacesDir), safeKey);
-    const targetRepo = this.targetRepoByKey.get(safeKey);
-    if (!(await this.pathExists(worktreePath))) {
-      this.targetRepoByKey.delete(safeKey);
-      this.logger.warn(`Workspace para key=${safeKey} já não existe: ${worktreePath}`);
-      return;
-    }
-
-    // Sem repo-alvo conhecido (ex.: reinício), removemos só o diretório local.
-    if (!targetRepo || !(await this.isInsideGitRepo(targetRepo))) {
-      await this.removeDirIfExists(worktreePath);
-      this.targetRepoByKey.delete(safeKey);
-      this.logger.warn(
-        `Repo-alvo indisponível durante cleanup; removido diretório local para key=${safeKey}: ${worktreePath}`,
-      );
-      return;
-    }
-
-    try {
-      await this.runGit(['worktree', 'remove', '--force', worktreePath], targetRepo);
-      this.targetRepoByKey.delete(safeKey);
-    } catch (error: unknown) {
-      if (!(await this.pathExists(worktreePath))) {
-        this.targetRepoByKey.delete(safeKey);
-        this.logger.warn(`Worktree para key=${safeKey} já removido: ${worktreePath}`);
-        return;
-      }
-
-      const message = this.extractErrorMessage(error);
-      this.logger.warn(
-        `Falha tolerada ao remover worktree key=${safeKey} (${worktreePath}): ${message}`,
-      );
-    }
-  }
-
-  private async ensureBaseDir(): Promise<string> {
-    const baseDir = path.resolve(this.config.agent.workspacesDir);
-    await fs.mkdir(baseDir, { recursive: true });
-    return baseDir;
+    this.targetRepoByKey.delete(safeKey);
   }
 
   private sanitizeKey(key: string): string {

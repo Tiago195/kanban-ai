@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { BacklogChatController } from './backlog-chat.controller';
+import { BacklogChatController, BacklogStoryChatController } from './backlog-chat.controller';
 import { BacklogChatOrchestrator } from './backlog-chat.orchestrator';
 import { BacklogCliRunner } from './runner/backlog-cli.runner';
 import { CardsModule } from '../cards/cards.module';
@@ -13,7 +13,7 @@ import { CardsModule } from '../cards/cards.module';
  */
 @Module({
   imports: [CardsModule],
-  controllers: [BacklogChatController],
+  controllers: [BacklogChatController, BacklogStoryChatController],
   providers: [BacklogChatOrchestrator, BacklogCliRunner],
   exports: [BacklogChatOrchestrator],
 })
