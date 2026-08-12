@@ -20,7 +20,9 @@ memory/
 ├── memory-lock.service.spec.ts  # Testes EP-78 (git real + prisma fake in-memory)
 ├── memory-write.service.ts      # EP-79: escrita otimista + compare-and-swap (CAS)
 ├── memory-write.service.spec.ts # Testes EP-79 (git real + prisma fake in-memory)
-└── memory.module.ts             # @Global (exporta os quatro servicos)
+├── memory-review.service.ts     # EP-80: REVIEW + arbitragem (enterReview/resolve)
+├── memory-review.service.spec.ts# Testes EP-80 (git real + prisma fake in-memory)
+└── memory.module.ts             # @Global (exporta os cinco servicos)
 ```
 
 ## Contrato (Camada 1)
@@ -106,6 +108,37 @@ memory/
   - `WriteResult` expõe `{ oid, branch, headCommit, projection, retries }`
     (`retries` = nº de iterações completas do laço; 0 quando o rebase é inline).
 
+### Contrato (EP-80 — REVIEW + arbitragem de conflitos)
+
+- `MemoryReviewService` é **@Injectable** e **@Global** (via `MemoryModule`).
+- É o desfecho de uma proposta que NÃO pôde ser integrada sozinha: o write/lock
+  sinaliza colisão e transiciona o neurônio para `REVIEW` (ADR-0027 §"Resolução
+  de conflito semântico"). Dois gatilhos de EDITING→REVIEW:
+  `'semantic-conflict'` (colisão de merge no mesmo trecho) e `'out-of-scope'`
+  (proposta fora do escopo do autor).
+- Público:
+  - `enterReview({path, reason, sessionId, holder, baseCommit?})` (US-200/201/202)
+    — transiciona `EDITING → REVIEW` (`lockState=REVIEW`, `reviewQueued=true`),
+    **preserva o `headCommit` estável** e, quando `reason='semantic-conflict'`,
+    monta o `MemoryConflict` (`base`/`ours`/`theirs`) lendo os dois lados: `ours`
+    = HEAD estável do path; `theirs` = ponta do ramo efêmero
+    `mem/ai/<sessao>/<path>`. Em `'out-of-scope'` o `conflict` fica ausente.
+    Retorna `MemoryReviewItem`.
+  - `buildConflict(...)` (US-202) — lê `ours`/`theirs` e devolve o `MemoryConflict`.
+  - `resolve({path, baseCommit, content?, arbiter?})` (US-203) — fecha o `REVIEW`
+    com **compare-and-swap anti-stale** (se `baseCommit` não casar nem com
+    `row.baseCommit` nem com o HEAD estável → `MemoryReviewStaleError`) e dois
+    desfechos, ambos `REVIEW → FREE` + **poda do ramo efêmero**:
+    - **aceitar** (`content` presente): commita a mutação arbitrada em `main` via
+      `MemoryIndexService.commitAndReindex` (segue a ordem canônica) → o HEAD
+      avança; `ResolveResponse.headCommit` é o novo SHA;
+    - **descartar** (sem `content`): mantém o HEAD estável; `headCommit`
+      permanece inalterado.
+  - Se o neurônio não estiver em `REVIEW` → `MemoryNotInReviewError`.
+- **Fora de escopo aqui:** emitir `memory.conflict`/`memory.resolved` no WS é
+  EP-81; a **política** de quem PODE arbitrar (autoridade/escopo) vive fora deste
+  serviço — aqui só o mecanismo.
+
 ## Invariantes
 
 1. **Idempotência total** — rodar `provision()` N vezes converge para o MESMO
@@ -124,10 +157,10 @@ memory/
 
 - **WebSocket** (EP-81) — o 3º passo da ordem de escrita (emitir evento) NÃO vive
   aqui; `commitAndReindex`/`commit` param na reindexação; nada emite `memory.*`.
-- **Resolução de conflito** de merge (árbitro/REVIEW) — as Camadas 1/2 e o write
-  apenas **sinalizam** (`mergeSessionBranch` → `conflict: true`;
-  `MemoryWriteConflictError`; `MemoryStaleWriteError` com `reason: 'conflict'`);
-  resolver é EP-80.
+- **Resolução de conflito** de merge — o **mecanismo** (transição para `REVIEW`,
+  montagem do `MemoryConflict`, arbitragem via `MemoryReviewService.resolve`) já
+  vive aqui (EP-80). O que segue fora: **emitir** os eventos `memory.conflict`/
+  `memory.resolved` no WS (EP-81) e a **política** de quem PODE arbitrar.
 - **Agendamento** do `expireStale` (tick periódico) — o método existe; quem o
   chama periodicamente vive fora (infra/EP-85).
 

@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { MemoryGitService } from './memory-git.service';
 import { MemoryIndexService } from './memory-index.service';
 import { MemoryLockService } from './memory-lock.service';
+import { MemoryReviewService } from './memory-review.service';
 import { MemoryWriteService } from './memory-write.service';
 
 /**
@@ -15,13 +16,28 @@ import { MemoryWriteService } from './memory-write.service';
  *   TTL/heartbeat, release e anti-deadlock sobre o índice.
  * - **Escrita otimista + CAS** (`MemoryWriteService`, EP-79): ramo efêmero por
  *   agent, compare-and-swap anti-stale, merge 3-way e retry.
+ * - **REVIEW + arbitragem** (`MemoryReviewService`, EP-80): `EDITING → REVIEW`
+ *   por conflito semântico ou escrita fora de escopo, `memory.conflict` e
+ *   `resolve` (aceitar/descartar) fechando `REVIEW → FREE`.
  *
  * É `@Global` (como `workspaces`) para que consumidores (MCP, gateway WS)
  * injetem os serviços sem reimportar o módulo.
  */
 @Global()
 @Module({
-  providers: [MemoryGitService, MemoryIndexService, MemoryLockService, MemoryWriteService],
-  exports: [MemoryGitService, MemoryIndexService, MemoryLockService, MemoryWriteService],
+  providers: [
+    MemoryGitService,
+    MemoryIndexService,
+    MemoryLockService,
+    MemoryWriteService,
+    MemoryReviewService,
+  ],
+  exports: [
+    MemoryGitService,
+    MemoryIndexService,
+    MemoryLockService,
+    MemoryWriteService,
+    MemoryReviewService,
+  ],
 })
 export class MemoryModule {}

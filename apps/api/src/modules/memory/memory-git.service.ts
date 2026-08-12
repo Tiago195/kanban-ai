@@ -359,6 +359,51 @@ export class MemoryGitService implements OnModuleInit {
   }
 
   /**
+   * Lê o conteúdo do neurônio na **ponta do ramo efêmero** de uma sessão
+   * (`mem/ai/<sessao>/<path>`) — o lado `theirs` de um conflito (ADR-0027,
+   * EP-80). Retorna `null` se o ramo não existe ou o path não está lá.
+   */
+  async readSessionBranch(input: {
+    sessionId: string;
+    path: string;
+  }): Promise<{ ref: string; content: string | null } | null> {
+    const dir = this.gitDir;
+    const filepath = this.normalizePath(input.path);
+    const branch = this.sessionBranch(input.sessionId, filepath);
+    let oid: string;
+    try {
+      oid = await git.resolveRef({ fs, dir, gitdir: dir, ref: `refs/heads/${branch}` });
+    } catch (err) {
+      if (this.isNotFound(err)) {
+        return null;
+      }
+      throw err;
+    }
+    const content = await this.readNeuron(filepath, oid);
+    return { ref: oid, content };
+  }
+
+  /**
+   * **Poda** o ramo efêmero de uma sessão para um path (`mem/ai/<sessao>/<path>`)
+   * — chamado após integrar/descartar a proposta (ADR-0027, EP-80/EP-85).
+   * Idempotente: não falha se o ramo já não existe.
+   */
+  async pruneSessionBranch(input: { sessionId: string; path: string }): Promise<boolean> {
+    const dir = this.gitDir;
+    const filepath = this.normalizePath(input.path);
+    const branch = this.sessionBranch(input.sessionId, filepath);
+    try {
+      await git.deleteBranch({ fs, dir, gitdir: dir, ref: branch });
+      return true;
+    } catch (err) {
+      if (this.isNotFound(err)) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Resolve o SHA do commit apontado por `ref` (default `main`). Usado pela
    * Camada 2 para gravar o `headCommit` de origem de cada projeção.
    */
