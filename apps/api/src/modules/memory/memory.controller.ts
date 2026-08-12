@@ -1,6 +1,9 @@
-import { Body, Controller, Get, Post, Query, UsePipes } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, UseGuards, UsePipes } from '@nestjs/common';
 import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
 import { PrismaService } from '../../shared/db/prisma.service';
+import { MemoryAuthGuard, MEMORY_AGENT_KEY } from './memory-auth.guard';
+import type { RequestWithMemoryAgent } from './memory-auth.guard';
+import type { MemoryAgentIdentity } from './memory-auth.tokens';
 import { MemoryGitService } from './memory-git.service';
 import { MemoryBootstrapService } from './memory-bootstrap.service';
 import { MemoryGcService } from './memory-gc.service';
@@ -38,6 +41,7 @@ import {
  * release) e arbitragem de REVIEW. Nenhuma regra vive aqui — apenas a borda.
  */
 @Controller('memory')
+@UseGuards(MemoryAuthGuard)
 export class MemoryController {
   constructor(
     private readonly prisma: PrismaService,
@@ -68,59 +72,79 @@ export class MemoryController {
   }
 
   /**
-   * Escrita otimista (US-207) — delega ao compare-and-swap da EP-79. Quando
-   * `module` é informado (EP-83/US-211), aplica o enforcement de escopo (US-212):
-   * fora do escopo do agent a escrita NÃO aplica direto — vira proposta em
-   * REVIEW (ponte EP-80) e a resposta é o `MemoryReviewItem`.
+   * Escrita otimista (US-207) — delega ao compare-and-swap da EP-79.
+   *
+   * **Identidade/escopo do TOKEN (EP-C/US-C2):** quando a requisição está
+   * autenticada (`MEMORY_API_TOKENS` ligado), o autor do ramo efêmero
+   * (`sessionId`) e o `module` do enforcement de escopo vêm do TOKEN, NÃO do
+   * body — fechando o buraco de "escrever como qualquer sessão". Um token com
+   * escopo GLOBAL (`*`) escreve direto (sem `module`). Sem auth (dev local),
+   * mantém o comportamento anterior baseado no body.
+   *
+   * Quando o `module` efetivo está presente (EP-83/US-211) e a escrita cai fora
+   * do escopo (US-212), NÃO commita direto — vira proposta em REVIEW (ponte
+   * EP-80) e a resposta é o `MemoryReviewItem`.
    */
   @Post('write')
   @UsePipes(new ZodValidationPipe(memoryWriteSchema))
-  write_(@Body() dto: MemoryWriteDto) {
-    if (dto.module) {
-      const scopePrefix = this.policy.scopeFor(dto.module);
-      const scope = this.policy.classifyWrite({ scopePrefix, path: dto.path });
+  write_(@Body() dto: MemoryWriteDto, @Req() req: RequestWithMemoryAgent) {
+    const identity = req[MEMORY_AGENT_KEY];
+    // Identidade autenticada tem precedência: autor e escopo vêm do token.
+    const sessionId = identity ? sessionOf(identity) : dto.sessionId;
+    const module = identity ? identity.scope : dto.module;
+    const effective: MemoryWriteDto = { ...dto, sessionId, module };
+
+    if (module) {
+      const scopePrefix = this.policy.scopeFor(module);
+      const scope = this.policy.classifyWrite({ scopePrefix, path: effective.path });
       if (scope === 'out-of-scope') {
-        const holder = this.policy.agentIdFor({ sessionId: dto.sessionId });
+        const holder = identity?.agentId ?? this.policy.agentIdFor({ sessionId });
         return this.review.enterReview({
-          path: dto.path,
+          path: effective.path,
           reason: 'out-of-scope',
-          sessionId: dto.sessionId,
+          sessionId,
           holder,
-          baseCommit: dto.baseCommit,
+          baseCommit: effective.baseCommit,
         });
       }
     }
-    return this.write.commit(dto);
+    return this.write.commit(effective);
   }
 
   /** Aquisição de lease advisory (US-208) — retorna `baseCommit`. */
   @Post('acquire')
   @UsePipes(new ZodValidationPipe(memoryAcquireSchema))
-  acquire(@Body() dto: MemoryAcquireDto) {
-    return this.lock.acquire(dto.path, dto.holder, dto.ttlMs);
+  acquire(@Body() dto: MemoryAcquireDto, @Req() req: RequestWithMemoryAgent) {
+    const holder = holderFrom(req, dto.holder);
+    return this.lock.acquire(dto.path, holder, dto.ttlMs);
   }
 
   /** Renovação de TTL do lease (US-208). */
   @Post('heartbeat')
   @UsePipes(new ZodValidationPipe(memoryHeartbeatSchema))
-  async heartbeat(@Body() dto: MemoryHeartbeatDto) {
-    const expiresAt = await this.lock.heartbeat(dto.path, dto.holder, dto.ttlMs);
-    return { path: dto.path, holder: dto.holder, expiresAt };
+  async heartbeat(@Body() dto: MemoryHeartbeatDto, @Req() req: RequestWithMemoryAgent) {
+    const holder = holderFrom(req, dto.holder);
+    const expiresAt = await this.lock.heartbeat(dto.path, holder, dto.ttlMs);
+    return { path: dto.path, holder, expiresAt };
   }
 
   /** Liberação do lease (US-208) — dispara o merge do ramo efêmero. */
   @Post('release')
   @UsePipes(new ZodValidationPipe(memoryReleaseSchema))
-  async release(@Body() dto: MemoryReleaseDto) {
-    await this.lock.release(dto.path, dto.holder);
+  async release(@Body() dto: MemoryReleaseDto, @Req() req: RequestWithMemoryAgent) {
+    const holder = holderFrom(req, dto.holder);
+    await this.lock.release(dto.path, holder);
     return { path: dto.path, released: true };
   }
 
   /** Arbitragem de um REVIEW (US-209) — ponte fina para a EP-80. */
   @Post('resolve')
   @UsePipes(new ZodValidationPipe(memoryResolveSchema))
-  resolve(@Body() dto: MemoryResolveDto) {
-    return this.review.resolve(dto);
+  resolve(@Body() dto: MemoryResolveDto, @Req() req: RequestWithMemoryAgent) {
+    const identity = req[MEMORY_AGENT_KEY];
+    // O árbitro autenticado (token) tem precedência sobre o body.
+    const arbiter = identity?.agentId ?? dto.arbiter;
+    return this.review.resolve({ ...dto, arbiter });
   }
 
   /**
@@ -175,4 +199,23 @@ export class MemoryController {
     const pruned = await this.gc.pruneEphemeralBranches();
     return { pruned, count: pruned.length };
   }
+}
+
+/**
+ * Deriva o `holder` de um lease: identidade autenticada (token) tem precedência
+ * sobre o `holder` do body — o mesmo agent sempre coordena com a mesma
+ * identidade estável, independentemente do que envie no corpo.
+ */
+function holderFrom(req: RequestWithMemoryAgent, bodyHolder: string): string {
+  const identity = req[MEMORY_AGENT_KEY];
+  return identity?.agentId ?? bodyHolder;
+}
+
+/**
+ * Deriva um `sessionId` estável a partir da identidade do token: remove o
+ * prefixo `ai:` do `agentId` (`ai:claude-1` → `claude-1`) para nomear o ramo
+ * efêmero por autor. Mantém o `agentId` como âncora da identidade.
+ */
+function sessionOf(identity: MemoryAgentIdentity): string {
+  return identity.agentId.replace(/^ai:/, '');
 }

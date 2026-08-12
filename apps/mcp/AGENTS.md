@@ -24,7 +24,7 @@ o loop engine**.
 
 ```
 apps/mcp/src/
-├── main.ts        # bootstrap stdio; lê KANBAN_API_URL / KANBAN_API_TOKEN; wiring
+├── main.ts        # bootstrap stdio + Streamable HTTP (MCP_HTTP_PORT); KANBAN_API_URL/TOKEN; wiring
 ├── client.ts      # cliente HTTP tipado da API + tradução de erro
 ├── mapping.ts     # McpToolError + erros acionáveis
 ├── streaming.ts   # WS /ws → notifications/resources/updated (chat de tasks)
@@ -73,7 +73,38 @@ Config de cliente (ex.: Claude Desktop):
 }
 ```
 
+## Transporte remoto (Streamable HTTP — EP-C / US-C1)
+
+Além do **stdio** (default, uso local), o `main.ts` expõe o server MCP via
+**Streamable HTTP** do SDK (`@modelcontextprotocol/sdk` `^1.30.0` — expõe
+`StreamableHTTPServerTransport`) para agents **externos** por rede:
+
+- Ligue setando `MCP_HTTP_PORT`. Host configurável por `MCP_HTTP_HOST` (default
+  `127.0.0.1` — não expõe a rede sem intenção). Endpoint: `http://<host>:<port>/mcp`.
+- **O stdio é preservado** e roda em conjunto quando `MCP_HTTP_PORT` está setado
+  (opt-out via `MCP_HTTP_ONLY=true`). Sem `MCP_HTTP_PORT`, o comportamento é o
+  histórico: só stdio.
+- Padrão **stateful**: um `StreamableHTTPServerTransport` + `McpServer` por sessão,
+  indexado pelo header `mcp-session-id` (retornado no `initialize`). O
+  `buildServer()` factory garante que ambos os transportes registram as mesmas
+  tools/resources/streaming.
+
+```bash
+# sobe HTTP (+ stdio) — smoke: initialize -> tools/list lista as memory_* tools
+MCP_HTTP_PORT=39217 node apps/mcp/dist/main.js
+```
+
+Guia de integração de um agent externo (fluxo acquire→read→write→release, auth,
+contrato de erros, exemplos curl): ver
+[docs/how-to-plug-an-agent-into-the-hive.md](../../docs/how-to-plug-an-agent-into-the-hive.md).
+
 ## Auth
 
-v1 sem auth (ADR-0009). `KANBAN_API_TOKEN` já é lido e enviado como
-`Authorization: Bearer` quando presente — preparado para quando a API ganhar auth.
+O plano de controle de **cards/board** v1 não tem auth (ADR-0009). O plano de
+controle de **memória**, porém, é protegido (EP-C / US-C2): quando a API tem
+`MEMORY_API_TOKENS` configurada, as rotas `/memory/*` exigem
+`Authorization: Bearer <token>`. `KANBAN_API_TOKEN` é lido e enviado como
+`Authorization: Bearer` quando presente — configure-o com um token de
+`MEMORY_API_TOKENS` para que os writes de memória via MCP herdem a
+identidade/escopo (`agentId`/`scope`) corretos. Sem `MEMORY_API_TOKENS`, a auth de
+memória fica desligada (dev local).
