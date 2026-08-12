@@ -7,8 +7,9 @@
  */
 
 import type { AgentSessionState, ExecState } from './enums';
-import type { AffectedFlow, Card, Iteration } from './domain';
+import type { AffectedFlow, AgentId, Card, Iteration, Owner } from './domain';
 import type { BacklogProposal, BacklogTaskProposal } from './backlog-chat';
+import type { MemoryConflict, MemoryReviewItem } from './dtos';
 
 /** Status derivado de um epic a partir das stories filhas. */
 export type EpicDerivedStatus = 'todo' | 'inprogress' | 'done';
@@ -271,6 +272,82 @@ export interface BacklogTurnDoneEvent {
   channel: string;
 }
 
+/**
+ * Um neurônio (path da colmeia de memória) teve seu lock ADQUIRIDO — passou de
+ * FREE para EDITING. A web usa isto para exibir o cadeado e o dono na UI de
+ * memória sem F5. Payload mínimo: o `path` travado, o `headCommit` corrente do
+ * path no instante do lock e o `owner` que passou a segurá-lo.
+ */
+export interface MemoryLockedEvent {
+  type: 'memory.locked';
+  /** Path do neurônio travado (ver `Neuron.path`). */
+  path: string;
+  /** `headCommit` corrente do path no instante do lock (ver `Neuron.headCommit`). */
+  headCommit: string;
+  /** Dono que adquiriu o lock (AI-id ou humano-id; ver `Owner`). */
+  owner: Owner;
+}
+
+/**
+ * Um neurônio teve seu lock LIBERADO — passou de EDITING (ou REVIEW) de volta
+ * para FREE. A web usa isto para retirar o cadeado e o dono na UI de memória sem
+ * F5. Payload mínimo: o `path` liberado, o `headCommit` corrente do path no
+ * instante da liberação e o `owner` que segurava o lock até então.
+ */
+export interface MemoryReleasedEvent {
+  type: 'memory.released';
+  /** Path do neurônio liberado (ver `Neuron.path`). */
+  path: string;
+  /** `headCommit` corrente do path no instante da liberação (ver `Neuron.headCommit`). */
+  headCommit: string;
+  /** Dono que segurava o lock até a liberação (AI-id ou humano-id; ver `Owner`). */
+  owner: Owner;
+}
+
+/**
+ * O conteúdo de um neurônio foi ATUALIZADO (novo commit gravado via write/CAS)
+ * enquanto o lock seguia com o holder. A web usa isto para recarregar o conteúdo
+ * exibido e avançar o `headCommit` sem F5. Payload mínimo: o `path` atualizado, o
+ * NOVO `headCommit` resultante da mutação e o `agentId` que a produziu.
+ */
+export interface MemoryUpdatedEvent {
+  type: 'memory.updated';
+  /** Path do neurônio atualizado (ver `Neuron.path`). */
+  path: string;
+  /** NOVO `headCommit` resultante da mutação (ver `Neuron.headCommit`). */
+  headCommit: string;
+  /** Agent que produziu a atualização (ver `AgentId`). */
+  agentId: AgentId;
+}
+
+/**
+ * Um neurônio entrou em CONFLITO SEMÂNTICO — o merge 3-way não resolveu duas
+ * verdades no mesmo trecho, levando o path de `EDITING` a `REVIEW`. A web usa
+ * isto para sinalizar a disputa na UI de memória sem F5 (cadeado em REVIEW + os
+ * dois lados a arbitrar). Payload: o `conflict` completo com os 2 lados
+ * (`ours`/`theirs`) + `baseCommit` (ver `MemoryConflict`). Distingue-se do 409
+ * anti-stale de _timing_ ({@link MemoryUpdatedEvent} não é emitido aqui; o CAS
+ * sucedeu, mas o conteúdo colide).
+ */
+export interface MemoryConflictEvent {
+  type: 'memory.conflict';
+  /** Descrição da disputa: os 2 lados (`ours`/`theirs`) + `baseCommit` (ver `MemoryConflict`). */
+  conflict: MemoryConflict;
+}
+
+/**
+ * Um neurônio ENTROU NA FILA DE REVIEW — passou de `EDITING` a `REVIEW`
+ * aguardando arbitragem (por conflito semântico ou proposta fora de escopo). A
+ * web usa isto para exibir/atualizar a fila de revisão sem F5. Payload: o `item`
+ * completo da fila (ver `MemoryReviewItem`), que carrega `path`, `baseCommit`,
+ * `reason`, o `conflict` (quando houver) e quem arbitra.
+ */
+export interface MemoryReviewEvent {
+  type: 'memory.review';
+  /** Registro do que entrou em REVIEW e quem o arbitra (ver `MemoryReviewItem`). */
+  item: MemoryReviewItem;
+}
+
 /** Keep-alive. */
 export interface PingEvent {
   type: 'ping';
@@ -338,6 +415,11 @@ export type ServerEvent =
   | CommentCreatedEvent
   | BoardUpdatedEvent
   | CardNeedsHumanEvent
+  | MemoryLockedEvent
+  | MemoryReleasedEvent
+  | MemoryUpdatedEvent
+  | MemoryConflictEvent
+  | MemoryReviewEvent
   | PingEvent;
 
 /** Nomes de eventos, úteis para type-guards e roteamento. */

@@ -13,6 +13,7 @@ import type {
   ExecState,
   IterationPhase,
   LoopProfileId,
+  NeuronLockState,
   StoryPoints,
   ValidationStrategy,
 } from './enums';
@@ -322,4 +323,96 @@ export function isVerifiableEvidence(
     Array.isArray((evidence as StructuredEvidence).checks) &&
     (evidence as StructuredEvidence).checks.some((c) => c && c.passed === true)
   );
+}
+
+/**
+ * Identidade ESTÁVEL de um agent da colmeia, derivada da sessão + story em que
+ * ele trabalha. É o handle que amarra tudo o que um agent faz na memória viva:
+ * o `holder` de um lock de edição, o autor de uma mutação e o namespace do ramo
+ * efêmero de escrita (`mem/ai/<sessao>/<path>`).
+ *
+ * Convenção de forma (ver ADR-0027): `ai:<sessao>` para agents autônomos. Como a
+ * sessão é ancorada na story, dois passos do loop na MESMA story compartilham o
+ * mesmo `AgentId` — é isso que torna a identidade "estável" entre iterações, e
+ * não um id novo a cada `spawn`.
+ *
+ * É apenas o CONTRATO da identidade (uma string com convenção de prefixo); a
+ * derivação real (sessão+story → id) e qualquer autorização vivem na Camada 2,
+ * fora deste pacote.
+ *
+ * @example 'ai:sess_9f3a' // agent autônomo de uma sessão ligada a uma story
+ */
+export type AgentId = string;
+
+/**
+ * Dono (holder) de um lock de edição de neurônio na colmeia. Identifica QUEM
+ * detém o lease `EDITING`/`REVIEW` — pode ser um agent de AI ou um humano.
+ *
+ * Convenção de forma (ver ADR-0027): `ai:<id>` para agents autônomos (o mesmo
+ * handle estável do `AgentId`, derivado de sessão+story) e `human:<id>` para
+ * pessoas. O prefixo distingue a natureza do dono sem exigir um campo extra.
+ *
+ * É apenas o CONTRATO do identificador (uma string com convenção de prefixo);
+ * autenticação e autorização vivem na Camada 2, fora deste pacote. Nos eventos e
+ * no índice, `null` significa que o neurônio está `FREE` (sem dono).
+ *
+ * @example 'ai:sess_9f3a'   // lock detido por um agent autônomo
+ * @example 'human:u_1287'   // lock detido por um humano
+ */
+export type Owner = string;
+
+/**
+ * Neuron — unidade de memória versionada da colmeia (ver ADR-0027).
+ *
+ * Um neurônio é um documento markdown granular por assunto (feature, endpoint,
+ * convenção aprendida, beco sem saída). A fonte da verdade do `content` é o git
+ * da Camada 1; este shape é a projeção type-safe consumida por api+web+mcp
+ * (Camada 2 — índice + locks). Sem lógica: só o contrato.
+ */
+export interface Neuron {
+  /**
+   * Identidade LÓGICA e única do neurônio — o arquivo `.md` versionado, nomeado
+   * pelo assunto (ex.: 'apps/api/src/modules/cards', 'endpoints/cards.create').
+   * É a CHAVE fina de tudo: leitura, aquisição de lock e nome do ramo efêmero
+   * de escrita (`mem/ai/<sessao>/<path>`). Distingue-se de `module`: `path` é a
+   * identidade granular do documento; `module` é o agrupamento grosso a que ele
+   * pertence. (Ver ADR-0027.)
+   */
+  path: string;
+  /**
+   * Conteúdo do neurônio em markdown. É uma PROJEÇÃO (cache) do arquivo `.md` no
+   * `headCommit`; a fonte da verdade do texto é o git da Camada 1, não este campo.
+   */
+  content: string;
+  /**
+   * SHA do commit HEAD do neurônio no git da Camada 1 — a FONTE DA VERDADE da
+   * versão. Índice (Postgres) e eventos WS são projeções derivadas e
+   * reindexáveis do git; por isso o git nunca fica "atrás" (no pior caso, à
+   * frente). Comparar `headCommit` com o `baseCommit` que o holder leu é o que
+   * detecta escrita _stale_ no write. (Ver ADR-0027.)
+   */
+  headCommit: string;
+  /**
+   * Módulo/escopo GROSSO a que o neurônio pertence (ex.: 'cards', 'ai-engine').
+   * Ao contrário de `path` (identidade fina do documento), `module` agrupa
+   * neurônios para fins de escopo de edição e arbitragem — uma proposta "fora do
+   * escopo" do autor pode encaminhar o neurônio a REVIEW. (Ver ADR-0027.)
+   */
+  module: string;
+  /** Estado do lock de edição (ver `NeuronLockState`, US-114). */
+  lockState: NeuronLockState;
+  /** Dono atual do lock (AI-id ou humano-id; ver `Owner`); null quando FREE. */
+  owner: Owner | null;
+  /**
+   * `baseCommit` do lock ativo: o `headCommit` que o holder LEU no `acquire`;
+   * null quando FREE. É a âncora do COMPARE-AND-SWAP: o holder envia este SHA no
+   * `write` e o serviço compara com o `headCommit` ATUAL do path. Se forem iguais
+   * (não divergiu), o write procede; se o `headCommit` mudou (outro holder fechou
+   * uma mutação no meio), o `baseCommit` está _stale_ e o serviço responde 409
+   * anti-stale — quem protege contra _lost-update_ é este CAS, não o lock (que é
+   * advisory/presença). (Ver ADR-0027.)
+   */
+  baseCommit: string | null;
+  /** Epoch ms da última atualização do neurônio. */
+  updatedAt: number;
 }

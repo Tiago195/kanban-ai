@@ -1,11 +1,35 @@
 /**
  * Configuração centralizada da API, lida de variáveis de ambiente.
  * Ver `.env.example` na raiz do monorepo.
+ *
+ * NOTA: existe **um único** arquivo de exemplo de env — `.env.example` na
+ * **raiz** do monorepo. Embora existam dois `.env` reais em runtime (raiz e
+ * `apps/api/.env`, ver ADR-0019), **não** há `apps/api/.env.example`: todas as
+ * chaves ficam documentadas no template da raiz.
+ *
+ * AVISO (anti-alucinação): NÃO crie `apps/api/.env.example`. Esse path é um
+ * arquivo-fantasma — nunca existiu e não deve existir. Este módulo lê apenas
+ * `process.env.*` (nenhuma leitura de `.env.example` em runtime); o template
+ * versionado vive só na raiz. Ferramentas/agents não devem listá-lo como
+ * arquivo tocado no fluxo `config-boot`.
  */
 export interface AppConfig {
   apiPort: number;
   wsPath: string;
   databaseUrl: string;
+  /**
+   * Serviço de memória (ADR-0027, Camada 1 — git como fonte da verdade).
+   */
+  memory: {
+    /**
+     * Raiz do **bare git repository** da memória (isomorphic-git). Aponta para
+     * um **volume dedicado do serviço**, FORA do repo-alvo, com ciclo de vida
+     * independente (não é clone nem convive com o working tree do projeto).
+     * Lido de `MEMORY_GIT_DIR`. Default: `./.kanban-ai-memory/git` (relativo ao
+     * cwd da API). A validação no boot garante que esteja configurado/válido.
+     */
+    gitDir: string;
+  };
   agent: {
     defaultModel: string;
     maxConcurrentSessions: number;
@@ -136,11 +160,40 @@ function csv(value: string | undefined, fallback: string[]): string[] {
   return parsed.length > 0 ? parsed : fallback;
 }
 
+/**
+ * Default do bare repo da memória (ADR-0027, Camada 1). VOLUME DEDICADO, com
+ * ciclo de vida independente e FORA do repo-alvo.
+ */
+export const DEFAULT_MEMORY_GIT_DIR = './.kanban-ai-memory/git';
+
+/**
+ * Resolve e valida o caminho do bare repo da memória (`MEMORY_GIT_DIR`),
+ * falhando cedo com mensagem clara se estiver configurado de forma inválida.
+ *
+ * - Ausente (`undefined`): usa o default documentado.
+ * - Presente mas vazio/só-espaços: erro (configuração explícita inválida).
+ * - Presente e válido: usa o valor com trim.
+ */
+export function resolveMemoryGitDir(value: string | undefined): string {
+  if (value === undefined) return DEFAULT_MEMORY_GIT_DIR;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new Error(
+      'MEMORY_GIT_DIR está definido mas vazio: configure o caminho do bare repo ' +
+        `da memória (volume dedicado, fora do repo-alvo) ou remova a variável para usar o default "${DEFAULT_MEMORY_GIT_DIR}".`,
+    );
+  }
+  return trimmed;
+}
+
 export function loadConfig(): AppConfig {
   return {
     apiPort: num(process.env.API_PORT, 3333),
     wsPath: process.env.WS_PATH ?? '/ws',
     databaseUrl: process.env.DATABASE_URL ?? '',
+    memory: {
+      gitDir: resolveMemoryGitDir(process.env.MEMORY_GIT_DIR),
+    },
     agent: {
       defaultModel: process.env.AGENT_DEFAULT_MODEL ?? 'opus',
       maxConcurrentSessions: num(process.env.AGENT_MAX_CONCURRENT_SESSIONS, 3),
