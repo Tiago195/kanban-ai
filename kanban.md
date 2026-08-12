@@ -14,13 +14,6 @@
   - **Correção sugerida (NÃO aplicada):** o `CopilotCliRunner` deve **extrair os tokens do output real da Copilot CLI** (parsear a linha/telemetria de usage emitida pela própria CLI ao final da execução) em vez de esperá-los no `KANBAN_RESULT`. Alimentar `inputTokens`/`outputTokens` do `AgentRunResult` a partir dessa fonte. Manter o mock como está. (Alternativa/complemento: registrar tokens por chamada via API do provider, se disponível.)
   - **DOD:** após rodar uma iteração real (runner `cli`), a `Iteration` correspondente grava `inputTokens`/`outputTokens` > 0; o `LoopMetricsPanel` exibe os valores reais (não zero); specs cobrindo a extração de tokens do output da CLI no `CopilotCliRunner`; `npm run build && npm run lint && npm test` verdes.
 
-- [ ] **🟠 Serialização de story deveria ser por EPIC, não por aiProject (repo-alvo)** — solicitado 2026-08-12
-  - **Contexto/sintoma:** duas stories de **épicos diferentes** (US-135 do EP-76 e US-176 do EP-74) ficam bloqueadas entre si porque ambas resolvem o mesmo `aiProject` (`/home/tmeireles/dev/demo/kanban-ai`, herdado do epic). A US-135 pegou o slot e a US-176 fica em "aguardando serialização" indefinidamente — logo a TK-177 (task da US-176) nunca inicia.
-  - **Causa-raiz (`apps/api/src/modules/ai-engine/orchestrator.ts`):** `onStoryEnterInProgress` chama `findActiveStoryOnSameProject`, que compara stories pelo **repo-alvo resolvido** (`resolveStoryProject` → `workspaces.resolveTargetRepo`). Como stories de épicos distintos frequentemente compartilham o mesmo repo-alvo, a serialização "1 story In Progress por repo" as trata como conflitantes mesmo sendo trabalho independente.
-  - **Melhoria desejada:** a serialização deve valer **apenas dentro do mesmo epic** (mesmo `parentId` de story / mesma cadeia de epic), não para todo o repo-alvo. Stories de épicos diferentes que apontam para o mesmo repo devem poder rodar concorrentemente (respeitando o limite global de concorrência de sessões).
-  - **Pontos de código a ajustar (investigar):** `findActiveStoryOnSameProject` + `resolveStoryProject` (trocar a chave de conflito de "repo-alvo" para "epicId da story"); `resumeDeferredForProject` (retomar por epic em vez de por projeto) e quem o chama em `finishAuto`/saída de In Progress; revisar a nota de ADR-0019/serialização e specs de `orchestrator-guards.spec.ts` que cobrem a serialização.
-  - **Cuidado (invariante):** o agent coda direto no working tree do repo-alvo (worktree isolado ainda é stub — ver ADR-0019). Se dois épicos compartilham o MESMO repo-alvo físico, rodar em paralelo pode causar colisão de arquivos. Decidir no design: (a) serializar por epic **e** manter serialização por repo físico só quando o worktree isolado não existir; ou (b) exigir worktree por execução antes de habilitar concorrência no mesmo repo. Documentar a decisão em ADR.
-  - **DOD:** duas stories de épicos diferentes apontando para o mesmo repo-alvo iniciam sem uma bloquear a outra por serialização (dentro do limite global de sessões); duas stories do MESMO epic continuam serializadas; specs cobrindo ambos os casos; sem regressão no `resumeDeferredForProject`; `npm run build && npm run lint && npm test` verdes.
 
 - [ ] Precisamos melhorar o chat de conversa do backlog-chat
 
@@ -32,6 +25,11 @@
 
 # done
 <!-- apenas ultimas 2 tarefas, para n poluir o arquivo -->
+
+- [x] **🟠 Serialização de story deveria ser por EPIC, não por aiProject (repo-alvo)** — **CONCLUÍDO 2026-08-12 (build+lint+test verdes; 160/160 specs)**
+  - **Correção aplicada (`ai-engine/orchestrator.ts`):** a chave de conflito da serialização passou de "repo-alvo resolvido" para **epic** (`Card.parentId`). Novo `resolveStoryEpic(storyId)`; `findActiveStoryOnSameProject` → `findConflictingActiveStory` (compara epic da story com o das sessões ativas); `resumeDeferredForProject` → `resumeDeferredForStory` (retoma por epic). Stories de épicos diferentes rodam concorrentes (respeitando `AGENT_MAX_CONCURRENT_SESSIONS`); stories do mesmo epic continuam serializadas.
+  - **Guard-rail legado opcional:** novo flag `AGENT_SERIALIZE_BY_REPO` (default `false`) reforça a serialização também por repo-alvo físico enquanto o worktree isolado for stub (ADR-0019) e dois épicos ativos compartilharem o MESMO repo. Config + `.env.example` + AGENTS.md do módulo atualizados; 3 specs novos em `orchestrator-guards.spec.ts` (mesmo epic serializa; épicos distintos concorrem; flag reforça por repo).
+  - **DOD atingido:** épicos diferentes no mesmo repo iniciam sem bloqueio mútuo; mesmo epic continua serializado; specs cobrindo ambos os casos + o flag; `resumeDeferredForStory` sem regressão; `npm run build && npm run lint && npm test` verdes.
 
 - [x] **🔴 Loop de derivação cria tasks "Corrigir: …" duplicadas ao infinito (sem dedup)** — **CONCLUÍDO 2026-08-12 (build+lint+test verdes; 157/157 specs)**
   - **Causa-raiz:** `createDerivedTask` nunca lia as tasks existentes antes de criar `Corrigir: ${problem.title}` (sem dedup) e os caps eram por-cadeia (`derivedDepth`/`validationFailures` da task de origem) — cada falha iniciava uma cadeia NOVA (depth reinicia) escapando do guard-rail; a US-135 acumulou 7 tasks idênticas.

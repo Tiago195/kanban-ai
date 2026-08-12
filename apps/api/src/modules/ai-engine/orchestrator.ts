@@ -110,20 +110,21 @@ export class Orchestrator implements OnModuleInit {
       return;
     }
 
-    // SERIALIZAÇÃO por aiProject: como o agent agora coda DIRETO no working tree
-    // do repo-alvo (sem worktree isolado), duas stories apontando para o mesmo
-    // aiProject se sobrescreveriam. Se já houver outra story ativa no mesmo
-    // repo-alvo, adiamos esta — só uma story In Progress por aiProject.
-    const conflictStoryId = await this.findActiveStoryOnSameProject(storyId);
+    // SERIALIZAÇÃO por EPIC: o loop engine trabalha uma story por epic de cada
+    // vez (stories do MESMO epic são serializadas). Stories de épicos DIFERENTES
+    // rodam concorrentes, respeitando apenas o limite global de sessões. Quando
+    // `serializeByRepo` está ligado (worktree isolado ainda é stub — ADR-0019),
+    // reforçamos com o guard-rail legado de "uma story por repo-alvo físico".
+    const conflictStoryId = await this.findConflictingActiveStory(storyId);
     if (conflictStoryId) {
       this.logger.warn(
-        `Serialização: story=${storyId} compartilha aiProject com story=${conflictStoryId} ` +
-          '(já ativa). Adiando até a outra concluir.',
+        `Serialização: story=${storyId} conflita com story=${conflictStoryId} ` +
+          '(já ativa no mesmo epic/repo-alvo). Adiando até a outra concluir.',
       );
       await this.log(
         storyId,
-        `aguardando serialização — outra story (${conflictStoryId}) já está trabalhando no mesmo ` +
-          'repositório-alvo (aiProject). Esta story iniciará quando a anterior sair de In Progress.',
+        `aguardando serialização — outra story (${conflictStoryId}) já está ativa no mesmo ` +
+          'epic (ou repositório-alvo). Esta story iniciará quando a anterior sair de In Progress.',
       );
       return;
     }
@@ -176,12 +177,12 @@ export class Orchestrator implements OnModuleInit {
    * após a story sair de In Progress (o `finishAuto` só era chamado pelo próprio
    * loop ao concluir todas as tasks ou pelo watchdog). Uma story concluída e
    * movida para Done — ou qualquer saída manual — deixava a sessão "fantasma"
-   * viva, e `findActiveStoryOnSameProject` bloqueava indefinidamente qualquer
-   * outra story do mesmo aiProject até reiniciar a API.
+   * viva, e `findConflictingActiveStory` bloqueava indefinidamente qualquer
+   * outra story do mesmo epic (ou repo-alvo) até reiniciar a API.
    *
    * Agora liberamos o slot explicitamente: `finishAuto` para o auto-play,
-   * remove a sessão, limpa o watchdog e destrava (via `resumeDeferredForProject`)
-   * a próxima story pendente do mesmo repo-alvo. Idempotente: se não houver
+   * remove a sessão, limpa o watchdog e destrava (via `resumeDeferredForStory`)
+   * a próxima story pendente do mesmo epic/repo-alvo. Idempotente: se não houver
    * sessão/timer, é no-op.
    */
   onStoryLeaveInProgress(storyId: string): void {
@@ -192,19 +193,43 @@ export class Orchestrator implements OnModuleInit {
   }
 
   /**
-   * Retorna o id de uma story que já está em execução (sessão ativa) no mesmo
-   * repo-alvo (aiProject) da `storyId` dada, ou `null` se não houver conflito.
-   * Sem aiProject resolvido, não há como colidir — retorna null.
+   * Retorna o id de uma story JÁ ativa (sessão em execução) que conflita com a
+   * `storyId` dada, ou `null` se não houver conflito. Conflito = mesma story do
+   * MESMO epic (serialização por epic). Quando `config.agent.serializeByRepo`
+   * está ligado, também conflita se compartilhar o MESMO repo-alvo físico
+   * (guard-rail legado para o cenário sem worktree isolado — ADR-0019).
+   * Stories de épicos diferentes só concorrem pelo limite global de sessões.
    */
-  private async findActiveStoryOnSameProject(storyId: string): Promise<string | null> {
-    const target = await this.resolveStoryProject(storyId);
-    if (!target) return null;
+  private async findConflictingActiveStory(storyId: string): Promise<string | null> {
+    const epicId = await this.resolveStoryEpic(storyId);
+    const target = this.config.agent.serializeByRepo
+      ? await this.resolveStoryProject(storyId)
+      : null;
+    if (!epicId && !target) return null;
     for (const activeId of this.sessions.activeStoryIds()) {
       if (activeId === storyId) continue;
-      const otherTarget = await this.resolveStoryProject(activeId);
-      if (otherTarget && otherTarget === target) return activeId;
+      if (epicId) {
+        const otherEpic = await this.resolveStoryEpic(activeId);
+        if (otherEpic && otherEpic === epicId) return activeId;
+      }
+      if (target) {
+        const otherTarget = await this.resolveStoryProject(activeId);
+        if (otherTarget && otherTarget === target) return activeId;
+      }
     }
     return null;
+  }
+
+  /**
+   * Resolve o id do epic (card pai) de uma story — a âncora de serialização.
+   * Retorna null se a story não tiver `parentId` (story órfã, sem epic).
+   */
+  private async resolveStoryEpic(storyId: string): Promise<string | null> {
+    const story = await this.prisma.card.findUnique({
+      where: { id: storyId },
+      select: { parentId: true },
+    });
+    return story?.parentId ?? null;
   }
 
   /**
@@ -303,9 +328,10 @@ export class Orchestrator implements OnModuleInit {
     // Diretório de trabalho do agent = o PRÓPRIO repo-alvo (aiProject). O agent
     // coda direto na branch já aberta, sem worktree isolado nem branch/commit —
     // deixando as mudanças no working tree do projeto. A colisão entre stories
-    // concorrentes do mesmo repo é resolvida por SERIALIZAÇÃO em
-    // onStoryEnterInProgress (uma story In Progress por aiProject). Se o
-    // projeto-alvo não estiver definido/for inválido, RECUSAMOS rodar — o agent
+    // concorrentes é resolvida por SERIALIZAÇÃO em onStoryEnterInProgress (uma
+    // story In Progress por EPIC; opcionalmente também por repo-alvo físico via
+    // AGENT_SERIALIZE_BY_REPO). Se o projeto-alvo não estiver definido/for
+    // inválido, RECUSAMOS rodar — o agent
     // nunca pode trabalhar no repo do kanban-ai. A task fica em blocked-dep.
     let cwd = '';
     try {
@@ -1083,27 +1109,31 @@ export class Orchestrator implements OnModuleInit {
     this.stopRequested.delete(storyId);
     this.realtime.broadcast({ type: 'auto.stopped', storyId, mode });
     // Story concluída/parada: libera o slot (sessão + watchdog) para que a
-    // SERIALIZAÇÃO possa iniciar uma story pendente do mesmo aiProject. Não há
-    // worktree a destruir — o agent codou direto no repo-alvo e o trabalho
-    // permanece no working tree (comportamento desejado). O cleanupWorktree
-    // apenas solta o tracking em memória.
+    // SERIALIZAÇÃO possa iniciar uma story pendente do mesmo epic (ou repo-alvo,
+    // quando serializeByRepo). Não há worktree a destruir — o agent codou direto
+    // no repo-alvo e o trabalho permanece no working tree (comportamento
+    // desejado). O cleanupWorktree apenas solta o tracking em memória.
     this.sessions.remove(storyId);
     this.clearWatchdog(storyId);
     void this.workspaces.cleanupWorktree(storyId).catch(() => undefined);
-    // SERIALIZAÇÃO: destrava a próxima story que estava aguardando este repo.
-    void this.resumeDeferredForProject(storyId).catch(() => undefined);
+    // SERIALIZAÇÃO: destrava a próxima story que estava aguardando este epic/repo.
+    void this.resumeDeferredForStory(storyId).catch(() => undefined);
   }
 
   /**
-   * SERIALIZAÇÃO: ao liberar um repo-alvo, procura stories que estão em "In
-   * Progress" no board mas SEM sessão ativa (foram adiadas por compartilhar o
-   * aiProject) e reinicia o loop de UMA delas. Chamado quando uma story termina.
+   * SERIALIZAÇÃO: ao liberar uma story, procura stories que estão em "In
+   * Progress" no board mas SEM sessão ativa (foram adiadas por conflito de
+   * serialização — mesmo epic, ou mesmo repo-alvo quando `serializeByRepo`) e
+   * reinicia o loop de UMA delas. Chamado quando uma story termina.
    *
    * @param finishedStoryId story que acabou de liberar o slot (ignorada na busca).
    */
-  private async resumeDeferredForProject(finishedStoryId: string): Promise<void> {
-    const freedProject = await this.resolveStoryProject(finishedStoryId);
-    if (!freedProject) return;
+  private async resumeDeferredForStory(finishedStoryId: string): Promise<void> {
+    const freedEpic = await this.resolveStoryEpic(finishedStoryId);
+    const freedProject = this.config.agent.serializeByRepo
+      ? await this.resolveStoryProject(finishedStoryId)
+      : null;
+    if (!freedEpic && !freedProject) return;
 
     // Stories em colunas "In Progress" do board, sem sessão ativa.
     const inProgressCols = await this.prisma.column.findMany({
@@ -1123,11 +1153,21 @@ export class Orchestrator implements OnModuleInit {
     for (const cand of candidates) {
       if (cand.id === finishedStoryId) continue;
       if (this.sessions.get(cand.id)) continue; // já ativa
-      const candProject = await this.resolveStoryProject(cand.id);
-      if (candProject && candProject === freedProject) {
+      let matches = false;
+      if (freedEpic) {
+        const candEpic = await this.resolveStoryEpic(cand.id);
+        if (candEpic && candEpic === freedEpic) matches = true;
+      }
+      if (!matches && freedProject) {
+        const candProject = await this.resolveStoryProject(cand.id);
+        if (candProject && candProject === freedProject) matches = true;
+      }
+      if (matches) {
+        // Só reinicia se ainda houver conflito real (evita re-disparar uma story
+        // que já poderia iniciar sozinha). onStoryEnterInProgress reavalia.
         await this.log(
           cand.id,
-          'serialização liberada — o repositório-alvo ficou livre; iniciando o loop desta story.',
+          'serialização liberada — o epic/repo-alvo ficou livre; iniciando o loop desta story.',
         );
         await this.onStoryEnterInProgress(cand.id);
         return; // uma por vez

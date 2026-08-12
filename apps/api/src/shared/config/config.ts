@@ -124,6 +124,18 @@ export interface AppConfig {
      */
     maxTaskTokens: number;
     /**
+     * Serialização de stories: quando `true`, mantém o guard-rail LEGADO de "uma
+     * story In Progress por repo-alvo físico" (aiProject) EM ADIÇÃO à
+     * serialização por epic. Necessário só enquanto o worktree isolado por
+     * execução for stub (ADR-0019): dois épicos apontando para o MESMO repo
+     * físico se sobrescreveriam ao codar no mesmo working tree. Default `false`
+     * — a serialização passa a ser por EPIC (stories de épicos diferentes rodam
+     * concorrentes, respeitando o limite global de sessões). Ligue quando vários
+     * épicos ativos compartilharem o mesmo repo-alvo sem worktree isolado.
+     * AGENT_SERIALIZE_BY_REPO.
+     */
+    serializeByRepo: boolean;
+    /**
      * Anti-thrash — similaridade (0..1) entre `summary`+`nextStep` de iterações
      * consecutivas acima da qual a AI é considerada "travada". Default 0.9.
     /**
@@ -232,6 +244,7 @@ export function loadConfig(): AppConfig {
       maxDerivedPerProblem: num(process.env.AGENT_MAX_DERIVED_PER_PROBLEM, 2),
       maxTaskDurationMs: num(process.env.AGENT_MAX_TASK_DURATION_MS, 0),
       maxTaskTokens: num(process.env.AGENT_MAX_TASK_TOKENS, 0),
+      serializeByRepo: process.env.AGENT_SERIALIZE_BY_REPO === 'true',
       thrashDetectionEnabled:
         process.env.AGENT_THRASH_DETECTION_ENABLED === 'true',
       thrashSimilarityThreshold: num(process.env.AGENT_THRASH_SIMILARITY, 0.9),

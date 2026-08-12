@@ -52,6 +52,7 @@ function makeConfig(overrides: Partial<AppConfig['agent']> = {}): AppConfig {
     maxDerivedPerProblem: 2,
     maxTaskDurationMs: 0,
     maxTaskTokens: 0,
+    serializeByRepo: false,
     thrashDetectionEnabled: false,
     thrashSimilarityThreshold: 0.9,
     thrashWindow: 2,
@@ -757,33 +758,33 @@ test('buildPrompt: sem workdir, instrui a trabalhar só no cwd atual', () => {
 
 // ── BUG-A8: hook simétrico de saída de In Progress libera o slot ─────────────
 
-test('onStoryLeaveInProgress: remove a sessão e libera o aiProject (BUG-A8)', async () => {
-  // Duas stories no MESMO aiProject: story-1 ativa, story-2 pendente.
+test('onStoryLeaveInProgress: remove a sessão e libera o epic (BUG-A8)', async () => {
+  // Duas stories no MESMO epic: story-1 ativa, story-2 pendente.
   const prisma = makePrisma({
     cardFindUnique: async (args) => {
-      // resolveStoryProject: ambas apontam para o mesmo repo-alvo.
+      // resolveStoryEpic: ambas têm o mesmo parentId (epic-1).
       if (args.where.id === 'story-1' || args.where.id === 'story-2') {
-        return { aiProject: '/repo/target', parentId: null };
+        return { aiProject: '/repo/target', parentId: 'epic-1' };
       }
-      return { aiProject: '/repo/target', parentId: null };
+      return { aiProject: '/repo/target', parentId: 'epic-1' };
     },
   });
   const { orch, sessions } = makeOrchestrator({ prisma });
 
-  // story-1 em execução ocupa o slot do repo.
+  // story-1 em execução ocupa o slot do epic.
   sessions.start('story-1');
   assert.ok(sessions.get('story-1'), 'pré-condição: story-1 tem sessão ativa');
 
-  // Enquanto story-1 está ativa, story-2 (mesmo aiProject) está bloqueada.
-  const blockedBefore = await priv(orch).findActiveStoryOnSameProject('story-2');
+  // Enquanto story-1 está ativa, story-2 (mesmo epic) está bloqueada.
+  const blockedBefore = await priv(orch).findConflictingActiveStory('story-2');
   assert.equal(blockedBefore, 'story-1', 'story-2 deve estar bloqueada por story-1 antes do fix');
 
   // story-1 sai de In Progress (arrastada p/ Done): o hook deve liberar o slot.
   orch.onStoryLeaveInProgress('story-1');
   assert.equal(sessions.get('story-1'), undefined, 'a sessão de story-1 deve ser removida');
 
-  // Agora story-2 não colide mais — o repo-alvo está livre.
-  const blockedAfter = await priv(orch).findActiveStoryOnSameProject('story-2');
+  // Agora story-2 não colide mais — o epic está livre.
+  const blockedAfter = await priv(orch).findConflictingActiveStory('story-2');
   assert.equal(blockedAfter, null, 'story-2 não deve mais estar bloqueada após a saída de story-1');
 });
 
@@ -800,7 +801,58 @@ test('onStoryLeaveInProgress: idempotente quando não há sessão/timer (BUG-A8)
   );
 });
 
-// ── BUG-A7: erro fatal do runner → fail-fast (escala + para o loop) ──────────
+// ── Item 3: serialização por EPIC (não por repo-alvo físico) ─────────────────
+
+test('findConflictingActiveStory: stories do MESMO epic são serializadas', async () => {
+  const prisma = makePrisma({
+    cardFindUnique: async (args) => {
+      // ambas as stories pertencem ao mesmo epic (epic-1), repos distintos.
+      const map: Record<string, { aiProject: string; parentId: string | null }> = {
+        's1': { aiProject: '/repo/a', parentId: 'epic-1' },
+        's2': { aiProject: '/repo/b', parentId: 'epic-1' },
+      };
+      return map[args.where.id as string] ?? { aiProject: '', parentId: null };
+    },
+  });
+  const { orch, sessions } = makeOrchestrator({ prisma });
+  sessions.start('s1');
+  const conflict = await priv(orch).findConflictingActiveStory('s2');
+  assert.equal(conflict, 's1', 's2 deve serializar atrás de s1 (mesmo epic)');
+});
+
+test('findConflictingActiveStory: épicos diferentes mesmo repo rodam concorrentes (default)', async () => {
+  const prisma = makePrisma({
+    cardFindUnique: async (args) => {
+      // épicos diferentes, MESMO repo-alvo físico.
+      const map: Record<string, { aiProject: string; parentId: string | null }> = {
+        's1': { aiProject: '/repo/shared', parentId: 'epic-1' },
+        's2': { aiProject: '/repo/shared', parentId: 'epic-2' },
+      };
+      return map[args.where.id as string] ?? { aiProject: '', parentId: null };
+    },
+  });
+  const { orch, sessions } = makeOrchestrator({ prisma });
+  sessions.start('s1');
+  const conflict = await priv(orch).findConflictingActiveStory('s2');
+  assert.equal(conflict, null, 'épicos diferentes não conflitam por default (serializeByRepo=false)');
+});
+
+test('findConflictingActiveStory: serializeByRepo reforça guard por repo físico', async () => {
+  const prisma = makePrisma({
+    cardFindUnique: async (args) => {
+      // épicos diferentes, MESMO repo-alvo físico.
+      const map: Record<string, { aiProject: string; parentId: string | null }> = {
+        's1': { aiProject: '/repo/shared', parentId: 'epic-1' },
+        's2': { aiProject: '/repo/shared', parentId: 'epic-2' },
+      };
+      return map[args.where.id as string] ?? { aiProject: '', parentId: null };
+    },
+  });
+  const { orch, sessions } = makeOrchestrator({ config: makeConfig({ serializeByRepo: true }), prisma });
+  sessions.start('s1');
+  const conflict = await priv(orch).findConflictingActiveStory('s2');
+  assert.equal(conflict, 's1', 'com serializeByRepo=true, mesmo repo físico serializa mesmo em épicos distintos');
+});
 
 test('runIteration: fatalError do runner escala a humano, grava outcome=error e NÃO itera (BUG-A7)', async () => {
   const prisma = makePrisma({

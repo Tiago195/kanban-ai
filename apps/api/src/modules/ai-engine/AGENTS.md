@@ -91,6 +91,26 @@ por **quatro** gatilhos independentes — todos convergem para o mesmo destino:
   (dedup — apenas loga e deixa a derivada existente resolver); ao atingir o cap
   agregado, **escala** em vez de multiplicar cadeias paralelas.
 
+## Serialização de stories (por EPIC)
+
+O loop engine roda **uma story por epic** de cada vez. Duas stories do **mesmo
+epic** (mesmo `Card.parentId`) são **serializadas**: ao entrar em In Progress, a
+segunda é adiada (log de "aguardando serialização") e retomada automaticamente
+quando a primeira sai de In Progress (`resumeDeferredForStory`). Stories de
+**épicos diferentes** rodam **concorrentes**, limitadas apenas por
+`AGENT_MAX_CONCURRENT_SESSIONS`.
+
+- Âncora de conflito: `resolveStoryEpic(storyId)` → `Card.parentId` (o epic).
+- Detecção: `findConflictingActiveStory(storyId)` compara o epic da story com o
+  das sessões ativas (`sessions.activeStoryIds()`).
+- **Guard-rail legado opcional** — `AGENT_SERIALIZE_BY_REPO` (default `false`):
+  enquanto o worktree isolado por execução for **stub** ([ADR-0019](../../../../../docs/adr/0019-api-runs-on-host-not-docker.md)),
+  o agent coda direto no working tree do repo-alvo. Se **dois épicos ativos**
+  apontarem para o **MESMO repo físico**, eles se sobrescreveriam. Ligue este
+  flag para reforçar a serialização também por repo-alvo físico
+  (`resolveStoryProject`) nesse cenário. Por default fica desligado (a
+  serialização é puramente por epic).
+
 ## O que NÃO mexer
 
 - Não remova as salvaguardas nem torne o watchdog não-idempotente.
