@@ -22,19 +22,6 @@
   - **Cuidado (invariante):** o agent coda direto no working tree do repo-alvo (worktree isolado ainda é stub — ver ADR-0019). Se dois épicos compartilham o MESMO repo-alvo físico, rodar em paralelo pode causar colisão de arquivos. Decidir no design: (a) serializar por epic **e** manter serialização por repo físico só quando o worktree isolado não existir; ou (b) exigir worktree por execução antes de habilitar concorrência no mesmo repo. Documentar a decisão em ADR.
   - **DOD:** duas stories de épicos diferentes apontando para o mesmo repo-alvo iniciam sem uma bloquear a outra por serialização (dentro do limite global de sessões); duas stories do MESMO epic continuam serializadas; specs cobrindo ambos os casos; sem regressão no `resumeDeferredForProject`; `npm run build && npm run lint && npm test` verdes.
 
-- [ ] **🔴 Loop de derivação cria tasks "Corrigir: …" duplicadas ao infinito (sem dedup)** — descoberto 2026-08-12 (US-135)
-  - **Sintoma:** a US-135 acumulou **7 tasks idênticas** "Corrigir: Arquivo inexistente no fluxo \"config-boot\"" criadas em cadeia (12:52→13:44), a AI entrou em loop derivando a mesma correção sem parar.
-  - **Evidência (banco):** as 7 tasks formam VÁRIAS cadeias de derivação paralelas — TK-142→TK-175→TK-187→TK-190 (depth 1→2→3), TK-143→TK-185→TK-188 (1→2), TK-144→TK-186→TK-189 (1→2). Cada task de validação que falha com o MESMO problema deriva outra "Corrigir: …" nova.
-  - **Causa-raiz (`apps/api/src/modules/ai-engine/orchestrator.ts`):**
-    1. **`createDerivedTask` (~linha 858) não faz dedup**: sempre cria uma nova `Corrigir: ${problem.title}` sem checar se já existe uma task irmã idêntica/aberta para o mesmo problema/fluxo. `cards.service` também não deduplica por título. Ou seja: **o engine não lê as tasks existentes da story antes de criar uma nova** — não há verificação de duplicata.
-    2. **Os caps são por-cadeia/por-task, não agregados**: `decideValidationFailureAction` usa `derivedDepth` da task de ORIGEM (default `AGENT_MAX_DERIVED_DEPTH=3`) e `validationFailures` contados só **naquela** task (default `AGENT_MAX_VALIDATION_FAILURES=3`). Como cada falha vira uma cadeia NOVA (origem diferente, depth reinicia baixo), nenhum cap enxerga o total de 7 tasks idênticas na story. O loop escapa dos guard-rails multiplicando cadeias em vez de aprofundar uma só.
-  - **Resposta à pergunta "os agents leem as tasks antes de criar?":** NÃO. A derivação é feita 100% pelo engine (`createDerivedTask`), sem consultar tasks existentes; e a materialização via chat também não checa duplicatas. Nada impede criar N tasks com o mesmo título.
-  - **Correção sugerida (NÃO aplicada):**
-    - **Dedup na derivação:** antes de `createDerivedTask`, procurar task irmã aberta (mesmo `parentId`) com mesmo `problem.title`/fluxo; se existir, NÃO criar outra — reusar/reabrir a existente (ou escalar), e não recomeçar a cadeia.
-    - **Cap agregado por problema/fluxo na story:** contar quantas derivadas para o MESMO problema já existem na story; ao exceder um limite (ex.: `AGENT_MAX_DERIVED_PER_PROBLEM`), escalar para humano (`escalateToHuman`) em vez de derivar de novo.
-    - Considerar propagar `derivedDepth` pela linhagem do problema (não reiniciar a cada nova cadeia) para o cap de profundidade voltar a valer.
-  - **DOD:** uma validação que falha repetidamente com o MESMO problema não gera mais que uma task de correção aberta por vez; ao insistir além do limite, a story escala para humano em vez de multiplicar tasks; specs cobrindo dedup + cap agregado; `npm run build && npm run lint && npm test` verdes.
-
 - [ ] Precisamos melhorar o chat de conversa do backlog-chat
 
 - [ ] tentar disponibilizar tudo em docker
@@ -45,6 +32,11 @@
 
 # done
 <!-- apenas ultimas 2 tarefas, para n poluir o arquivo -->
+
+- [x] **🔴 Loop de derivação cria tasks "Corrigir: …" duplicadas ao infinito (sem dedup)** — **CONCLUÍDO 2026-08-12 (build+lint+test verdes; 157/157 specs)**
+  - **Causa-raiz:** `createDerivedTask` nunca lia as tasks existentes antes de criar `Corrigir: ${problem.title}` (sem dedup) e os caps eram por-cadeia (`derivedDepth`/`validationFailures` da task de origem) — cada falha iniciava uma cadeia NOVA (depth reinicia) escapando do guard-rail; a US-135 acumulou 7 tasks idênticas.
+  - **Correção aplicada (`ai-engine/orchestrator.ts`):** novo `countOpenDerivedForProblem(parentId, problem.title)` conta as tasks de correção ABERTAS (`execState != done`) com o título canônico sob a MESMA story. Antes de derivar: se já há ≥1 → **dedup** (não cria duplicata, só loga); ao atingir `AGENT_MAX_DERIVED_PER_PROBLEM` (novo cap agregado, default 2) → **escala para humano** (4º gatilho de `escalateToHuman`). Config + `.env.example` + AGENTS.md do módulo atualizados; 2 specs novos em `orchestrator-guards.spec.ts`.
+  - **DOD atingido:** falhas repetidas com o MESMO problema não geram mais que uma task de correção aberta por vez; ao insistir além do limite, escala em vez de multiplicar tasks; specs cobrindo dedup + cap agregado; `npm run build && npm run lint && npm test` verdes.
 
 - [x] **🟠 Descrições das tasks propostas no chat são descartadas ao materializar** — **CONCLUÍDO 2026-08-12 (build+lint+test verdes; 155/155 specs)**
   - **Causa-raiz:** o contrato `materializeStoryTasksSchema` só aceitava `{ titles: string[] }`; controller/orchestrator repassavam só títulos e `cards.create` gravava `description: ''` fixo — tanto no `materializeStoryTasks` (incremental) quanto no `applyProposal` (apply de épico).

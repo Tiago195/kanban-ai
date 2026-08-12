@@ -102,6 +102,15 @@ export interface AppConfig {
      */
     maxDerivedDepth: number;
     /**
+     * Cap AGREGADO de derivações por problema/fluxo dentro da MESMA story —
+     * quantas tasks de correção abertas para o MESMO `problem.title` (mesmo
+     * título `Corrigir: …` sob o mesmo epic/story) podem coexistir antes de o
+     * loop escalar para humano em vez de derivar mais uma. Fecha a brecha em
+     * que cada falha inicia uma cadeia NOVA (depth reinicia) escapando do cap
+     * de profundidade. Default 2. `0` desliga. AGENT_MAX_DERIVED_PER_PROBLEM.
+     */
+    maxDerivedPerProblem: number;
+    /**
      * Gate de custo — orçamento de TEMPO por task. Soma de `durationMs` das
      * iterações da task; ao ultrapassar, o loop marca `needsHuman` (reason de
      * custo), para o auto-play graceful e emite `card.needs_human`.
@@ -220,6 +229,7 @@ export function loadConfig(): AppConfig {
       maxIterationsPerTask: num(process.env.AGENT_MAX_ITERATIONS_PER_TASK, 30),
       maxUnproductiveIterations: num(process.env.AGENT_MAX_UNPRODUCTIVE_ITERATIONS, 3),
       maxDerivedDepth: num(process.env.AGENT_MAX_DERIVED_DEPTH, 3),
+      maxDerivedPerProblem: num(process.env.AGENT_MAX_DERIVED_PER_PROBLEM, 2),
       maxTaskDurationMs: num(process.env.AGENT_MAX_TASK_DURATION_MS, 0),
       maxTaskTokens: num(process.env.AGENT_MAX_TASK_TOKENS, 0),
       thrashDetectionEnabled:

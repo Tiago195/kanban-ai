@@ -64,11 +64,11 @@ ai-engine/
    emite `card.needs_human`. Isso é o **destino/resgate**, não substitui caps de
    iteração/derivação.
 
-## Escalonamento a humano (#3) — três gatilhos
+## Escalonamento a humano (#3) — quatro gatilhos
 
 O caminho de resgate `escalateToHuman(...)` (marca `needsHuman`/
 `needsHumanReason`, faz `stop(graceful)` e emite `card.needs_human`) é acionado
-por **três** gatilhos independentes — todos convergem para o mesmo destino:
+por **quatro** gatilhos independentes — todos convergem para o mesmo destino:
 
 - **(a) Falhas de validação** — `AGENT_MAX_VALIDATION_FAILURES` (default 3):
   ao esgotar as tentativas de validação da task, para de derivar e escala.
@@ -82,6 +82,14 @@ por **três** gatilhos independentes — todos convergem para o mesmo destino:
   vez de criar mais uma derivada — evita cadeia infinita de bugs derivados.
   `createDerivedTask` incrementa `derivedDepth` (origem = 0, cada derivada +1;
   migration `card_derived_depth`).
+- **(d) Cap AGREGADO por problema** — `AGENT_MAX_DERIVED_PER_PROBLEM` (default 2;
+  0 = desligado): fecha a brecha em que cada falha inicia uma **cadeia NOVA**
+  (onde `derivedDepth` reinicia baixo) escapando do cap (c). Antes de derivar,
+  `countOpenDerivedForProblem(parentId, problem.title)` conta as tasks de
+  correção ABERTAS (`execState != done`) com o título canônico
+  `Corrigir: ${problem.title}` sob a MESMA story. Se já há ≥1, **não duplica**
+  (dedup — apenas loga e deixa a derivada existente resolver); ao atingir o cap
+  agregado, **escala** em vez de multiplicar cadeias paralelas.
 
 ## O que NÃO mexer
 

@@ -49,6 +49,7 @@ function makeConfig(overrides: Partial<AppConfig['agent']> = {}): AppConfig {
     maxIterationsPerTask: 30,
     maxUnproductiveIterations: 0,
     maxDerivedDepth: 3,
+    maxDerivedPerProblem: 2,
     maxTaskDurationMs: 0,
     maxTaskTokens: 0,
     thrashDetectionEnabled: false,
@@ -522,7 +523,60 @@ test('createDerivedTask: cria derivada com derivedDepth+1 e dependência reversa
   assert.ok(realtime.events.some((e) => e.type === 'task.state.changed'));
 });
 
-// ── Idempotência do watchdog ─────────────────────────────────────────────────
+test('countOpenDerivedForProblem: conta irmãs abertas pelo título canônico', async () => {
+  let captured: Record<string, unknown> | null = null;
+  const prismaSvc = {
+    card: {
+      count: async (args: { where: Record<string, unknown> }) => {
+        captured = args.where;
+        return 2;
+      },
+    },
+  } as unknown as PrismaService;
+
+  const orch = new Orchestrator(
+    prismaSvc,
+    new AgentSessionManager(makeConfig()),
+    makeValidation(),
+    makeWorkspaces(),
+    makeRealtime().svc,
+    makeRunner(),
+    makeConfig(),
+  );
+
+  const n = await priv(orch).countOpenDerivedForProblem('story-1', 'parser quebrado');
+  assert.equal(n, 2);
+  assert.equal(captured!.parentId, 'story-1');
+  assert.equal(captured!.type, 'task');
+  assert.equal(captured!.title, 'Corrigir: parser quebrado', 'usa o título canônico da derivada');
+  assert.deepEqual(captured!.execState, { not: 'done' }, 'só conta tasks abertas');
+});
+
+test('countOpenDerivedForProblem: parentId nulo retorna 0 (sem irmãs)', async () => {
+  let called = false;
+  const prismaSvc = {
+    card: {
+      count: async () => {
+        called = true;
+        return 5;
+      },
+    },
+  } as unknown as PrismaService;
+
+  const orch = new Orchestrator(
+    prismaSvc,
+    new AgentSessionManager(makeConfig()),
+    makeValidation(),
+    makeWorkspaces(),
+    makeRealtime().svc,
+    makeRunner(),
+    makeConfig(),
+  );
+
+  const n = await priv(orch).countOpenDerivedForProblem(null, 'qualquer');
+  assert.equal(n, 0);
+  assert.equal(called, false, 'não consulta o banco quando não há parent');
+});
 
 test('watchdog: startWatchdog é idempotente (não registra dois intervals)', async () => {
   const { orch } = makeOrchestrator();

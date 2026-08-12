@@ -605,7 +605,7 @@ export class Orchestrator implements OnModuleInit {
         // senão o engine pode derivar bugs em cadeia infinita.
         const originCard = await this.prisma.card.findUnique({
           where: { id: taskId },
-          select: { derivedDepth: true },
+          select: { derivedDepth: true, parentId: true },
         });
         const depth = originCard?.derivedDepth ?? 0;
         const decision = this.decideValidationFailureAction(depth, validationFailures);
@@ -615,7 +615,36 @@ export class Orchestrator implements OnModuleInit {
           const reason = decision.reasonKind === 'depth' ? decision.reason : problem.title;
           await this.escalateToHuman(taskId, storyId, reason, decision.log);
         } else {
-          await this.createDerivedTask(taskId, problem);
+          // Dedup + cap AGREGADO por problema (fecha o loop de derivações
+          // paralelas): antes de derivar, conta quantas tasks de correção
+          // ABERTAS para o MESMO problema já existem como irmãs (mesmo
+          // `parentId`/story). Se já há ≥1, NÃO cria outra (dedup); se o total
+          // atingir o cap agregado, escala para humano em vez de multiplicar
+          // cadeias. Assim o loop não escapa do guard-rail iniciando cadeias
+          // novas (onde `derivedDepth` reinicia baixo).
+          const openDerived = await this.countOpenDerivedForProblem(
+            originCard?.parentId ?? null,
+            problem.title,
+          );
+          const maxPerProblem = this.config.agent.maxDerivedPerProblem;
+          if (maxPerProblem > 0 && openDerived >= maxPerProblem) {
+            const reason = `derivações repetidas para o mesmo problema atingiram o limite (${openDerived} ≥ ${maxPerProblem}): ${problem.title}`;
+            await this.escalateToHuman(
+              taskId,
+              storyId,
+              problem.title,
+              `cap agregado de derivação: ${reason} — task marcada como "precisa de humano"; auto-play parado`,
+            );
+          } else if (openDerived > 0) {
+            // Ja existe uma correcao aberta identica: nao duplicar. Apenas
+            // registra e deixa a derivada existente resolver o problema.
+            await this.log(
+              taskId,
+              `dedup de derivação: já existe task de correção aberta para "${problem.title}" — não criando duplicata`,
+            );
+          } else {
+            await this.createDerivedTask(taskId, problem);
+          }
         }
       }
       return true;
@@ -920,6 +949,29 @@ export class Orchestrator implements OnModuleInit {
     this.realtime.broadcast({ type: 'task.state.changed', taskId: originId, execState: 'blocked-dep' });
     this.realtime.broadcast({ type: 'task.derived', originTaskId: originId, derivedTaskId: derivedId });
     return derivedId;
+  }
+
+  /**
+   * Conta quantas tasks de correção ABERTAS (`execState != done`) para o MESMO
+   * problema já existem como irmãs sob o mesmo `parentId` (story). A âncora é o
+   * título canônico `Corrigir: ${problem.title}` produzido por
+   * `createDerivedTask`. Base do dedup + cap agregado por problema (evita o loop
+   * de derivações paralelas que escapa do cap de profundidade). `parentId` nulo
+   * (task órfã) retorna 0 — sem irmãs para deduplicar.
+   */
+  private async countOpenDerivedForProblem(
+    parentId: string | null,
+    problemTitle: string,
+  ): Promise<number> {
+    if (!parentId) return 0;
+    return this.prisma.card.count({
+      where: {
+        parentId,
+        type: 'task',
+        title: `Corrigir: ${problemTitle}`,
+        execState: { not: 'done' },
+      },
+    });
   }
 
   // ── Serial por story ──────────────────────────────────────────────────────
