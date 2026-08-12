@@ -159,10 +159,80 @@ export class CliAdapter {
     // kind ausente/desconhecido → tratar como pensamento com o texto disponível.
     return { kind: 'thought', text: str(obj.text) || trimmed };
   }
+
+  /**
+   * Extrai telemetria de tokens do rodapé de stats que a Copilot CLI imprime em
+   * TEXTO CRU (não-JSON) ao encerrar um turno. O `result` estruturado (JSONL)
+   * quase nunca traz `inputTokens`/`outputTokens` porque exigiria o agent
+   * auto-reportar — então, na prática, as `Iteration`s ficavam com tokens NULL.
+   * Este parser recupera os números do output real da CLI.
+   *
+   * Reconhece formatos tolerantes (case-insensitive), p.ex.:
+   *   "Token usage: input=1234 output=567"
+   *   "tokens: 1234 input, 567 output"
+   *   "Total usage est: 1.2k input · 567 output"
+   *   "↑ 1234 tokens  ↓ 567 tokens"
+   *   "prompt_tokens: 1234, completion_tokens: 567"
+   * Separadores de milhar (`,`/`.`) e sufixo `k`/`m` são normalizados.
+   * Retorna `undefined` quando a linha não contém um par reconhecível.
+   */
+  parseTokenUsage(line: string): { inputTokens: number; outputTokens: number } | undefined {
+    const text = line.trim();
+    if (text.length === 0) return undefined;
+    const lower = text.toLowerCase();
+    if (!lower.includes('token') && !lower.includes('usage') && !/[↑↓]/.test(text)) {
+      return undefined;
+    }
+
+    // (1) rótulos explícitos: input/prompt e output/completion.
+    const input =
+      matchNum(lower, /(?:input|prompt|prompt_tokens|↑)[^0-9]{0,12}([0-9][0-9.,]*\s*[km]?)/) ??
+      undefined;
+    const output =
+      matchNum(lower, /(?:output|completion|completion_tokens|↓)[^0-9]{0,12}([0-9][0-9.,]*\s*[km]?)/) ??
+      undefined;
+    if (input !== undefined && output !== undefined) {
+      return { inputTokens: input, outputTokens: output };
+    }
+
+    // (2) forma "N input, M output" (número ANTES do rótulo).
+    const inputBefore = matchNum(lower, /([0-9][0-9.,]*\s*[km]?)\s*(?:tokens?\s*)?input/);
+    const outputBefore = matchNum(lower, /([0-9][0-9.,]*\s*[km]?)\s*(?:tokens?\s*)?output/);
+    if (inputBefore !== undefined && outputBefore !== undefined) {
+      return { inputTokens: inputBefore, outputTokens: outputBefore };
+    }
+
+    return undefined;
+  }
 }
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v : v == null ? '' : String(v);
+}
+
+/**
+ * Extrai o primeiro grupo capturado do regex e o converte em inteiro de tokens.
+ * Normaliza separadores de milhar (`,`/`.`) e sufixos `k`/`m` (ex.: "1.2k" →
+ * 1200). Retorna `undefined` se não casar ou o número for inválido.
+ */
+function matchNum(text: string, re: RegExp): number | undefined {
+  const m = re.exec(text);
+  if (!m || !m[1]) return undefined;
+  let raw = m[1].trim().toLowerCase();
+  let mult = 1;
+  if (raw.endsWith('k')) {
+    mult = 1_000;
+    raw = raw.slice(0, -1).trim();
+  } else if (raw.endsWith('m')) {
+    mult = 1_000_000;
+    raw = raw.slice(0, -1).trim();
+  }
+  // Com sufixo k/m, `.`/`,` é separador DECIMAL (1.2k=1200); sem sufixo, é
+  // separador de MILHAR (1,234=1234).
+  const cleaned = mult > 1 ? raw.replace(',', '.') : raw.replace(/[.,]/g, '');
+  const n = Number(cleaned);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return Math.round(n * mult);
 }
 
 /** Normaliza a lista de fluxos afetados reportada pela AI (tolerante a lixo). */

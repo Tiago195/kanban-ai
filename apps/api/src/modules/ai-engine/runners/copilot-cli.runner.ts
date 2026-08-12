@@ -70,6 +70,11 @@ export class CopilotCliRunner implements AgentRunner {
       let result: AgentRunResult | null = null;
       let settled = false;
       let idleTimer: NodeJS.Timeout | null = null;
+      // Telemetria de tokens parseada do rodapé de stats CRU da CLI (não-JSON).
+      // Usada para backfill quando o `result` estruturado não traz tokens (o
+      // caso comum — o agent não auto-reporta). A ÚLTIMA leitura vence (o rodapé
+      // final do turno reflete o total acumulado).
+      let parsedTokens: { inputTokens: number; outputTokens: number } | null = null;
       // Enquanto uma pergunta HITL está pendente (aguardando resposta humana), o
       // idle timeout de stdout NÃO se aplica: o subprocesso one-shot já encerrou
       // e o humano pode levar minutos para responder. O tempo de espera é
@@ -141,6 +146,9 @@ export class CopilotCliRunner implements AgentRunner {
 
       rl.on('line', (line) => {
         resetIdle();
+        // Rodapé de stats da CLI (texto cru): tenta extrair tokens do turno.
+        const usage = this.adapter.parseTokenUsage(line);
+        if (usage) parsedTokens = usage;
         const event = this.adapter.parseLine(line);
         if (!event) return;
         queue = queue.then(() =>
@@ -175,6 +183,17 @@ export class CopilotCliRunner implements AgentRunner {
           .then(() => {
             finish(() => {
               if (result) {
+                // Backfill de tokens: se o `result` estruturado não trouxe
+                // tokens (caso comum), usa o que foi parseado do rodapé cru da
+                // CLI. Assim as `Iteration`s deixam de gravar tokens NULL/zero.
+                if (parsedTokens) {
+                  if (result.inputTokens === undefined) {
+                    result.inputTokens = parsedTokens.inputTokens;
+                  }
+                  if (result.outputTokens === undefined) {
+                    result.outputTokens = parsedTokens.outputTokens;
+                  }
+                }
                 resolve(result);
                 return;
               }
