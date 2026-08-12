@@ -408,6 +408,7 @@ export class CardsService {
       });
     }
 
+    await this.orchestrator.enqueueWakeup(storyId, 'task_added');
     await this.orchestrator.onStoryEnterInProgress(storyId);
   }
 
@@ -588,6 +589,8 @@ export class CardsService {
       result.toColumn.title.trim().toLowerCase() === 'in progress'
     ) {
       this.realtime.broadcast({ type: 'story.entered_in_progress', storyId: id });
+      // US-COLAB3: enfileira (coalesce) o wakeup durável ANTES de acordar direto.
+      await this.orchestrator.enqueueWakeup(id, 'story_in_progress');
       // Acorda o loop engine (auto-play server-side).
       await this.orchestrator.onStoryEnterInProgress(id);
     }

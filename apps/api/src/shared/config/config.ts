@@ -216,6 +216,16 @@ export interface AppConfig {
      * story-dona, se In Progress). Off por default. Env: AGENT_AUTOSTART_DEPENDENTS.
      */
     autostartDependents: boolean;
+    /**
+     * US-COLAB3 — liga a wakeup queue persistente (Postgres) idempotente com
+     * coalescing. Quando ON, os gatilhos (story→In Progress, task_added, HITL,
+     * stepOnce, reconcile no boot) ENFILEIRAM o wakeup numa tabela durável antes
+     * de acordar a story, e o boot recupera `claimed` órfãos. Off por default
+     * (retrocompat: acorda direto, sem estado durável). O executor segue
+     * in-process, SEM Redis (invariante 7). Env: AGENT_WAKEUP_QUEUE_ENABLED
+     * (`true` liga).
+     */
+    wakeupQueueEnabled: boolean;
   };
 }
 
@@ -311,6 +321,7 @@ export function loadConfig(): AppConfig {
       claimEnabled: process.env.AGENT_CLAIM_ENABLED === 'true',
       claimTtlMs: num(process.env.AGENT_CLAIM_TTL_MS, 300_000),
       autostartDependents: process.env.AGENT_AUTOSTART_DEPENDENTS === 'true',
+      wakeupQueueEnabled: process.env.AGENT_WAKEUP_QUEUE_ENABLED === 'true',
     },
   };
 }

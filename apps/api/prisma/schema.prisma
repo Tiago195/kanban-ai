@@ -43,6 +43,23 @@ enum ValidationStrategy {
   regression_only // regression-only
 }
 
+// EP-COLAB / US-COLAB3 — estados de um item da wakeup queue durável.
+enum WakeupStatus {
+  pending // aguardando o processador in-process
+  claimed // sendo processado por uma sessão in-process
+  done    // processado com sucesso
+  failed  // falhou (mantido para auditoria/retry)
+}
+
+// EP-COLAB / US-COLAB3 — motivo pelo qual a story precisa acordar.
+enum WakeupReason {
+  story_in_progress // story entrou/está em In Progress (gatilho clássico)
+  task_added        // task nova adicionada a story em progresso (BUG-09)
+  hitl_answered     // humano respondeu uma pergunta pendente
+  manual_step       // "Rodar 1 iteração" / stepOnce
+  reconcile         // re-enfileirado no boot a partir do board
+}
+
 // ─────────────────────────────────────────────────────────────
 // Board & colunas
 // ─────────────────────────────────────────────────────────────
@@ -170,6 +187,7 @@ model Card {
   agentMessages AgentMessage[]
   labels        CardLabel[]
   assignees     CardAssignee[]
+  wakeups       WakeupQueue[]  @relation("WakeupStory")
 
   @@unique([boardId, key])
   @@index([boardId])
@@ -319,6 +337,44 @@ model AgentRuntimeState {
   @@index([livenessState])
   @@index([claimExpiresAt])
 }
+
+// EP-COLAB / US-COLAB3 — fila de wakeups durável, idempotente e com coalescing.
+// Substitui a fila 100% in-process: o PROCESSAMENTO continua in-process (sem
+// Redis, invariante 7 / ADR-0019 / ADR-0032), mas o ESTADO da fila é persistido
+// para sobreviver a restart e para coalescer (merge) wakeups duplicados por
+// story.
+model WakeupQueue {
+  id      String @id @default(uuid())
+  storyId String
+  story   Card   @relation("WakeupStory", fields: [storyId], references: [id], onDelete: Cascade)
+
+  // Coalescing: no máximo UM wakeup NÃO-terminal (pending|claimed) por story. Um
+  // novo wakeup para uma story que já tem um ativo faz MERGE (incrementa
+  // attempts, atualiza reason), não cria linha nova. Garantido pelo índice único
+  // PARCIAL adicionado à mão na migration (Prisma v6 não expressa índice parcial
+  // no schema — ver ADR-0032).
+  status WakeupStatus @default(pending)
+
+  // Por que a story precisa acordar (auditoria + retomada correta pós-restart).
+  reason WakeupReason @default(story_in_progress)
+
+  // Contagem de coalescing: quantos wakeups foram mesclados neste registro.
+  attempts Int @default(1)
+
+  // Serialização por epic (invariante 7): a fila registra o epic para o
+  // processador respeitar "uma story por epic" ao drenar.
+  epicId String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  claimedAt   DateTime? // quando o processador in-process pegou este item
+  processedAt DateTime? // quando concluiu (status=done/failed)
+
+  @@index([status])
+  @@index([epicId])
+  @@index([storyId])
+}
+
 // AgentChatMessage de @kanban-ai/shared. Diferente de Iteration (registro
 // minucioso lido pela próxima iteração), aqui vive a CONVERSA: chunks
 // consolidados da AI, a pergunta HITL e a RESPOSTA do humano — para reidratar

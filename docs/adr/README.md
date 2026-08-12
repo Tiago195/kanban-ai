@@ -30,5 +30,8 @@ Registro das decisões de arquitetura da fundação. Formato leve
 | [0023](0023-backlog-chat-story-threads.md) | Threads por story no chat de backlog (modelo Slack: uma sessão Copilot, transcripts por canal `main`/`story:<id>`) | Aceito |
 | [0024](0024-backlog-chat-rich-stories-and-draft-tasks.md) | Stories ricas (`aiSummary`/`aiNotes`) + tasks rascunhadas no backlog-chat, reusando o modelo do `Card` (sem duplicar Epic/Story/Task/DoD) | Aceito |
 | [0027](0027-memory-as-a-living-service.md) | Memória como serviço vivo (colmeia): git como fonte da verdade + índice Postgres/WS (fonte de design: board excalidraw `5WqltgG6Kq8`, seções 18–24) | Aceito |
+| [0028](0028-completion-gate-minimum-artifact.md) | Gate de completude por artefato mínimo verificável (`done` não fecha por "falso sucesso"; estende `isVerifiableEvidence` por `ResultClass`) | Proposto |
+| [0029](0029-agent-runtime-state-persisted.md) | Estado de runtime do agent persistido (`AgentRuntimeState` sobrevive a restart; colunas de lease p/ stale-claim) | Proposto |
 | [0030](0030-multi-tenant-nullable-column.md) | Multi-tenant por coluna `tenantId` nullable (isolamento lógico retrocompatível; ecoa escopo da memória viva) | Aceito |
+| [0032](0032-wakeup-queue-persistent-idempotent.md) | Wakeup queue persistente, idempotente e com coalescing (`WakeupQueue` no Postgres; índice único parcial; executor in-process, sem Redis) | Aceito |
 | [0033](0033-mention-delegation-backlog-chat.md) | `@mention` delegation no backlog-chat (`parseMentions` + `MentionDirective`; menção cria e atribui task via `CardsService`, sem schema novo) | Aceito |

@@ -75,6 +75,41 @@ export const LivenessState = {
 } as const;
 export type LivenessState = (typeof LivenessState)[keyof typeof LivenessState];
 
+/**
+ * US-COLAB3 — estado de um item na wakeup queue durável (Postgres). A fila é só
+ * ESTADO persistido: o processamento segue in-process (Orchestrator), SEM Redis
+ * (invariante 7 / ADR-0019 / ADR-0032).
+ *
+ *  - pending: aguardando o processador in-process drenar.
+ *  - claimed: reivindicado por uma sessão in-process (em processamento).
+ *  - done:    processado com sucesso.
+ *  - failed:  falhou (mantido para auditoria/retry).
+ *
+ * Coalescing forte: no máximo UM item NÃO-terminal (`pending`|`claimed`) por
+ * story (garantido por índice único parcial na migration).
+ */
+export const WAKEUP_STATUS = ['pending', 'claimed', 'done', 'failed'] as const;
+export type WakeupStatus = (typeof WAKEUP_STATUS)[number];
+
+/**
+ * US-COLAB3 — motivo pelo qual uma story precisa acordar. Persistido junto do
+ * item da wakeup queue para auditoria e retomada correta pós-restart.
+ *
+ *  - story_in_progress: gatilho clássico — story entrou/está em In Progress.
+ *  - task_added:        task nova adicionada a story já em progresso (BUG-09).
+ *  - hitl_answered:     humano respondeu uma pergunta pendente.
+ *  - manual_step:       "Rodar 1 iteração" / stepOnce.
+ *  - reconcile:         re-enfileirado no boot a partir do board.
+ */
+export const WAKEUP_REASON = [
+  'story_in_progress',
+  'task_added',
+  'hitl_answered',
+  'manual_step',
+  'reconcile',
+] as const;
+export type WakeupReason = (typeof WAKEUP_REASON)[number];
+
 /** Modo de parada manual de uma sessão de agent. */
 export type StopMode = 'graceful' | 'hard';
 

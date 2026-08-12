@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { StopMode } from '@kanban-ai/shared';
-import type { ExecState, AffectedFlow, LoopMetrics } from '@kanban-ai/shared';
+import type { ExecState, AffectedFlow, LoopMetrics, WakeupReason } from '@kanban-ai/shared';
 import { isVerifiableEvidence, minimumArtifactSatisfied } from '@kanban-ai/shared';
 import type { ResultClass } from '@kanban-ai/shared';
 import { randomUUID } from 'node:crypto';
@@ -21,6 +21,7 @@ import { deriveEpicStatus, type ColumnLike } from '../cards/cards.epic-status';
 import { MemoryIndexService } from '../memory/memory-index.service';
 import { MemoryGitService } from '../memory/memory-git.service';
 import { MemoryBootstrapService } from '../memory/memory-bootstrap.service';
+import { WakeupQueueService } from './wakeup-queue.service';
 import {
   allTasksDone,
   dodAllDone,
@@ -81,7 +82,34 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     private readonly memoryIndex: MemoryIndexService,
     private readonly memoryGit: MemoryGitService,
     private readonly memoryBootstrap: MemoryBootstrapService,
+    // US-COLAB3 — wakeup queue durável (opcional para não quebrar as specs que
+    // instanciam o Orchestrator com os 10 params anteriores). Usado apenas
+    // quando `config.agent.wakeupQueueEnabled` está ON, sempre com try/catch
+    // defensivo: uma falha na fila NUNCA pode derrubar o loop.
+    private readonly wakeupQueue?: WakeupQueueService,
   ) {}
+
+  /** US-COLAB3 — a fila só age quando o flag está ON e o serviço foi injetado. */
+  private get wakeupEnabled(): boolean {
+    return this.config.agent.wakeupQueueEnabled && !!this.wakeupQueue;
+  }
+
+  /**
+   * US-COLAB3 — enfileira (coalescendo) um wakeup durável para a story. Resolve
+   * o epicId para a serialização por epic. Totalmente defensivo e no-op quando o
+   * flag está OFF: nunca lança, nunca bloqueia o gatilho legado.
+   */
+  async enqueueWakeup(storyId: string, reason: WakeupReason): Promise<void> {
+    if (!this.wakeupEnabled) return;
+    try {
+      const epicId = await this.resolveStoryEpic(storyId);
+      await this.wakeupQueue!.enqueue({ storyId, reason, epicId });
+    } catch (err) {
+      this.logger.warn(
+        `wakeupQueue.enqueue falhou (story=${storyId}, reason=${reason}): ${(err as Error).message}`,
+      );
+    }
+  }
 
   /** Salvaguarda #1: reconciliação no boot. */
   async onModuleInit(): Promise<void> {
@@ -133,6 +161,24 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // US-ROB4 — recovery no boot: libera claims vencidos antes de reconciliar
     // (unifica recovery boot + runtime). No-op se claimEnabled=false.
     await this.recoverStaleClaims();
+
+    // US-COLAB3 — recovery da wakeup queue: reabre itens `claimed` órfãos (a
+    // sessão in-process morreu com a API) devolvendo-os para `pending`, para que
+    // sejam reprocessados abaixo. Defensivo e no-op quando o flag está OFF.
+    if (this.wakeupEnabled) {
+      try {
+        const reopened = await this.wakeupQueue!.recoverOnBoot();
+        if (reopened.length) {
+          this.logger.log(
+            `reconcileOnBoot() — wakeup queue: ${reopened.length} item(ns) claimed órfão(s) reabertos`,
+          );
+        }
+      } catch (err) {
+        this.logger.warn(
+          `reconcileOnBoot() — wakeupQueue.recoverOnBoot falhou (segue): ${(err as Error).message}`,
+        );
+      }
+    }
 
     // US-ROB2 — leitura DURÁVEL: antes de re-escanear as colunas, lê a tabela
     // AgentRuntimeState para (a) saber quais sessões existiam antes do restart e
@@ -191,6 +237,9 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     }
     for (const story of stories) {
       this.logger.log(`reconcileOnBoot() — retomando loop da story=${story.id}`);
+      // US-COLAB3: enfileira (coalesce) um wakeup `reconcile` para a story em
+      // In Progress achada no board, convergindo fila + board no boot.
+      await this.enqueueWakeup(story.id, 'reconcile');
       await this.onStoryEnterInProgress(story.id);
     }
   }
@@ -225,6 +274,16 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
 
     const session = this.sessions.start(storyId);
     void this.claimStory(storyId); // US-ROB4: adquire o lease da execução
+    // US-COLAB3: reivindica o wakeup durável desta story (se houver na fila).
+    // Defensivo/no-op quando o flag está OFF. A fila coalesce, então mesmo que o
+    // gatilho não tenha enfileirado (ex.: reconcile), o claim é idempotente.
+    if (this.wakeupEnabled) {
+      void this.wakeupQueue!
+        .claim(storyId)
+        .catch((err) =>
+          this.logger.warn(`wakeupQueue.claim falhou (story=${storyId}): ${(err as Error).message}`),
+        );
+    }
     this.realtime.broadcast({
       type: 'agent.session.state_changed',
       storyId,
@@ -1350,6 +1409,8 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
 
   /** Passo manual único (botão "Rodar 1 iteração"). */
   async stepOnce(storyId: string): Promise<boolean> {
+    // US-COLAB3: registra a intenção durável (coalesce) antes de agir.
+    await this.enqueueWakeup(storyId, 'manual_step');
     if (!this.sessions.get(storyId)) {
       await this.onStoryEnterInProgress(storyId);
       return true;
@@ -1373,6 +1434,18 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     this.sessions.remove(storyId);
     this.clearWatchdog(storyId);
     void this.releaseClaim(storyId); // US-ROB4: solta o lease ao encerrar
+    // US-COLAB3: fecha o wakeup durável (status=done) ANTES de drenar a fila,
+    // para que a próxima story do epic não veja este item como ativo. Defensivo
+    // e no-op quando o flag está OFF.
+    if (this.wakeupEnabled) {
+      void this.wakeupQueue!
+        .complete(storyId)
+        .catch((err) =>
+          this.logger.warn(
+            `wakeupQueue.complete falhou (story=${storyId}): ${(err as Error).message}`,
+          ),
+        );
+    }
     void this.workspaces.cleanupWorktree(storyId).catch(() => undefined);
     // SERIALIZAÇÃO: destrava a próxima story que estava aguardando este epic/repo.
     void this.resumeDeferredForStory(storyId).catch(() => undefined);
@@ -2181,6 +2254,9 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       data: { needsHuman: false, needsHumanReason: null },
     });
     this.realtime.broadcast({ type: 'agent.answered', taskId, questionId });
+    // US-COLAB3: registra (coalesce) a intenção durável de acordar a story após
+    // a resposta HITL, para que a retomada sobreviva a restart.
+    await this.enqueueWakeup(storyId, 'hitl_answered');
     await this.log(
       taskId,
       'resposta HITL recebida após restart — retomando iteração (resume via --session-id)',

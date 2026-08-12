@@ -14,6 +14,7 @@ entra em **In Progress**, encadear **iterações**, marcar o **DOD**, rodar a
 ```
 ai-engine/
 ├── orchestrator.ts            # Orchestrator: onStoryEnterInProgress, watchdog, stop
+├── wakeup-queue.service.ts    # WakeupQueueService: fila durável/idempotente (US-COLAB3)
 ├── session-manager/           # AgentSessionManager (in-process: running|idle|dead)
 ├── runners/                   # AgentRunner (interface, token AGENT_RUNNER) + CopilotCliRunner
 ├── loop-profiles/             # feature | bug | refactor | __default (+ resolveLoopProfile)
@@ -30,6 +31,14 @@ ai-engine/
   `running|idle|dead`. **Interface plugável** (ponto de extensão para BullMQ+Redis).
 - **`Orchestrator`**: `onStoryEnterInProgress(storyId)`, `stop(storyId, mode)`,
   `reconcileOnBoot()`.
+- **`WakeupQueueService`** (`wakeup-queue.service.ts`, US-COLAB3 / ADR-0032):
+  fila de wakeups **durável no Postgres** (`WakeupQueue`), **idempotente** e com
+  **coalescing** (índice único PARCIAL `WakeupQueue_storyId_active_key` garante no
+  máx. 1 item `pending|claimed` por story). `enqueue|claim|complete|fail|recoverOnBoot|listPending`.
+  O PROCESSAMENTO segue **in-process** (invariante 7 — sem Redis); só o ESTADO da
+  fila é persistido, para sobreviver a restart e mesclar wakeups duplicados.
+  **Off-by-default** atrás de `AGENT_WAKEUP_QUEUE_ENABLED`; parâmetro OPCIONAL no
+  construtor do `Orchestrator` (não quebra os specs que instanciam com fakes).
 - **`ValidationRunner`**: valida os `affectedFlows` quando o DOD fecha. Além das
   checagens estruturais, roda **validação empírica real** (#1) — executa os scripts
   do projeto-alvo (`test`/`build`/`lint`) no worktree isolado (`cwd`) via `npm run`

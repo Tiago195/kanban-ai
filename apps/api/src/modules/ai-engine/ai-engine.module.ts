@@ -8,6 +8,7 @@ import { MockAgentRunner } from './runners/mock-agent.runner';
 import { AGENT_RUNNER, type AgentRunner } from './runners/agent-runner.interface';
 import { APP_CONFIG, type AppConfig } from '../../shared/config/config';
 import { WorkspaceService } from './workspaces/workspace.service';
+import { WakeupQueueService } from './wakeup-queue.service';
 
 /**
  * Módulo do loop engine (núcleo).
@@ -26,6 +27,7 @@ import { WorkspaceService } from './workspaces/workspace.service';
     AgentSessionManager,
     ValidationRunner,
     WorkspaceService,
+    WakeupQueueService,
     CopilotCliRunner,
     MockAgentRunner,
     {
