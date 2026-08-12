@@ -9,16 +9,29 @@ import {
 } from './config';
 
 // --- config-boot: guard-rail anti-alucinação do arquivo-fantasma ---
-// Regressão: `apps/api/.env.example` NUNCA deve existir (ver config.ts:10-14 e
-// ADR-0019). Existe um único template versionado: `.env.example` na raiz. Se
-// alguém (humano ou agent) recriar o path-fantasma, este teste falha cedo.
+// Regressão: `apps/api/.env.example` NUNCA deve existir (ver o aviso
+// anti-alucinação no cabeçalho de config.ts e o ADR-0019). Existe um único
+// template versionado: `.env.example` na raiz do monorepo. Se alguém (humano
+// ou agent) recriar o path-fantasma, ou remover o template real da raiz, este
+// teste falha cedo.
 test('config-boot: apps/api/.env.example não existe (path-fantasma)', () => {
+  // __dirname em runtime = apps/api/src/shared/config; ../../../ sobe até apps/api.
   const phantom = resolve(__dirname, '../../../.env.example');
   assert.equal(
     existsSync(phantom),
     false,
     'apps/api/.env.example é um path-fantasma e não deve existir; o único ' +
       'template versionado é .env.example na raiz do monorepo (ver ADR-0019).',
+  );
+
+  // Asserção positiva: o único template legítimo deve estar na raiz do
+  // monorepo (apps/api/src/shared/config -> ../../../../../ = raiz).
+  const rootTemplate = resolve(__dirname, '../../../../../.env.example');
+  assert.equal(
+    existsSync(rootTemplate),
+    true,
+    'o template .env.example deve existir na raiz do monorepo; todas as ' +
+      'chaves de env ficam documentadas nele (ver ADR-0019).',
   );
 });
 

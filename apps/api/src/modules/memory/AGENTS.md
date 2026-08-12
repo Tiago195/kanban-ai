@@ -25,6 +25,9 @@ memory/
   - `provision(): Promise<void>` — garante o bare repo provisionado de forma
     **idempotente** (init `--bare` se o volume estiver vazio; abre + valida `HEAD`
     se já houver repo). Chamado no boot via `onModuleInit()`.
+  - `readNeuron(path, ref?)`, `writeNeuron({...})`, `mergeSessionBranch({...})`,
+    `diffNeuron({...})`, `historyNeuron(path, ref?)` — read/write/merge/diff/
+    history de neurônios (ver "Estado atual").
   - `get gitDir(): string` — caminho do bare repo (lido de `config.memory.gitDir`).
   - `MEMORY_DEFAULT_BRANCH` (`'main'`) — branch inicial garantida.
 - Config via `MEMORY_GIT_DIR` (default `./.kanban-ai-memory/git`, **gitignored** —
@@ -46,10 +49,10 @@ memory/
 
 ## Fora de escopo (Camada 1 — NÃO implementar aqui)
 
-- **Read/write** de conteúdo por path+commit.
-- Branches `mem/ai/<sessao>/<path>`, **merge 3-way** branch→main, **diff**, **blame**
-  (chegam em iterações/stories seguintes do épico da Camada 1).
 - **Locks, WebSocket e índice** — são **Camada 2**, NÃO vivem neste módulo.
+- **Resolução de conflito** de merge (árbitro/REVIEW) — o serviço apenas
+  **sinaliza** o conflito (`mergeSessionBranch` → `conflict: true`); resolver é
+  Camada 2 (EP-80).
 
 ## O que NÃO mexer
 
@@ -70,7 +73,23 @@ memory/
 
 ## Estado atual
 
-Camada 1 **provisionamento concluído**: init/open idempotente + branch `main`
-garantida por commit de bootstrap vazio determinístico. Fonte:
+Camada 1 **completa** (US-135..141):
+
+- **US-135** provisionamento: init/open idempotente + branch `main` garantida por
+  commit de bootstrap vazio determinístico (`provision()`, `onModuleInit()`).
+- **US-136** `readNeuron(path, ref?)` — lê o blob por path em `main`/SHA (null se
+  ausente).
+- **US-137** `writeNeuron({ path, content, sessionId, message, author? })` —
+  grava numa branch efêmera por sessão+path `mem/ai/<sessao>/<path>` (escrita
+  otimista; repo bare: writeBlob→writeTree→commit→ref).
+- **US-138** `mergeSessionBranch({ sessionId, path, author? })` — merge 3-way
+  branch→`main`; em conflito NÃO escreve em `main` e retorna `conflict: true`.
+- **US-139** `diffNeuron({ path, from, to? })` — status added/modified/deleted/
+  unchanged + conteúdo before/after.
+- **US-140** `historyNeuron(path, ref?)` — commits que tocaram o path (git log
+  `-- <path>`), do mais recente ao mais antigo.
+- **US-141** tudo exposto pelo `MemoryModule` (@Global); build/lint/test verdes.
+
+Todos os métodos são cobertos por testes em tmpdir isolado. Fonte:
 [ADR-0027](../../../../../docs/adr/0027-memory-as-a-living-service.md),
 seção "Camada 1 — git como fonte da verdade".
