@@ -92,6 +92,13 @@ model Card {
   board       Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
   key         String // EP-1, US-2, TK-3
   type        CardType
+
+  // EP-COLAB / US-COLAB1 — isolamento multi-tenant por coluna nullable.
+  // null = card global (comportamento pré-COLAB, retrocompatível). Quando
+  // preenchido, o card só aparece no board quando a query filtra pelo MESMO
+  // tenantId (ou não filtra por tenant). Não há FK — tenant é um rótulo opaco
+  // no v1 (sem auth, ADR-0009). O isolamento é cooperativo, não de segurança.
+  tenantId String?
   title       String
   description String   @default("")
 
@@ -169,6 +176,7 @@ model Card {
   @@index([parentId])
   @@index([type])
   @@index([backlogChatSessionId])
+  @@index([boardId, tenantId]) // US-COLAB1: filtro de board por tenant
 }
 
 // Aresta do grafo de dependências entre tasks.

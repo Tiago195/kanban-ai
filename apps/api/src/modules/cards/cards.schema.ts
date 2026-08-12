@@ -23,6 +23,11 @@ export const createCardSchema = z.object({
   // interno (apply do backlog-chat); não é preenchido em criações manuais via
   // board. Ver ADR-0026.
   backlogChatSessionId: z.string().uuid().optional(),
+  /**
+   * US-COLAB1 — tenant do card. Ausente = card global (retrocompatível). Ver
+   * ADR-0030; rótulo opaco de escopo (sem auth no v1, ADR-0009).
+   */
+  tenantId: z.string().min(1).optional(),
 });
 
 export type CreateCardDto = z.infer<typeof createCardSchema>;
@@ -47,6 +52,12 @@ export const listCardsQuerySchema = z.object({
   cursor: z.string().uuid().optional(),
   /** Projeção: `full` (default) mantém tudo; `summary` retorna só campos essenciais. */
   fields: z.enum(['full', 'summary']).optional(),
+  /**
+   * US-COLAB1 — filtra o board por tenant. Ausente = comportamento antigo
+   * (todos os cards do board). Presente = só cards com esse tenantId (filtro
+   * estrito; cards globais com tenantId=null NÃO vazam). Ver ADR-0030.
+   */
+  tenantId: z.string().min(1).optional(),
 });
 
 export type ListCardsQueryDto = z.infer<typeof listCardsQuerySchema>;

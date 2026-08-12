@@ -103,8 +103,12 @@ export const apiClient = {
     });
   },
 
-  getCards(boardId: string): Promise<ApiCardSummary[]> {
-    return request<ApiCardSummary[]>(`/cards?boardId=${encodeURIComponent(boardId)}`);
+  getCards(boardId: string, tenantId?: string): Promise<ApiCardSummary[]> {
+    const qs = new URLSearchParams({ boardId });
+    // US-COLAB1: filtro opcional de tenant. Omitido = comportamento antigo
+    // (todos os cards do board). Ver ADR-0030.
+    if (tenantId) qs.set("tenantId", tenantId);
+    return request<ApiCardSummary[]>(`/cards?${qs.toString()}`);
   },
 
   getCard(id: string): Promise<ApiCardDetails> {

@@ -44,7 +44,7 @@ export class CardsService {
   ) {}
 
   async findAll(query: ListCardsQueryDto = {}) {
-    const { boardId, type, columnId, updatedSince, limit, cursor, fields } = query;
+    const { boardId, type, columnId, updatedSince, limit, cursor, fields, tenantId } = query;
     // Degrada com elegância em schema drift (bug-cards-500): se o health-check
     // de boot detectou coluna(s) ausente(s), respondemos 503 com um aviso
     // acionável em vez de deixar o Prisma estourar um 500 opaco (P2022).
@@ -66,6 +66,10 @@ export class CardsService {
         where.OR = [{ boardColumnId: columnId }, { taskColumnId: columnId }];
       }
       if (updatedSince) where.updatedAt = { gte: new Date(updatedSince) };
+      // US-COLAB1: filtro estrito de tenant. Com tenantId, só cards com esse
+      // tenantId exato (cards globais com tenantId=null NÃO vazam). Sem tenantId,
+      // nenhuma cláusula → todos os cards (retrocompat). Ver ADR-0030.
+      if (tenantId) where.tenantId = tenantId;
 
       // Paginação por cursor: só ativa quando `limit` é passado. Buscamos
       // `limit + 1` para saber se há próxima página sem um count extra.
@@ -352,6 +356,7 @@ export class CardsService {
           ...(dto.backlogChatSessionId !== undefined
             ? { backlogChatSessionId: dto.backlogChatSessionId }
             : {}),
+          ...(dto.tenantId !== undefined ? { tenantId: dto.tenantId } : {}),
           ...(dto.type === 'task'
             ? { taskColumnId }
             : { boardColumnId }),

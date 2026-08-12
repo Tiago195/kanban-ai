@@ -166,6 +166,12 @@ export interface CardBase {
   resolvedModel: string | null;
   labelIds: string[];
   assigneeIds: string[];
+  /**
+   * US-COLAB1 — tenant do card. `null`/ausente = card global (retrocompatível).
+   * Rótulo opaco de isolamento de escopo no board (sem auth no v1, ADR-0009);
+   * o isolamento é cooperativo, não uma fronteira de segurança.
+   */
+  tenantId?: string | null;
   /** Definition of Done — único checklist do v1. */
   dod: ChecklistItem[];
   comments: Comment[];
