@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { MemoryController } from './memory.controller';
 import { MemoryAuthGuard } from './memory-auth.guard';
+import { MemoryTokenRegistry } from './memory-auth.tokens';
 import { MemoryBootstrapService } from './memory-bootstrap.service';
 import { MemoryEventsService } from './memory-events.service';
 import { MemoryGcService } from './memory-gc.service';
@@ -50,6 +51,11 @@ import { MemoryWriteService } from './memory-write.service';
     MemoryBootstrapService,
     MemoryGcService,
     MemorySchedulerService,
+    {
+      provide: MemoryTokenRegistry,
+      useFactory: () => new MemoryTokenRegistry(process.env.MEMORY_API_TOKENS),
+    },
+    MemoryAuthGuard,
   ],
   exports: [
     MemoryGitService,
