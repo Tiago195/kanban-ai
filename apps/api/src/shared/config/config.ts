@@ -210,6 +210,12 @@ export interface AppConfig {
      * sessões vivas). Default 5 min. Env: AGENT_CLAIM_TTL_MS.
      */
     claimTtlMs: number;
+    /**
+     * US-ROB3 — quando true, ao fechar uma task o orquestrador promove
+     * proativamente os dependentes que ficaram READY (recompute + auto-play da
+     * story-dona, se In Progress). Off por default. Env: AGENT_AUTOSTART_DEPENDENTS.
+     */
+    autostartDependents: boolean;
   };
 }
 
@@ -304,6 +310,7 @@ export function loadConfig(): AppConfig {
       runtimePersistEnabled: process.env.AGENT_RUNTIME_PERSIST_ENABLED !== 'false',
       claimEnabled: process.env.AGENT_CLAIM_ENABLED === 'true',
       claimTtlMs: num(process.env.AGENT_CLAIM_TTL_MS, 300_000),
+      autostartDependents: process.env.AGENT_AUTOSTART_DEPENDENTS === 'true',
     },
   };
 }

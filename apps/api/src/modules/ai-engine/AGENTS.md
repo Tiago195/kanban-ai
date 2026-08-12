@@ -216,6 +216,16 @@ nem os mocks/testes:
   salvaguarda #3 é preservada: o watchdog só age em sessão `dead` **ou** claim
   vencido — por isso `claimTtlMs` **deve** ser `> watchdogIntervalMs` (validado com
   warning no boot). Off por default (retrocompat total).
+- **Autostart de dependentes (US-ROB3)**: quando `AGENT_AUTOSTART_DEPENDENTS=true`,
+  ao fechar uma task o `onTaskDone` chama `promoteReadyDependents(taskId)` **após**
+  o re-validate de `blocked-dep`. Ele varre as arestas `TaskDependency` cuja
+  `dependsOnId` é a task fechada, e para cada dependente que ficou **READY**
+  (`pendingDeps` vazio, reusando `loop-helpers`) **e** cuja story-dona está **In
+  Progress** (invariante 6), garante o auto-play via `onStoryEnterInProgress`
+  (caminho canônico — respeita serialização por epic/concorrência/watchdog; NÃO
+  há caminho paralelo de start). É idempotente (não re-acorda story já rodando) e
+  cobre o gap de dependentes `idle`/de outra story do epic que o re-validate
+  sozinho não promove. Off por default (só o re-validate roda).
 
 Ao mudar esses contratos, mantenha este arquivo em dia.
 

@@ -1063,6 +1063,67 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
         await this.setExecState(dependentId, 'validating');
       }
     }
+    // US-ROB3 — após o re-validate acima, promove dependentes que ficaram READY
+    // mas nunca arrancaram (idle / de outra story do epic). Guardado por flag.
+    await this.promoteReadyDependents(taskId);
+  }
+
+  /**
+   * US-ROB3 — ao fechar `taskId`, recomputa quais dependentes ficaram READY e
+   * garante que o auto-play da story-dona esteja ativo (via `onStoryEnterInProgress`,
+   * caminho canônico que respeita serialização/concorrência/watchdog). Reusa
+   * `pendingDeps` (loop-helpers); NÃO reimplementa a checagem de dependências.
+   * Idempotente (onStoryEnterInProgress já é) e guardado por flag. Nunca acorda
+   * story fora de In Progress (invariante 6).
+   */
+  private async promoteReadyDependents(taskId: string): Promise<void> {
+    if (!this.config.agent.autostartDependents) return;
+
+    const edges = await this.prisma.taskDependency.findMany({
+      where: { dependsOnId: taskId },
+      select: { dependentId: true },
+    });
+    const seenStories = new Set<string>();
+    for (const { dependentId } of edges) {
+      const dep = await this.loadTask(dependentId);
+      if (!dep || dep.execState === 'done') continue;
+      const byId = await this.loadSiblingsById(dependentId);
+      if (pendingDeps(dep, byId).length > 0) continue; // ainda não READY
+
+      const storyId = await this.resolveTaskStory(dependentId);
+      if (!storyId || seenStories.has(storyId)) continue;
+      seenStories.add(storyId);
+
+      // Invariante 6: só promove se a story-dona está In Progress.
+      if (!(await this.isStoryInProgress(storyId))) continue;
+
+      await this.log(
+        dependentId,
+        `dependência ${taskId} resolvida → dependente pronto; garantindo auto-play`,
+      );
+      if (!this.isAutoRunning(storyId)) {
+        await this.onStoryEnterInProgress(storyId);
+      }
+    }
+  }
+
+  /** Story-dona de uma task (parentId). Null se a task não existir / for órfã. */
+  private async resolveTaskStory(taskId: string): Promise<string | null> {
+    const task = await this.prisma.card.findUnique({
+      where: { id: taskId },
+      select: { parentId: true },
+    });
+    return task?.parentId ?? null;
+  }
+
+  /** True se a story está numa coluna de board "In Progress" (invariante 6). */
+  private async isStoryInProgress(storyId: string): Promise<boolean> {
+    const story = await this.prisma.card.findUnique({
+      where: { id: storyId },
+      select: { boardColumn: { select: { title: true, isTaskColumn: true } } },
+    });
+    const col = story?.boardColumn;
+    return !!col && !col.isTaskColumn && col.title.toLowerCase() === 'in progress';
   }
 
   /**
