@@ -252,6 +252,8 @@ export class CopilotCliRunner implements AgentRunner {
           nextStep: event.nextStep,
           done: event.done,
           evidence: event.evidence,
+          inputTokens: event.inputTokens,
+          outputTokens: event.outputTokens,
           fatalError: event.fatalError,
         });
         return;

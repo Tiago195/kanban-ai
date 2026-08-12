@@ -36,6 +36,13 @@ export type CliEvent =
       /** #6: evidência de verificação — string livre (legado) ou estruturada. */
       evidence?: string | StructuredEvidence;
       /**
+       * Telemetria de tokens do turno (parseada do rodapé de stats da CLI).
+       * `inputTokens` = tokens de entrada (↑); `outputTokens` = saída (↓).
+       * Ausentes quando a CLI não expõe o rodapé.
+       */
+      inputTokens?: number;
+      outputTokens?: number;
+      /**
        * BUG-A7: erro FATAL de infraestrutura (spawn/modelo indisponível/não
        * autenticado/crash). Quando presente, o orchestrator escala a humano e
        * PARA o loop (fail-fast) em vez de contar como iteração normal.
@@ -135,6 +142,14 @@ export class CliAdapter {
         nextStep: str(obj.nextStep),
         done: obj.done === true,
         evidence: parseEvidence(obj.evidence),
+        inputTokens:
+          typeof obj.inputTokens === 'number' && Number.isFinite(obj.inputTokens)
+            ? obj.inputTokens
+            : undefined,
+        outputTokens:
+          typeof obj.outputTokens === 'number' && Number.isFinite(obj.outputTokens)
+            ? obj.outputTokens
+            : undefined,
         fatalError:
           typeof obj.fatalError === 'string' && obj.fatalError.trim().length > 0
             ? obj.fatalError

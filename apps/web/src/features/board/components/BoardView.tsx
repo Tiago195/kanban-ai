@@ -221,7 +221,35 @@ function ColumnDropZone({
   );
 }
 
-function StoryCardContent({ card }: { card: ApiCardSummary }) {
+function resolveEpicRef(card: ApiCardSummary, allCards: ApiCardSummary[]): { key: string; title: string } | null {
+  if (!card.parentId) return null;
+  const epic = allCards.find((candidate) => candidate.id === card.parentId && candidate.type === "epic");
+  if (!epic) return null;
+  return { key: epic.key, title: epic.title };
+}
+
+/**
+ * True quando ALGUMA task-filha da story está com `needsHuman`. Serve para o
+ * badge no card de story: mesmo que a própria story não esteja escalada, se uma
+ * de suas tasks precisa de intervenção humana o board deve sinalizar — senão a
+ * escalada só apareceria ao abrir a story e navegar até a task.
+ */
+function storyHasTaskNeedsHuman(story: ApiCardSummary, allCards: ApiCardSummary[]): boolean {
+  return allCards.some(
+    (candidate) =>
+      candidate.type === "task" && candidate.parentId === story.id && candidate.needsHuman,
+  );
+}
+
+function StoryCardContent({
+  card,
+  epicRef,
+  taskNeedsHuman,
+}: {
+  card: ApiCardSummary;
+  epicRef?: { key: string; title: string } | null;
+  taskNeedsHuman?: boolean;
+}) {
   const hasDescription = Boolean(card.description && card.description.trim());
   return (
     <>
@@ -238,8 +266,21 @@ function StoryCardContent({ card }: { card: ApiCardSummary }) {
             🙋 precisa de você
           </span>
         ) : null}
+        {!card.needsHuman && taskNeedsHuman ? (
+          <span
+            className="needs-human-badge needs-human-badge--task"
+            title="Uma task desta história precisa de você — abra a história para responder no chat da task."
+          >
+            🙋 task precisa de você
+          </span>
+        ) : null}
       </div>
       <div className="card-title">{card.title}</div>
+      {epicRef ? (
+        <span className="epic-badge" title={epicRef.title}>
+          {epicRef.key} · {epicRef.title}
+        </span>
+      ) : null}
       {hasDescription ? (
         <div className="card-meta">
           <span className="card-badge">📝</span>
@@ -249,7 +290,17 @@ function StoryCardContent({ card }: { card: ApiCardSummary }) {
   );
 }
 
-function StoryCard({ card, onOpen }: { card: ApiCardSummary; onOpen: (card: ApiCardSummary) => void }) {
+function StoryCard({
+  card,
+  epicRef,
+  taskNeedsHuman,
+  onOpen,
+}: {
+  card: ApiCardSummary;
+  epicRef?: { key: string; title: string } | null;
+  taskNeedsHuman?: boolean;
+  onOpen: (card: ApiCardSummary) => void;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
   const style = { transform: CSS.Transform.toString(transform), transition };
 
@@ -265,7 +316,7 @@ function StoryCard({ card, onOpen }: { card: ApiCardSummary; onOpen: (card: ApiC
       {...attributes}
       {...listeners}
     >
-      <StoryCardContent card={card} />
+      <StoryCardContent card={card} epicRef={epicRef} taskNeedsHuman={taskNeedsHuman} />
     </div>
   );
 }
@@ -276,12 +327,14 @@ function StoryColumn({
   isDropTarget,
   onOpenStory,
   onCreateStory,
+  allCards,
 }: {
   column: ApiBoardColumn;
   stories: ApiCardSummary[];
   isDropTarget?: boolean;
   onOpenStory: (card: ApiCardSummary) => void;
   onCreateStory: (columnId: string) => void;
+  allCards: ApiCardSummary[];
 }) {
   const points = stories.reduce((sum, story) => sum + (story.points ?? 0), 0);
   const overLimit = column.wipLimit != null && stories.length > column.wipLimit;
@@ -312,7 +365,13 @@ function StoryColumn({
       <SortableContext items={stories.map((story) => story.id)} strategy={verticalListSortingStrategy}>
         <ColumnDropZone columnId={column.id} className="card-list">
           {stories.map((story) => (
-            <StoryCard key={story.id} card={story} onOpen={onOpenStory} />
+            <StoryCard
+              key={story.id}
+              card={story}
+              epicRef={resolveEpicRef(story, allCards)}
+              taskNeedsHuman={storyHasTaskNeedsHuman(story, allCards)}
+              onOpen={onOpenStory}
+            />
           ))}
           {isDropTarget ? <div className="drop-placeholder" /> : null}
         </ColumnDropZone>
@@ -1675,14 +1734,21 @@ function TaskLoopControls({ task, boardId }: { task: ApiCardDetails; boardId: st
   const execState = task.execState ?? "idle";
   const deps = task.dependsOn ?? [];
   const busy = stepLoop.isPending || start.isPending || stop.isPending;
+  // Task 1 (autoplay roda a task "errada"): o step/auto-play é POR-STORY — o
+  // engine escolhe a próxima task pronta (pickNextTask), que pode NÃO ser esta.
+  // Se esta task está escalada (needsHuman), o engine a PULA e roda outra
+  // "silenciosamente". Para respeitar o DOD, bloqueamos o disparo a partir de
+  // uma task escalada e orientamos a resolver no chat primeiro.
+  const needsHuman = task.needsHuman ?? false;
+  const controlsDisabled = !storyId || busy || needsHuman;
 
   const onStep = () => {
-    if (storyId) stepLoop.mutate(storyId);
+    if (storyId && !needsHuman) stepLoop.mutate(storyId);
   };
   const onToggleAuto = () => {
     if (!storyId) return;
     if (running) stop.mutate({ storyId, mode: "graceful" });
-    else start.mutate(storyId);
+    else if (!needsHuman) start.mutate(storyId);
   };
 
   return (
@@ -1698,6 +1764,18 @@ function TaskLoopControls({ task, boardId }: { task: ApiCardDetails; boardId: st
       {task.derivedFromId ? (
         <div className="ai-derived">🔗 Task derivada de uma validação</div>
       ) : null}
+
+      {needsHuman ? (
+        <div className="ai-needs-human-note" role="status">
+          🙋 Esta task precisa de você. Responda no chat abaixo para destravá-la — enquanto isso,
+          o step/auto-play fica desabilitado (o auto-play rodaria outra task da história).
+        </div>
+      ) : (
+        <div className="ai-autoplay-note">
+          ℹ️ O <strong>auto-play</strong> executa a próxima task pronta <em>desta história</em> —
+          pode não ser exatamente esta task.
+        </div>
+      )}
 
       {deps.length > 0 ? (
         <div className="ai-deps">
@@ -1717,7 +1795,7 @@ function TaskLoopControls({ task, boardId }: { task: ApiCardDetails; boardId: st
           className="btn btn-ghost btn-sm"
           data-testid="loop-step"
           onClick={onStep}
-          disabled={!storyId || execState === "done" || busy}
+          disabled={controlsDisabled || execState === "done"}
         >
           ▶ Rodar 1 iteração
         </button>
@@ -1725,7 +1803,7 @@ function TaskLoopControls({ task, boardId }: { task: ApiCardDetails; boardId: st
           className={"btn btn-sm " + (running ? "btn-ghost" : "btn-primary")}
           data-testid="loop-toggle-auto"
           onClick={onToggleAuto}
-          disabled={!storyId || busy}
+          disabled={!storyId || busy || (needsHuman && !running)}
         >
           {running ? "⏸ Parar auto-play" : "⏩ Auto-play"}
         </button>
@@ -2226,6 +2304,7 @@ export function BoardView() {
               isDropTarget={overColumnId === column.id && draggedCardId != null}
               onOpenStory={(story) => openStory(story.id)}
               onCreateStory={(columnId) => setCreateStoryCtx({ columnId, parentId: null })}
+              allCards={cards ?? []}
             />
           ))}
         </div>
@@ -2235,7 +2314,11 @@ export function BoardView() {
                 const dragged = stories.find((story) => story.id === draggedCardId);
                 return dragged ? (
                   <div className={"card type-story" + (dragged.blocked ? " blocked" : "") + " dragging-overlay"}>
-                    <StoryCardContent card={dragged} />
+                    <StoryCardContent
+                      card={dragged}
+                      epicRef={resolveEpicRef(dragged, cards ?? [])}
+                      taskNeedsHuman={storyHasTaskNeedsHuman(dragged, cards ?? [])}
+                    />
                   </div>
                 ) : null;
               })()

@@ -29,3 +29,4 @@ Registro das decisões de arquitetura da fundação. Formato leve
 | [0022](0022-hitl-survives-restart-via-cli-session-id.md) | HITL sobrevive a restart via `--session-id` da Copilot CLI (reusa o UUID da sessão; sem migration) | Aceito |
 | [0023](0023-backlog-chat-story-threads.md) | Threads por story no chat de backlog (modelo Slack: uma sessão Copilot, transcripts por canal `main`/`story:<id>`) | Aceito |
 | [0024](0024-backlog-chat-rich-stories-and-draft-tasks.md) | Stories ricas (`aiSummary`/`aiNotes`) + tasks rascunhadas no backlog-chat, reusando o modelo do `Card` (sem duplicar Epic/Story/Task/DoD) | Aceito |
+| [0027](0027-memory-as-a-living-service.md) | Memória como serviço vivo (colmeia): git como fonte da verdade + índice Postgres/WS (fonte de design: board excalidraw `5WqltgG6Kq8`, seções 18–24) | Aceito |

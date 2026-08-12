@@ -82,6 +82,8 @@ export class MockAgentRunner implements AgentRunner {
     done?: boolean;
     affectedFlows?: { name: string; files: string[]; note?: string }[];
     proposedDod?: string[];
+    inputTokens?: number;
+    outputTokens?: number;
   }): Promise<AgentRunResult> {
     return Promise.resolve({
       detail: partial.detail,
@@ -89,6 +91,10 @@ export class MockAgentRunner implements AgentRunner {
       dodTouched: [],
       nextStep: partial.nextStep,
       done: partial.done ?? false,
+      // Mock de telemetria de tokens: valores plausíveis para que o
+      // LoopMetricsPanel exiba somas > 0 em dev/testes sem CLI real.
+      inputTokens: partial.inputTokens ?? 1200,
+      outputTokens: partial.outputTokens ?? 300,
       ...(partial.affectedFlows ? { affectedFlows: partial.affectedFlows } : {}),
       ...(partial.proposedDod ? { proposedDod: partial.proposedDod } : {}),
     });

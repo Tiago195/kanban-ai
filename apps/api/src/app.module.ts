@@ -12,6 +12,7 @@ import { AssigneesModule } from './modules/assignees/assignees.module';
 import { ModelsModule } from './modules/models/models.module';
 import { AiEngineModule } from './modules/ai-engine/ai-engine.module';
 import { BacklogChatModule } from './modules/backlog-chat/backlog-chat.module';
+import { MemoryModule } from './modules/memory/memory.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { BacklogChatModule } from './modules/backlog-chat/backlog-chat.module';
     ModelsModule,
     AiEngineModule,
     BacklogChatModule,
+    MemoryModule,
   ],
 })
 export class AppModule {}

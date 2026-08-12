@@ -116,6 +116,11 @@ function makePrisma(overrides: {
       findMany: makemaybe(overrides.iterationFindMany, async () => []),
       count: makemaybe(overrides.iterationCount, async () => 0),
     },
+    agentMessage: {
+      create: async () => undefined,
+      findFirst: async () => null,
+      findMany: async () => [],
+    },
     card: {
       findUnique: makemaybe(
         overrides.cardFindUnique,
@@ -264,6 +269,47 @@ test('enforceLoopGuards: iterações sem diff fora da fase implementation NÃO c
 
   const escalated = await priv(orch).enforceLoopGuards('task-1', 'story-1');
   assert.equal(escalated, false, 'fases não-implementation não disparam o cap improdutivo');
+});
+
+test('enforceLoopGuards: iterações que FECHAM DOD (diff vazio + dodTouched) NÃO contam como improdutivas', async () => {
+  // Regressão do deadlock de fechamento de DOD: iterações de VERIFICAÇÃO
+  // (build/lint/test verde, tipo exportado) fecham itens de DOD sem gerar diff.
+  // Elas avançaram o trabalho e NÃO devem escalar para humano.
+  const iterations = [
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'escreveu', handoffNextStep: 'n', phase: 'implementation', diff: 'diff --git a/x b/x', dodTouched: ['d1'] },
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'fechou dod', handoffNextStep: 'n', phase: 'implementation', diff: '', dodTouched: ['d2'] },
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'fechou dod', handoffNextStep: 'n', phase: 'implementation', diff: '', dodTouched: ['d3'] },
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'fechou dod', handoffNextStep: 'n', phase: 'implementation', diff: '', dodTouched: ['d4'] },
+  ];
+  const prisma = makePrisma({ iterationFindMany: async () => iterations });
+  const { orch } = makeOrchestrator({
+    config: makeConfig({ maxIterationsPerTask: 0, maxUnproductiveIterations: 3 }),
+    prisma,
+    realtime: makeRealtime(),
+  });
+
+  const escalated = await priv(orch).enforceLoopGuards('task-1', 'story-1');
+  assert.equal(escalated, false, 'fechar DOD sem diff é produtivo — não deve escalar');
+  assert.equal(prisma.updates.length, 0, 'não deve marcar needsHuman');
+});
+
+test('enforceLoopGuards: iterações sem diff E sem dodTouched -> escala (improdutivas de verdade)', async () => {
+  // Contraprova: iterações que NEM escrevem código NEM fecham DOD continuam
+  // sendo improdutivas e devem escalar (o guard genuíno segue ativo).
+  const iterations = [
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'a', handoffNextStep: 'n', phase: 'implementation', diff: '', dodTouched: [] },
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'b', handoffNextStep: 'n', phase: 'implementation', diff: '', dodTouched: [] },
+    { durationMs: 0, inputTokens: 0, outputTokens: 0, summary: 'c', handoffNextStep: 'n', phase: 'implementation', diff: '', dodTouched: [] },
+  ];
+  const prisma = makePrisma({ iterationFindMany: async () => iterations });
+  const { orch } = makeOrchestrator({
+    config: makeConfig({ maxIterationsPerTask: 0, maxUnproductiveIterations: 3 }),
+    prisma,
+    realtime: makeRealtime(),
+  });
+
+  const escalated = await priv(orch).enforceLoopGuards('task-1', 'story-1');
+  assert.equal(escalated, true, 'sem código e sem DOD = improdutiva → escala');
 });
 
 test('enforceLoopGuards: abaixo do cap -> NÃO escala', async () => {
@@ -792,4 +838,118 @@ test('runIteration: fatalError do runner escala a humano, grava outcome=error e 
   assert.match((escalated as unknown as { reason: string }).reason, /fatal|not available/i);
   assert.equal(appended.length, 1, 'deve gravar exatamente uma iteração (a de erro)');
   assert.equal(appended[0].outcome, 'error', 'a iteração de erro deve ter outcome=error');
+});
+
+// ── Regressão TK-130: DOD marcado com diff VAZIO não é descartado ────────────
+//
+// Cenário: o código que satisfaz um item de DOD já existe no working tree
+// (escrito por uma TASK IRMÃ da mesma story no mesmo repo, ou por um processo
+// anterior). A iteração de implementação tem `git diff` VAZIO, mas a AI reporta
+// `dodTouched`. O comportamento CORRETO é marcar o item de DOD (não descartar
+// por causa do diff vazio) e NÃO escalar. Antes da correção, o diff vazio
+// zerava `dodTouched` → a task nunca fechava o DOD → deadlock de re-escalação.
+test('runIteration: diff VAZIO + dodTouched reportado -> marca o DOD (não zera) e não escala (TK-130)', async () => {
+  const dodUpdates: string[] = [];
+  const prisma = makePrisma({
+    cardFindUnique: async () => ({
+      title: 'task irmã já escreveu o código',
+      loopType: 'feature',
+      model: null,
+      parentId: null,
+      boardId: 'b1',
+      assignees: [],
+      derivedDepth: 0,
+    }),
+  });
+  // Estende o fake para suportar a marcação do item de DOD desta iteração.
+  (prisma.svc as unknown as { dodItem: Record<string, unknown> }).dodItem = {
+    count: async () => 1, // ainda resta 1 item pendente -> não fecha a task
+    update: async ({ where }: { where: { id: string } }) => {
+      dodUpdates.push(where.id);
+      return { id: where.id, done: true };
+    },
+    findFirst: async () => null,
+  };
+
+  // Runner REAL (id != 'mock') que relata progresso de DOD sem produzir diff.
+  const runner = {
+    id: 'copilot',
+    run: async () => ({
+      detail: 'confirmei que ResolveRequest já está exportado pelo barrel',
+      summary: 'DOD item validado',
+      dodTouched: ['d1'],
+      done: false,
+      affectedFlows: [],
+    }),
+  } as unknown as AgentRunner;
+
+  const config = makeConfig();
+  const sessions = new AgentSessionManager(config);
+  const realtime = makeRealtime();
+  const orch = new Orchestrator(
+    prisma.svc,
+    sessions,
+    makeValidation(),
+    makeWorkspaces(),
+    realtime.svc,
+    runner,
+    config,
+  );
+
+  const p = priv(orch);
+  p.loadTask = async () => ({
+    id: 'task-130',
+    execState: 'implementing',
+    phases: ['analysis', 'implementation', 'validation'],
+    derivedDepth: 0,
+    dependsOn: [],
+    dodDone: [],
+    type: 'task',
+  });
+  p.loadSiblingsById = async () => new Map();
+  p.buildContext = async () => ({
+    taskTitle: 'task irmã já escreveu o código',
+    project: '/repo/target',
+    notes: '',
+    flowNames: [],
+    files: [],
+    storyId: 'story-117',
+    affectedFlows: [],
+    dodItems: [
+      { id: 'd1', text: 'ResolveRequest exportado pelo barrel', done: false },
+      { id: 'd2', text: 'monorepo verde', done: false },
+    ],
+    iterationHistory: [],
+    siblingHandoffs: [],
+  });
+  p.enforceLoopGuards = async () => false;
+  p.resolveCardModel = async () => 'valid-model';
+  // Simula o cenário TK-130: working tree sem delta NESTA iteração.
+  p.captureTreeBaseline = async () => 'baseline';
+  p.captureDiff = async () => '';
+  p.buildPrompt = () => 'prompt';
+  p.persistAffectedFlows = async () => undefined;
+
+  let escalated = false;
+  p.escalateToHuman = async () => {
+    escalated = true;
+  };
+  const appended: Array<Record<string, unknown>> = [];
+  p.appendIteration = async (_taskId: string, it: Record<string, unknown>) => {
+    appended.push(it);
+  };
+  p.setExecState = async () => undefined;
+  p.log = async () => undefined;
+
+  const ran = await orch.runIteration('task-130');
+
+  assert.equal(ran, true, 'a iteração deve rodar normalmente');
+  assert.equal(escalated, false, 'NÃO deve escalar a humano só por diff vazio');
+  assert.deepEqual(dodUpdates, ['d1'], 'o item de DOD reportado deve ser marcado apesar do diff vazio');
+  assert.equal(appended.length, 1, 'deve gravar exatamente uma iteração');
+  assert.deepEqual(
+    appended[0].dodTouched,
+    ['d1'],
+    'o dodTouched NÃO pode ser zerado por causa do diff vazio',
+  );
 });

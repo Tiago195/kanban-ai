@@ -261,6 +261,11 @@ async function main() {
     }
     const text = out.trim();
 
+    // Telemetria de tokens do rodapé de stats da CLI (modo texto). Computada
+    // uma vez a partir do stdout completo e anexada a TODO evento `result`
+    // abaixo, para o orchestrator persistir input/output tokens por iteração.
+    const tokenUsage = parseTokenUsage(out);
+
     // Chat da story (ADR-0026): proposta de TASKS estruturada. Tem precedência
     // sobre os blocos de backlog (Epic+Stories), pois no chat da story o PO
     // emite tasks, não um backlog novo. Patch cirúrgico antes da lista inteira.
@@ -315,6 +320,7 @@ async function main() {
           question.options?.length ? ` (opções: ${question.options.join(' | ')})` : ''
         }. Continue a partir da resposta recebida.`,
         done: false,
+        ...tokenUsage,
       });
       return;
     }
@@ -326,9 +332,13 @@ async function main() {
         detail: text || `Copilot CLI encerrou com código ${code}.`,
         summary: (structured.summary || lastLine(text) || 'Iteração concluída pelo Copilot CLI.').slice(0, 240),
         dodTouched: Array.isArray(structured.dodTouched) ? structured.dodTouched.map(String) : [],
+        proposedDod: Array.isArray(structured.proposedDod)
+          ? structured.proposedDod.map(String).filter((s) => s.trim().length > 0)
+          : undefined,
         affectedFlows: normalizeFlows(structured.affectedFlows),
         nextStep: typeof structured.nextStep === 'string' ? structured.nextStep : '',
         done: structured.done === true,
+        ...tokenUsage,
       });
       return;
     }
@@ -348,6 +358,7 @@ async function main() {
       affectedFlows: [],
       nextStep: '',
       done: code === 0 && !fatalError,
+      ...tokenUsage,
       ...(fatalError ? { fatalError } : {}),
     });
   };
@@ -365,6 +376,52 @@ async function main() {
 /** Última linha não-vazia de um texto. */
 function lastLine(text) {
   return text.split('\n').filter(Boolean).slice(-1)[0] || '';
+}
+
+/**
+ * Extrai a telemetria de TOKENS do rodapé de estatísticas que o Copilot CLI
+ * imprime ao final de um turno (modo texto), no formato:
+ *
+ *   Tokens     ↑ 44.4k (29.7k cached, 14.5k written) • ↓ 25
+ *
+ * `↑` (U+2191) é o total de tokens de ENTRADA (prompt); `↓` (U+2193) é o total
+ * de SAÍDA (resposta). Os valores podem vir como inteiro (`25`) ou abreviados
+ * (`44.4k`, `1.2m`). Retorna `{ inputTokens, outputTokens }` com os campos que
+ * conseguiu extrair (undefined quando ausente). Se o rodapé não existir (ex.:
+ * turno estruturado sem stats, versão diferente da CLI), retorna `{}`.
+ */
+function parseTokenUsage(text) {
+  if (!text) return {};
+  // Pega a ÚLTIMA ocorrência da linha de Tokens (um turno = um rodapé; se
+  // houver ruído, o rodapé real é o último).
+  const lines = text.split('\n');
+  let line = '';
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/(^|\s)Tokens\s/.test(lines[i]) && /[↑↓]/.test(lines[i])) {
+      line = lines[i];
+      break;
+    }
+  }
+  if (!line) return {};
+  const toNumber = (raw) => {
+    if (!raw) return undefined;
+    const m = String(raw)
+      .trim()
+      .match(/^([\d.,]+)\s*([kKmMgG])?/);
+    if (!m) return undefined;
+    const value = parseFloat(m[1].replace(/,/g, ''));
+    if (!Number.isFinite(value)) return undefined;
+    const mult = { k: 1e3, m: 1e6, g: 1e9 }[(m[2] || '').toLowerCase()] || 1;
+    return Math.round(value * mult);
+  };
+  const up = line.match(/↑\s*([\d.,]+\s*[kKmMgG]?)/);
+  const down = line.match(/↓\s*([\d.,]+\s*[kKmMgG]?)/);
+  const usage = {};
+  const inputTokens = up ? toNumber(up[1]) : undefined;
+  const outputTokens = down ? toNumber(down[1]) : undefined;
+  if (typeof inputTokens === 'number') usage.inputTokens = inputTokens;
+  if (typeof outputTokens === 'number') usage.outputTokens = outputTokens;
+  return usage;
 }
 
 /**
@@ -406,8 +463,12 @@ function detectFatalError(code, text, err) {
  * Extrai o bloco estruturado que a AI é instruída a emitir ao FINAL da resposta:
  *
  *   <<<KANBAN_RESULT>>>
- *   { "dodTouched": [...], "affectedFlows": [...], "nextStep": "...", "done": true, "summary": "..." }
+ *   { "dodTouched": [...], "proposedDod": [...], "affectedFlows": [...], "nextStep": "...", "done": true, "summary": "..." }
  *   <<<END_KANBAN_RESULT>>>
+ *
+ * `proposedDod` (lista de strings) só é usado na fase de ANÁLISE, quando a task
+ * ainda não tem DOD: o orchestrator cria os DodItems a partir dele. Se a AI não
+ * o emitir, o orchestrator aplica um fallback determinístico.
  *
  * Tolerante: aceita o bloco em qualquer lugar da saída, com ou sem cerca ```json.
  * Retorna o objeto parseado ou null se ausente/inválido.

@@ -588,6 +588,23 @@
     font-weight: 700;
     color: var(--text-muted);
   }
+  .epic-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-top: 2px;
+    max-width: 100%;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: color-mix(in srgb, #6366f1 18%, transparent);
+    color: #818cf8;
+    border: 1px solid color-mix(in srgb, #6366f1 40%, transparent);
+  }
+
   .points-badge {
     margin-left: auto;
     min-width: 22px;
@@ -1501,11 +1518,26 @@
     color: var(--text-muted);
     margin-bottom: 6px;
   }
+  .ai-autoplay-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    line-height: 1.4;
+  }
+  .ai-needs-human-note {
+    font-size: 12px;
+    color: var(--warning, #d29922);
+    background: color-mix(in srgb, var(--warning, #d29922) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning, #d29922) 35%, transparent);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    line-height: 1.4;
+  }
   .ai-exec-controls {
     display: flex;
     gap: 8px;
-    margin-top: 4px;
-  }
+    margin-top: 4px;  }
 
   /* badge "aguardando você" (HITL) */
   .awaiting-badge {
@@ -1533,6 +1565,14 @@
     background: color-mix(in srgb, var(--danger) 20%, transparent);
     color: var(--danger);
     border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  }
+
+  /* Variante para quando é uma TASK-filha (não a própria story) que precisa de
+     humano: tom âmbar para distinguir da escalada da própria story (vermelho). */
+  .needs-human-badge--task {
+    background: color-mix(in srgb, var(--warning, #d29922) 18%, transparent);
+    color: var(--warning, #d29922);
+    border-color: color-mix(in srgb, var(--warning, #d29922) 45%, transparent);
   }
 
   /* chat/transcript do agente (streaming + HITL) */

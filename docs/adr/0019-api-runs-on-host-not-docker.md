@@ -60,6 +60,9 @@ em container (`docker compose up -d` sobe apenas o `postgres`).
 - Há dois `.env` (raiz e `apps/api/.env`); as chaves do runner do loop
   (`AGENT_RUNNER_KIND`, `AGENT_CLI_*`, `COPILOT_BIN`, timeouts) devem viver no
   `apps/api/.env`, pois é o `cwd` da API — evitar drift entre os dois.
+  > Existe **um único** template versionado: `.env.example` na **raiz** (todas as
+  > chaves documentadas ali). **Não** há `apps/api/.env.example` — os dois `.env`
+  > reais são cópias locais não versionadas feitas a partir do template da raiz.
 
 ## Como rodar (host)
 

@@ -4,6 +4,9 @@ import type { ExecState, AffectedFlow, LoopMetrics } from '@kanban-ai/shared';
 import { isVerifiableEvidence } from '@kanban-ai/shared';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { rm } from 'node:fs/promises';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { APP_CONFIG, type AppConfig } from '../../shared/config/config';
 import { RealtimeService } from '../../realtime/realtime.service';
@@ -331,6 +334,11 @@ export class Orchestrator implements OnModuleInit {
       return false;
     }
 
+    // Diff/Replay Viewer: snapshot do working tree ANTES do agent rodar, para
+    // que o diff desta iteração reflita SÓ o delta produzido nesta iteração (e
+    // não o acumulado do worktree contra o último commit). Ver captureDiff().
+    const diffBaseline = await this.captureTreeBaseline(cwd);
+
     // b6: sinal de cancelamento cooperativo (stop hard) vindo da sessão.
     const signal = this.sessions.get(storyId)?.abort.signal;
 
@@ -447,9 +455,10 @@ export class Orchestrator implements OnModuleInit {
     await flushChunkBuffer();
 
     // Diff/Replay Viewer: captura o diff do worktree ANTES da validação/derivação,
-    // refletindo exatamente o que o agent produziu nesta iteração. Reutilizado
-    // em ambos os call sites de appendIteration abaixo.
-    const iterationDiff = await this.captureDiff(cwd);
+    // refletindo exatamente o que o agent produziu nesta iteração. O baseline
+    // (snapshot do início) garante que seja o DELTA desta iteração, não o
+    // acumulado. Reutilizado em ambos os call sites de appendIteration abaixo.
+    const iterationDiff = await this.captureDiff(cwd, diffBaseline);
 
     // BUG-A7: ERRO FATAL de infraestrutura (spawn falhou, modelo indisponível,
     // não autenticado, crash da CLI). Esta "iteração" NÃO é trabalho da AI —
@@ -474,6 +483,8 @@ export class Orchestrator implements OnModuleInit {
         evidence: evidenceToString(runResult.evidence),
         diff: iterationDiff,
         durationMs: Date.now() - iterationStartedAt,
+        inputTokens: runResult.inputTokens,
+        outputTokens: runResult.outputTokens,
         outcome: 'error',
       });
       await this.log(taskId, reason);
@@ -550,6 +561,8 @@ export class Orchestrator implements OnModuleInit {
         evidence: evidenceToString(runResult.evidence),
         diff: iterationDiff,
         durationMs: Date.now() - iterationStartedAt,
+        inputTokens: runResult.inputTokens,
+        outputTokens: runResult.outputTokens,
         outcome: effectivePassed ? 'ok' : 'derived',
       });
 
@@ -570,8 +583,22 @@ export class Orchestrator implements OnModuleInit {
         // Ao atingir o threshold, em vez de derivar de novo (risco de loop
         // infinito de derivações), marcamos a task com `needsHuman`, paramos o
         // auto-play da story de forma graceful e emitimos um evento WS.
+        //
+        // "Perdão" pós-intervenção: só contamos as falhas POSTERIORES à última
+        // resposta humana (role=user). Assim, após o humano destravar uma task
+        // escalada, o cap de falhas recomeça — evitando re-escalar de imediato.
+        const lastAnswerForFailures = await this.prisma.agentMessage.findFirst({
+          where: { cardId: taskId, role: 'user' },
+          orderBy: { ts: 'desc' },
+          select: { ts: true },
+        });
         const validationFailures = await this.prisma.iteration.count({
-          where: { cardId: taskId, phase: 'validation', handoffState: 'blocked' },
+          where: {
+            cardId: taskId,
+            phase: 'validation',
+            handoffState: 'blocked',
+            ...(lastAnswerForFailures ? { ts: { gt: lastAnswerForFailures.ts } } : {}),
+          },
         });
         // Cap de profundidade de derivação (#2): se a task de origem já está
         // fundo demais na cadeia de derivações, parar de derivar e escalar —
@@ -594,29 +621,66 @@ export class Orchestrator implements OnModuleInit {
       return true;
     }
 
-    // Guard anti-progresso-fantasma: na fase de implementação, se a AI relata
-    // progresso (marcou DOD, declarou `done` ou listou `affectedFlows`) mas o
-    // `git diff` do repo-alvo está VAZIO, então nenhuma mudança aterrissou no
-    // working tree — o "progresso" é alucinado. Nesse caso NÃO aceitamos:
-    // ignoramos o DOD reportado e registramos um desvio, para o loop corrigir
-    // em vez de avançar sobre trabalho inexistente. O agent coda direto no
-    // repo-alvo (sem worktree), então um diff vazio é sinal confiável de que
-    // nada foi escrito. (runner mock não produz diff real — só aplicamos ao real.)
-    const reportedProgress =
-      (runResult.dodTouched ?? []).filter(Boolean).length > 0 ||
-      runResult.done === true ||
-      (runResult.affectedFlows?.length ?? 0) > 0;
-    const emptyWorktreeBypass =
+    // Guard anti-progresso-fantasma: na fase de implementação, se a AI reivindica
+    // trabalho que EXIGE código novo — declarar a task `done` ou listar
+    // `affectedFlows` (afirmar que mexeu em fluxos) — mas o `git diff` desta
+    // iteração está VAZIO, então nenhuma mudança nova aterrissou no working tree
+    // e a reivindicação é alucinada. Nesse caso NÃO aceitamos: ignoramos e
+    // registramos um desvio, para o loop corrigir em vez de avançar sobre
+    // trabalho inexistente. (runner mock não produz diff real — só ao real.)
+    //
+    // IMPORTANTE (correção do deadlock de fechamento de DOD): marcar `dodTouched`
+    // NÃO é, por si só, reivindicação de código novo. Muitos itens de DOD são de
+    // VERIFICAÇÃO ("monorepo verde após build/lint/test", "tipo exportado pelo
+    // barrel", "confirmar reuso de US-115") e são legitimamente fechados em
+    // iterações SEM diff, depois que o código já foi escrito numa iteração
+    // anterior. Antes, um diff de iteração vazio descartava o `dodTouched` e a
+    // task nunca conseguia fechar o DOD → escalava como "improdutiva" em loop.
+    // Só tratamos o fechamento de DOD como fantasma quando a task NUNCA produziu
+    // diff algum (nenhuma iteração de implementação produtiva antes): aí o item
+    // provavelmente se refere a código que não existe.
+    // Guard anti-progresso-fantasma (reformulado após o deadlock das TK-129/130).
+    //
+    // Precisamos distinguir DOIS tipos de reivindicação da AI numa iteração de
+    // implementação com `git diff` VAZIO:
+    //
+    //  (A) Reivindicações que EXIGEM código novo NESTA iteração — declarar a task
+    //      `done` ou listar `affectedFlows` (afirmar que mexeu em fluxos). Se o
+    //      diff está vazio, essas reivindicações são alucinadas: bloqueamos.
+    //
+    //  (B) Marcar `dodTouched` — a AI ATESTANDO que um critério de DOD específico
+    //      está satisfeito. Isso NÃO exige diff nesta iteração: o código que
+    //      satisfaz o item pode ter sido escrito antes (iteração anterior, um
+    //      PROCESSO anterior que foi reiniciado, ou uma TASK IRMÃ da mesma story
+    //      no mesmo repo — foi exatamente o que travou a TK-130, cujo código
+    //      `ResolveRequest`/`MemoryReviewItem` já existia no repo). Muitos itens
+    //      de DOD são de VERIFICAÇÃO ("monorepo verde", "tipo exportado pelo
+    //      barrel") e nunca produzem diff. Zerar `dodTouched` aqui era a causa do
+    //      deadlock: a task nunca fechava o DOD e re-escalava para humano em loop.
+    //
+    // Portanto o bypass zera SÓ as reivindicações do tipo (A). O `dodTouched`
+    // (tipo B) sempre passa pela validação normal (ids desta task, ainda não
+    // marcados, regra nano de 1 por iteração). O antídoto contra a AI marcar DOD
+    // falsamente NÃO é o diff (que aqui é inconclusivo), e sim: (1) a nano-regra
+    // limita a 1 item/iteração; (2) o cap de improdutivas — agora ciente de
+    // `dodTouched` — só perdoa quem realmente avança o DOD e escala o resto.
+    // O aviso de desvio só faz sentido quando a reivindicação é de fato
+    // fantasma: `affectedFlows` sem diff, ou `done` sem diff E com DOD ainda
+    // incompleto (declarar conclusão sem ter terminado o checklist nem escrito
+    // código). `done` com todo o DOD fechado é conclusão legítima (tratada em
+    // `canFinish` adiante) e não deve alarmar.
+    const claimsNewCodeWithoutDiff =
       this.runner.id !== 'mock' &&
       phase === 'implementation' &&
-      reportedProgress &&
-      iterationDiff.trim().length === 0;
-    if (emptyWorktreeBypass) {
+      iterationDiff.trim().length === 0 &&
+      (runResult.affectedFlows?.length ?? 0) > 0;
+    if (claimsNewCodeWithoutDiff) {
       await this.log(
         taskId,
-        'desvio detectado: a AI relatou progresso mas o git diff do repo-alvo está VAZIO. ' +
-          'Nenhuma mudança foi escrita nos arquivos. O progresso foi IGNORADO — ' +
-          'edite de fato os arquivos do projeto no diretório atual antes de marcar DOD.',
+        'desvio detectado: a AI listou fluxos afetados mas o git diff do repo-alvo ' +
+          'está VAZIO nesta iteração. A reivindicação de mudança em fluxos foi ' +
+          'IGNORADA — marque os itens de DOD que você validou; para fechar a task, ' +
+          'edite de fato os arquivos ou conclua o DOD item a item.',
       );
     }
 
@@ -627,7 +691,7 @@ export class Orchestrator implements OnModuleInit {
     // fallback determinístico (marca o próximo item pendente) só na fase de
     // implementação, preservando o comportamento dev/test do mock.
     let touched: string[] = [];
-    const reported = emptyWorktreeBypass ? [] : (runResult.dodTouched ?? []).filter(Boolean);
+    const reported = (runResult.dodTouched ?? []).filter(Boolean);
     if (reported.length > 0) {
       const validIds = new Set(context.dodItems.filter((d) => !d.done).map((d) => d.id));
       const reportedValid = reported.filter((id) => validIds.has(id));
@@ -665,12 +729,35 @@ export class Orchestrator implements OnModuleInit {
     }
 
     // A AI registra os fluxos afetados (ela sabe onde mexeu). Persistimos na
-    // STORY pai (merge por nome) para alimentar a validação final.
-    if (runResult.affectedFlows && runResult.affectedFlows.length > 0 && context.storyId) {
+    // STORY pai (merge por nome) para alimentar a validação final. Não
+    // persistimos quando a reivindicação é fantasma (fluxos sem diff nesta
+    // iteração) — ver `claimsNewCodeWithoutDiff`.
+    if (
+      !claimsNewCodeWithoutDiff &&
+      runResult.affectedFlows &&
+      runResult.affectedFlows.length > 0 &&
+      context.storyId
+    ) {
       await this.persistAffectedFlows(context.storyId, runResult.affectedFlows);
     }
 
-    const handoffState = runResult.done && !emptyWorktreeBypass ? 'done' : execStateAfterPhase(phase);
+    // A task pode ir a `done` quando a AI declara `done` E isso é crível. Com
+    // diff vazio, `done` só é aceito se TODO o DOD já estiver satisfeito (o DOD
+    // é a fonte de verdade da conclusão) — inclusive contando o item marcado
+    // AGORA nesta iteração. Assim a iteração final de fechamento (marca o último
+    // item de DOD e declara `done`, sem diff) conclui a task; mas declarar
+    // `done` com DOD incompleto e sem diff cai no guard anti-fantasma.
+    let dodAllDone = false;
+    if (runResult.done) {
+      const pendingDod = await this.prisma.dodItem.count({
+        where: { cardId: taskId, done: false },
+      });
+      dodAllDone = pendingDod === 0;
+    }
+    const canFinish =
+      runResult.done &&
+      (dodAllDone || iterationDiff.trim().length > 0 || this.runner.id === 'mock');
+    const handoffState = canFinish ? 'done' : execStateAfterPhase(phase);
     // #6: se houve HITL nesta iteração, anexa a pergunta+resposta ao nextStep
     // para reinjeção no lastro da próxima iteração (modelo one-shot).
     const nextStep = hitlExchange
@@ -696,6 +783,8 @@ export class Orchestrator implements OnModuleInit {
       evidence: evidenceToString(runResult.evidence),
       diff: iterationDiff,
       durationMs: Date.now() - iterationStartedAt,
+      inputTokens: runResult.inputTokens,
+      outputTokens: runResult.outputTokens,
       outcome: hitlExchange ? 'awaiting-input' : 'ok',
     });
     await this.setExecState(taskId, execStateAfterPhase(phase));
@@ -1305,6 +1394,13 @@ export class Orchestrator implements OnModuleInit {
    * Caminho de resgate ("needs human"): marca a task, para o auto-play graceful
    * e emite `card.needs_human`. Reusado pelo limite de falhas de validação
    * (#5), pelo gate de custo (#1) e pelo anti-thrash (#3).
+   *
+   * Além de marcar a flag, registra uma PERGUNTA HITL sintética (AgentMessage
+   * role=ai + questionId + opções) e emite `agent.question`. Sem isso, a task
+   * exibiria o badge "🙋 precisa de você" mas o chat ficaria bloqueado (não há
+   * pergunta pendente para o `ChatPanel` reidratar) — o humano veria o problema
+   * sem ter como responder/destravar. Com a pergunta sintética, `answerQuestion`
+   * (caminho de resiliência) limpa `needsHuman` e retoma a iteração.
    */
   private async escalateToHuman(
     taskId: string,
@@ -1316,10 +1412,40 @@ export class Orchestrator implements OnModuleInit {
       where: { id: taskId },
       data: { needsHuman: true, needsHumanReason: reason },
     });
+
+    // Pergunta HITL sintética: dá ao humano um canal de resposta para destravar
+    // a task escalada por um gate (cap/custo/thrash/validação), que NÃO passa
+    // pelo fluxo `onQuestion` da AI. As opções guiam a intervenção; qualquer
+    // texto livre também é aceito (o `answerQuestion` retoma a iteração).
+    const questionId = randomUUID();
+    const prompt =
+      `A execução automática foi pausada e preciso de você: ${reason}. ` +
+      'Como devo prosseguir? Você pode escolher uma opção ou escrever uma orientação.';
+    const options = ['Retomar do ponto atual', 'Revisar o plano e continuar'];
+    await this.prisma.agentMessage.create({
+      data: {
+        cardId: taskId,
+        role: 'ai',
+        text: prompt,
+        questionId,
+        options,
+      },
+    });
+
     // Para o auto-play da story sem abortar hard (graceful): preserva o estado
     // no Postgres e deixa o próximo tick encerrar limpo.
     await this.stop(storyId, 'graceful');
     this.realtime.broadcast({ type: 'card.needs_human', taskId, storyId, reason });
+    // Espelha a pergunta sintética para o chat abrir ao vivo (sem depender de F5
+    // + hydrate). Mesmo shape do HITL normal (onQuestion).
+    this.realtime.broadcast({
+      type: 'agent.question',
+      taskId,
+      storyId,
+      questionId,
+      prompt,
+      options,
+    });
     await this.log(taskId, logMessage);
   }
 
@@ -1356,10 +1482,11 @@ export class Orchestrator implements OnModuleInit {
     const thrashOn = thrashDetectionEnabled && thrashWindow >= 2;
     if (!iterationCapOn && !unproductiveCapOn && !costGateOn && !thrashOn) return false;
 
-    const iterations = await this.prisma.iteration.findMany({
+    const iterationsAll = await this.prisma.iteration.findMany({
       where: { cardId: taskId },
       orderBy: { index: 'asc' },
       select: {
+        ts: true,
         durationMs: true,
         inputTokens: true,
         outputTokens: true,
@@ -1367,8 +1494,26 @@ export class Orchestrator implements OnModuleInit {
         handoffNextStep: true,
         phase: true,
         diff: true,
+        dodTouched: true,
       },
     });
+    if (iterationsAll.length === 0) return false;
+
+    // "Perdão" pós-intervenção humana: quando o humano responde uma escalação
+    // (needsHuman), a task é destravada e o loop retomado. Se os guards
+    // continuassem contando desde o início (caps CUMULATIVOS), a primeira
+    // iteração retomada re-escalaria imediatamente — deixando a task presa. Por
+    // isso, todos os caps passam a contar A PARTIR da última resposta humana:
+    // filtramos as iterações anteriores a ela. Sem intervenção, o comportamento
+    // é idêntico ao anterior (janela = todas as iterações).
+    const lastHumanAnswer = await this.prisma.agentMessage.findFirst({
+      where: { cardId: taskId, role: 'user' },
+      orderBy: { ts: 'desc' },
+      select: { ts: true },
+    });
+    const iterations = lastHumanAnswer
+      ? iterationsAll.filter((it) => it.ts > lastHumanAnswer.ts)
+      : iterationsAll;
     if (iterations.length === 0) return false;
 
     // Cap de iterações (#1 — anti-loop-infinito). Roda antes do gate de custo:
@@ -1386,23 +1531,32 @@ export class Orchestrator implements OnModuleInit {
 
     // Cap de iterações IMPRODUTIVAS consecutivas (#4 — anti-deadlock de
     // blocked_dep/derivações que ciclam sem produzir código). Conta, do fim
-    // para o começo, iterações de fase `implementation` cujo `diff` do worktree
-    // ficou VAZIO; para na primeira iteração de implementação produtiva (com
-    // diff). É uma defesa PRÓPRIA: mesmo que outro defeito zere o diff, o loop
-    // para e escala em vez de ciclar indefinidamente.
+    // para o começo, iterações de fase `implementation` que NÃO produziram nada:
+    // nem `diff` no worktree NEM avanço de DOD (`dodTouched` vazio). Para na
+    // primeira iteração PRODUTIVA (com diff OU que fechou ≥1 item de DOD).
+    //
+    // Por que considerar `dodTouched` (correção do deadlock de fechamento de
+    // DOD): uma task saudável tem fase(s) de implementação (com diff) seguida(s)
+    // de fase(s) de FECHAMENTO de itens de DOD de verificação ("build/lint/test
+    // verde", "tipo exportado pelo barrel") que legitimamente NÃO geram diff. Se
+    // contássemos essas iterações de fechamento como improdutivas, toda task
+    // escalaria para humano ao fechar o DOD — deadlock. Uma iteração que fecha
+    // um item de DOD avançou o trabalho e portanto é produtiva.
     if (unproductiveCapOn) {
-      let consecutiveEmpty = 0;
+      let consecutiveUnproductive = 0;
       for (let i = iterations.length - 1; i >= 0; i--) {
         const it = iterations[i];
         if (it.phase !== 'implementation') continue;
-        if ((it.diff ?? '').trim().length === 0) {
-          consecutiveEmpty += 1;
+        const noDiff = (it.diff ?? '').trim().length === 0;
+        const noDodProgress = (it.dodTouched?.length ?? 0) === 0;
+        if (noDiff && noDodProgress) {
+          consecutiveUnproductive += 1;
         } else {
           break;
         }
       }
-      if (consecutiveEmpty >= maxUnproductiveIterations) {
-        const reason = `iterações improdutivas consecutivas (${consecutiveEmpty} ≥ ${maxUnproductiveIterations}) — nenhuma mudança no worktree; possível deadlock`;
+      if (consecutiveUnproductive >= maxUnproductiveIterations) {
+        const reason = `iterações improdutivas consecutivas (${consecutiveUnproductive} ≥ ${maxUnproductiveIterations}) — nenhuma mudança no worktree nem avanço de DOD; possível deadlock`;
         await this.escalateToHuman(
           taskId,
           storyId,
@@ -1586,6 +1740,16 @@ export class Orchestrator implements OnModuleInit {
     await this.prisma.agentMessage.create({
       data: { cardId: taskId, role: 'user', text: answer, questionId },
     });
+    // Se a task estava escalada (needsHuman), a resposta humana é a intervenção
+    // que a destrava: limpamos a flag/reason para que o card saia do estado
+    // "🙋 precisa de você" e o loop possa retomar. Inofensivo para o HITL normal
+    // (needsHuman já era false). Os guards de cap/thrash passam a contar a
+    // partir desta intervenção (ver enforceLoopGuards), evitando re-escalar na
+    // primeira iteração retomada.
+    await this.prisma.card.update({
+      where: { id: taskId },
+      data: { needsHuman: false, needsHumanReason: null },
+    });
     this.realtime.broadcast({ type: 'agent.answered', taskId, questionId });
     await this.log(
       taskId,
@@ -1717,17 +1881,71 @@ export class Orchestrator implements OnModuleInit {
   }
 
   /**
+   * Diff/Replay Viewer: captura um SNAPSHOT do working tree como um objeto
+   * tree do git (`git write-tree`), retornando o tree-hash. Usado no INÍCIO de
+   * cada iteração como baseline, para que captureDiff() compute apenas o delta
+   * produzido NESTA iteração (e não o acumulado desde o último commit).
+   *
+   * Usa um ÍNDICE TEMPORÁRIO (GIT_INDEX_FILE) para não poluir o índice real do
+   * repo-alvo, e `git add -A` (conteúdo real, sem `-N`) para que o tree capture
+   * o CONTEÚDO exato dos arquivos naquele instante — inclusive novos e
+   * modificados por iterações anteriores. Assim o baseline representa fielmente
+   * o estado inicial da iteração. Qualquer falha (não é repo, timeout) retorna
+   * null — nesse caso captureDiff cai no comportamento antigo (git diff HEAD).
+   */
+  private async captureTreeBaseline(cwd: string): Promise<string | null> {
+    if (!cwd) return null;
+    const tmpIndex = join(tmpdir(), `kanban-diff-idx-${randomUUID()}`);
+    const env = { ...process.env, GIT_INDEX_FILE: tmpIndex };
+    const run = (args: string[]): Promise<string | null> =>
+      new Promise<string | null>((resolve) => {
+        execFile(
+          'git',
+          args,
+          { cwd, env, encoding: 'utf8', timeout: 15_000, maxBuffer: 20 * 1024 * 1024 },
+          (error, stdout) => {
+            if (error) {
+              resolve(null);
+              return;
+            }
+            resolve((stdout ?? '').trim());
+          },
+        );
+      });
+    try {
+      // Semeia o índice temporário com o HEAD (best-effort; repo sem commits
+      // simplesmente parte de um índice vazio) e adiciona TODO o working tree
+      // com conteúdo real, gerando um tree fiel ao estado atual.
+      await run(['read-tree', 'HEAD']);
+      await run(['add', '-A']);
+      const tree = await run(['write-tree']);
+      return tree && tree.length > 0 ? tree : null;
+    } catch (err) {
+      this.logger.warn(
+        `Falha ao capturar baseline de diff em ${cwd}: ${(err as Error).message}`,
+      );
+      return null;
+    } finally {
+      // Remove o índice temporário; o índice real do repo-alvo nunca foi tocado.
+      await rm(tmpIndex, { force: true }).catch(() => undefined);
+    }
+  }
+
+  /**
    * Diff/Replay Viewer: captura o unified diff do worktree isolado ao fim de
    * uma iteração, para o front navegar iteração a iteração vendo o que mudou.
    *
    * IMPORTANTE: este `git` é do ORQUESTRADOR (código do engine) inspecionando o
    * resultado no worktree — NÃO é o agent rodando git (isso é proibido pelo
-   * prompt). Roda `git add -A -N` para que arquivos novos apareçam no diff, e
-   * então `git diff HEAD` (staged + unstaged) contra o commit base do worktree.
-   * Trunca em ~100KB para não estourar payload/DB. Qualquer erro (cwd inválido,
-   * não é repo git, timeout) é tratado silenciosamente retornando ''.
+   * prompt). Roda `git add -A -N` para que arquivos novos apareçam no diff.
+   *
+   * Quando `baseline` (tree-hash capturado por captureTreeBaseline no início da
+   * iteração) é fornecido, computa `git diff <baseline>` — o DELTA produzido
+   * SÓ nesta iteração. Sem baseline (fallback), volta ao comportamento antigo
+   * (`git diff HEAD`, acumulado desde o último commit). Trunca em ~100KB para
+   * não estourar payload/DB. Qualquer erro é tratado silenciosamente ('').
    */
-  private async captureDiff(cwd: string): Promise<string> {
+  private async captureDiff(cwd: string, baseline?: string | null): Promise<string> {
     if (!cwd) return '';
     const MAX_DIFF_BYTES = 100 * 1024;
     const run = (args: string[]): Promise<string> =>
@@ -1749,8 +1967,16 @@ export class Orchestrator implements OnModuleInit {
       // Registra intenção de adicionar arquivos novos (não altera conteúdo) para
       // que apareçam no diff; ignoramos falha (repo vazio, etc.).
       await run(['add', '-A', '-N']);
-      let diff = await run(['diff', 'HEAD']);
-      if (!diff) diff = await run(['diff']);
+      let diff = '';
+      if (baseline) {
+        // Delta desta iteração: diferença entre o snapshot do início (baseline
+        // tree) e o estado atual do working tree.
+        diff = await run(['diff', baseline]);
+      } else {
+        // Fallback (sem baseline): acumulado contra o último commit.
+        diff = await run(['diff', 'HEAD']);
+        if (!diff) diff = await run(['diff']);
+      }
       if (diff.length > MAX_DIFF_BYTES) {
         diff = diff.slice(0, MAX_DIFF_BYTES) + '\n… [diff truncado]';
       }
@@ -1791,10 +2017,15 @@ export class Orchestrator implements OnModuleInit {
       .map((t) => t.trim())
       .filter((t) => t.length > 0)
       .slice(0, 20);
+    const aiProposed = texts.length > 0;
 
     // Fallback determinístico: só na análise, e só se a AI não propôs nada.
     if (texts.length === 0) {
       if (phase !== 'analysis') return [];
+      this.logger.warn(
+        `Task ${taskId}: AI não propôs DOD na análise — aplicando fallback genérico. ` +
+          `DOD relevante à task depende do agent emitir \`proposedDod\` no KANBAN_RESULT.`,
+      );
       texts = [
         'Implementação atende ao que foi descrito na task',
         'Código compila (build) sem erros',
@@ -1817,7 +2048,8 @@ export class Orchestrator implements OnModuleInit {
 
     await this.log(
       taskId,
-      `DOD definido na fase de ${phase} — ${created.length} ${created.length === 1 ? 'item' : 'itens'}`,
+      `DOD definido na fase de ${phase} (${aiProposed ? 'proposto pela AI' : 'fallback genérico'}) — ` +
+        `${created.length} ${created.length === 1 ? 'item' : 'itens'}`,
     );
     this.realtime.broadcast({ type: 'dod.created', cardId: taskId, count: created.length });
     return created;
@@ -1864,7 +2096,7 @@ export class Orchestrator implements OnModuleInit {
   private async loadSiblingsById(taskId: string): Promise<Map<string, LoopTask>> {
     const self = await this.prisma.card.findUnique({
       where: { id: taskId },
-      select: { parentId: true },
+      select: { parentId: true, title: true, description: true },
     });
     if (!self?.parentId) return new Map();
     const tasks = await this.loadStoryTasks(self.parentId);
@@ -2016,15 +2248,18 @@ export class Orchestrator implements OnModuleInit {
      * primeira iteração.
      */
     lastDiff: string;
+    taskDescription: string;
+    storyContext: { title: string; description: string } | null;
+    epicContext: { title: string; description: string } | null;
   }> {
     const task = await this.prisma.card.findUnique({
       where: { id: taskId },
-      select: { parentId: true },
+      select: { parentId: true, title: true, description: true },
     });
     const story = task?.parentId
       ? await this.prisma.card.findUnique({
           where: { id: task.parentId },
-          select: { aiProject: true, aiNotes: true, affectedFlows: true, parentId: true },
+          select: { aiProject: true, aiNotes: true, affectedFlows: true, parentId: true, title: true, description: true },
         })
       : null;
     // #10a: propagação epic→story. Se a story não tem aiProject/aiNotes
@@ -2032,7 +2267,7 @@ export class Orchestrator implements OnModuleInit {
     const epic = story?.parentId
       ? await this.prisma.card.findUnique({
           where: { id: story.parentId },
-          select: { aiProject: true, aiNotes: true },
+          select: { aiProject: true, aiNotes: true, title: true, description: true },
         })
       : null;
     const project = story?.aiProject || epic?.aiProject || '';
@@ -2148,6 +2383,9 @@ export class Orchestrator implements OnModuleInit {
       siblingHandoffs,
       epicNotes,
       lastDiff,
+      taskDescription: task?.description ?? '',
+      storyContext: story ? { title: story.title ?? '', description: story.description ?? '' } : null,
+      epicContext: epic ? { title: epic.title ?? '', description: epic.description ?? '' } : null,
     };
   }
 
@@ -2193,6 +2431,37 @@ export class Orchestrator implements OnModuleInit {
     lines.push('');
     lines.push(`## Task: ${context.taskTitle}`);
     if (context.notes) lines.push(`- Notas / efeitos colaterais: ${context.notes}`);
+
+    // Contexto textual hierárquico do board (épico → story → task).
+    // Truncamos descrições para evitar estourar argv/stdin do runner (spawn E2BIG).
+    const MAX_CONTEXT_DESCRIPTION = 2_000;
+    const truncateContextText = (text: string) =>
+      text.length > MAX_CONTEXT_DESCRIPTION
+        ? `${text.slice(0, MAX_CONTEXT_DESCRIPTION)}… (truncado)`
+        : text;
+
+    const epicTitle = context.epicContext?.title?.trim() ?? '';
+    const epicDescription = truncateContextText((context.epicContext?.description ?? '').trim());
+    const storyTitle = context.storyContext?.title?.trim() ?? '';
+    const storyDescription = truncateContextText((context.storyContext?.description ?? '').trim());
+    const taskDescription = truncateContextText((context.taskDescription ?? '').trim());
+
+    if (epicTitle || epicDescription || storyTitle || storyDescription || taskDescription) {
+      lines.push('');
+      lines.push('## Contexto do trabalho (épico → story → task)');
+      if (epicTitle || epicDescription) {
+        lines.push(`### Épico: ${epicTitle || '(sem título)'}`);
+        if (epicDescription) lines.push(epicDescription);
+      }
+      if (storyTitle || storyDescription) {
+        lines.push(`### Story: ${storyTitle || '(sem título)'}`);
+        if (storyDescription) lines.push(storyDescription);
+      }
+      if (taskDescription) {
+        lines.push('### Descrição da task');
+        lines.push(taskDescription);
+      }
+    }
 
     // Escopo e projeto-alvo — a AI trabalha DIRETO no working tree do repo-alvo
     // (o `cwd` do processo), na branch que já estiver aberta. NÃO há worktree

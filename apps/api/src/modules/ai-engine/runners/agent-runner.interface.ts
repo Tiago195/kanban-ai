@@ -116,6 +116,15 @@ export interface AgentRunResult {
    */
   evidence?: string | StructuredEvidence;
   /**
+   * Telemetria de tokens do turno, reportada pelo runner quando a CLI a expõe
+   * (parseada do rodapé de stats do Copilot CLI). `inputTokens` = tokens de
+   * entrada; `outputTokens` = tokens de saída. O orchestrator persiste estes
+   * valores por iteração e soma nas métricas do loop (LoopMetricsPanel).
+   * Ausentes (undefined) quando o runner/CLI não reporta.
+   */
+  inputTokens?: number;
+  outputTokens?: number;
+  /**
    * BUG-A7: erro FATAL de infraestrutura (spawn falhou, modelo indisponível,
    * não autenticado, crash da CLI). Quando presente, esta "iteração" NÃO
    * representa trabalho da AI: o orchestrator deve escalar a humano e PARAR o
