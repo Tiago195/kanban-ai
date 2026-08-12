@@ -182,6 +182,36 @@ nem os mocks/testes:
 
 Ao mudar esses contratos, mantenha este arquivo em dia.
 
+## Integração com a memória em colmeia (EP-A / ADR-0027)
+
+O loop engine **consome** e **alimenta** a memória em colmeia — antes ele começava
+"amnésico". Toda interação é **defensiva** (try/catch + fallback): a memória
+NUNCA pode derrubar o loop. `sessionId = taskId` (estável entre iterações);
+neurônios vivem em `modules/<modulo>.md`.
+
+- **READ (US-A1)** — `buildContext` (async) faz um fetch best-effort de
+  neurônios via `MemoryIndexService.query(...)` → `MemoryGitService.readNeuron(...)`
+  (limite 5, conteúdo truncado). O resultado vai em `context.memoryNeurons` e é
+  injetado por `buildPrompt` na seção **"Memória do projeto (colmeia)"** antes do
+  histórico de iterações. Em falha, `memoryNeurons = []`.
+- **INSTRUÇÃO (US-A2)** — o template `KANBAN_RESULT` inclui o campo opcional
+  `learnings[]` (`{ path, summary, scope? }`) e uma regra explicando quando/como
+  a AI deve reportar aprendizados reutilizáveis.
+- **WRITE (US-A3)** — após `persistAffectedFlows`, cada item de
+  `runResult.learnings` é anexado (não sobrescreve) ao neurônio via
+  `MemoryIndexService.commitAndReindex({path, content, sessionId, message})`
+  (git commit → reindexa Postgres → WS, na ordem invariante do ADR-0027). Um
+  warning por learning em caso de falha; o loop segue.
+- **BOOTSTRAP (US-A5)** — `onStoryEnterInProgress`, antes de `startAuto`, chama
+  `MemoryBootstrapService.bootstrapFromRepo({repoPath, sessionId})` para semear
+  neurônios iniciais por módulo do repo-alvo. É **idempotente** (pula módulos já
+  existentes) e defensivo.
+
+O contrato `learnings` é parseado em `runners/cli-adapter.ts` (`parseLearnings`)
+e tipado em `runners/agent-runner.interface.ts` (`AgentRunResult.learnings`).
+`MemoryModule` é `@Global`, então os 3 serviços são injetados direto no
+construtor do `Orchestrator`.
+
 ## Como testar
 
 - `npx nest build` (a partir de `apps/api`) deve passar.

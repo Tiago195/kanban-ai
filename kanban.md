@@ -4,23 +4,23 @@
 
 <!-- Épicos de adoção da memória em colmeia (memory-as-a-living-service, ADR-0027). Criados 2026-08-12 a partir da análise: a colmeia (EP-76..85) está construída mas o kanban-ai NÃO a consome, não há scheduler dos jobs e o MCP só serve stdio local. Ordem recomendada: EP-A (maior ROI) → EP-B → EP-C. -->
 
-- [ ] **🔴 EP-A — kanban-ai CONSOME a memória em colmeia (loop engine deixa de começar amnésico)**
+- [x] **🔴 EP-A — kanban-ai CONSOME a memória em colmeia (loop engine deixa de começar amnésico)** — **CONCLUÍDO 2026-08-12 (build+lint+test verdes; 175/175 specs)**
   - **Por quê:** a colmeia (`apps/api/src/modules/memory`, EP-76..85) está pronta e exposta via MCP, mas o `orchestrator.ts`/`buildPrompt` tem **zero** chamadas de memória (só um comentário histórico). Cada iteração começa sem o conhecimento acumulado — exatamente a amnésia que o ADR-0027 queria matar. Este épico é o de **maior ROI** para "entregar melhores agents com mais assertividade".
   - **Serviços já disponíveis (@Global) a consumir:** `MemoryIndexService.query`, `MemoryGitService.readNeuron`, `MemoryWriteService` (acquire→writeOptimistic→commit→release), `MemoryPolicyService.agentIdFor/scopeFor`, `MemoryBootstrapService.bootstrapFromRepo`.
   - **DOD do épico:** ao rodar uma story, o agent (1) recebe os neurônios do módulo no prompt, (2) é instruído a usar as memory tools, (3) persiste aprendizados ao fechar, (4) semeia neurônios de módulo no 1º uso de um repo-alvo; `npm run build && npm run lint && npm test` verdes; sem regressão no loop existente.
-  - **US-A1 — READ: injetar neurônios do módulo no `buildPrompt`**
+  - [x] **US-A1 — READ: injetar neurônios do módulo no `buildPrompt`** — CONCLUÍDO (fetch defensivo em `buildContext` → `context.memoryNeurons`; bloco "Memória do projeto (colmeia)" em `buildPrompt`)
     - Antes de montar o prompt de uma iteração, resolver o módulo da story (via `scopeFor`), consultar `MemoryIndexService.query({ pathPrefix: 'modules/<modulo>/' })`, ler o conteúdo com `readNeuron` e injetar um bloco "🧠 O que já sabemos sobre este módulo" no contexto. Limitar tamanho (top-N neurônios / truncar). Se a memória estiver vazia/indisponível, degradar sem quebrar o loop.
     - **DOD:** iteração com neurônios existentes inclui o bloco no prompt; sem neurônios, prompt segue normal; spec cobrindo injeção + degradação graciosa.
-  - **US-A2 — Instruir o agent a usar as memory tools (MCP)**
+  - [x] **US-A2 — Instruir o agent a usar as memory tools (MCP)** — CONCLUÍDO (campo `learnings[]` + regra no template `KANBAN_RESULT`)
     - As tools `memory_*` existem no MCP mas nada no prompt manda usá-las. Adicionar ao system/loop prompt a orientação: consultar a memória antes de decidir, e registrar aprendizados/convenções/becos-sem-saída. Documentar o fluxo `acquire → read → write → release` e o formato do neurônio.
     - **DOD:** prompt do agent contém a instrução de uso das memory tools + fluxo; spec/asserção sobre a presença da instrução no prompt gerado.
-  - **US-A3 — WRITE: persistir aprendizados ao fechar item de DOD / iteração**
+  - [x] **US-A3 — WRITE: persistir aprendizados ao fechar item de DOD / iteração** — CONCLUÍDO (persistência defensiva de `runResult.learnings` via `commitAndReindex` após `persistAffectedFlows`; anexa ao neurônio, não sobrescreve)
     - Quando o agent fecha um item de DOD, descobre uma convenção ou registra um beco-sem-saída, gravar como neurônio via `acquire → writeOptimistic → commit → release`, usando `agentIdFor(sessionId)` como holder e respeitando a política de escopo (`classifyWrite`; fora de escopo → REVIEW). Fonte do aprendizado: campo dedicado no `KANBAN_RESULT` (ver US-A4-contrato) ou heurística sobre o resultado da iteração.
     - **DOD:** iteração que reporta aprendizado gera commit no git da memória + entrada no índice; escrita fora de escopo entra em REVIEW (não aplica direto); spec cobrindo write in-scope e out-of-scope.
-  - **US-A4 — Contrato de auto-report de aprendizado no `KANBAN_RESULT`**
+  - [x] **US-A4 — Contrato de auto-report de aprendizado no `KANBAN_RESULT`** — CONCLUÍDO (campo `learnings?` em `AgentRunResult` + `parseLearnings` no cli-adapter; 3 specs; retrocompatível)
     - Estender o contrato de resultado da iteração (em `packages/shared`) com um campo opcional `learnings` (ex.: `{ path, summary, scope }[]`) que o agent preenche; orchestrator consome no US-A3. Atualizar os DOIS lados (web + api) e o parser do runner.
     - **DOD:** contrato type-safe em `packages/shared`; parser aceita e valida `learnings`; ausência do campo não quebra (retrocompatível); spec do parser.
-  - **US-A5 — Bootstrap on-ramp: semear neurônios de módulo no 1º uso do repo-alvo**
+  - [x] **US-A5 — Bootstrap on-ramp: semear neurônios de módulo no 1º uso do repo-alvo** — CONCLUÍDO (`bootstrapFromRepo` em `onStoryEnterInProgress` antes de `startAuto`; idempotente + defensivo)
     - Quando uma story entra em progresso pela 1ª vez num `aiProject` novo, chamar `bootstrapFromRepo` para varrer o repo e criar `modules/<modulo>.md` iniciais (idempotente — não recria se já existir). Disparar uma única vez por repo-alvo.
     - **DOD:** primeiro start num repo novo semeia os neurônios de módulo; chamadas subsequentes são no-op; spec cobrindo idempotência.
 

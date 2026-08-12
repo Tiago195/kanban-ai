@@ -8,6 +8,9 @@ import type { ValidationRunner } from './validators/validation.runner';
 import type { AgentRunner } from './runners/agent-runner.interface';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
 import { Orchestrator } from './orchestrator';
+import type { MemoryIndexService } from '../memory/memory-index.service';
+import type { MemoryGitService } from '../memory/memory-git.service';
+import type { MemoryBootstrapService } from '../memory/memory-bootstrap.service';
 import { BUILTIN_LOOP_PROFILES } from './loop-profiles/loop-profiles';
 
 /**
@@ -81,6 +84,23 @@ function makeValidation(): ValidationRunner {
 
 function makeRunner(): AgentRunner {
   return { run: async () => ({ detail: '', summary: '', dodTouched: [] }) } as unknown as AgentRunner;
+}
+
+// EP-A: fakes dos serviços de memória. O orchestrator os usa de forma
+// totalmente defensiva (try/catch), então stubs neutros bastam para os guards.
+function makeMemoryIndex(): MemoryIndexService {
+  return {
+    query: async () => [],
+    commitAndReindex: async () => ({ oid: 'x', branch: 'main', projection: {} }),
+  } as unknown as MemoryIndexService;
+}
+
+function makeMemoryGit(): MemoryGitService {
+  return { readNeuron: async () => null } as unknown as MemoryGitService;
+}
+
+function makeMemoryBootstrap(): MemoryBootstrapService {
+  return { bootstrapFromRepo: async () => [] } as unknown as MemoryBootstrapService;
 }
 
 /**
@@ -168,6 +188,9 @@ function makeOrchestrator(opts: {
     realtime.svc,
     makeRunner(),
     config,
+    makeMemoryIndex(),
+    makeMemoryGit(),
+    makeMemoryBootstrap(),
   );
   return { orch, config, prisma, sessions, realtime };
 }
@@ -503,6 +526,9 @@ test('createDerivedTask: cria derivada com derivedDepth+1 e dependência reversa
     realtime.svc,
     makeRunner(),
     makeConfig(),
+    makeMemoryIndex(),
+    makeMemoryGit(),
+    makeMemoryBootstrap(),
   );
 
   const derivedId = await orch.createDerivedTask('origin-1', {
@@ -543,6 +569,9 @@ test('countOpenDerivedForProblem: conta irmãs abertas pelo título canônico', 
     makeRealtime().svc,
     makeRunner(),
     makeConfig(),
+    makeMemoryIndex(),
+    makeMemoryGit(),
+    makeMemoryBootstrap(),
   );
 
   const n = await priv(orch).countOpenDerivedForProblem('story-1', 'parser quebrado');
@@ -572,6 +601,9 @@ test('countOpenDerivedForProblem: parentId nulo retorna 0 (sem irmãs)', async (
     makeRealtime().svc,
     makeRunner(),
     makeConfig(),
+    makeMemoryIndex(),
+    makeMemoryGit(),
+    makeMemoryBootstrap(),
   );
 
   const n = await priv(orch).countOpenDerivedForProblem(null, 'qualquer');
@@ -895,6 +927,9 @@ test('runIteration: fatalError do runner escala a humano, grava outcome=error e 
     realtime.svc,
     fatalRunner,
     config,
+    makeMemoryIndex(),
+    makeMemoryGit(),
+    makeMemoryBootstrap(),
   );
 
   // Stubs mínimos dos pré-requisitos privados para o controle chegar à branch
@@ -1000,6 +1035,9 @@ test('runIteration: diff VAZIO + dodTouched reportado -> marca o DOD (não zera)
     realtime.svc,
     runner,
     config,
+    makeMemoryIndex(),
+    makeMemoryGit(),
+    makeMemoryBootstrap(),
   );
 
   const p = priv(orch);

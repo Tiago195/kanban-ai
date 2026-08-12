@@ -17,6 +17,9 @@ import { ValidationRunner } from './validators/validation.runner';
 import { resolveLoopProfile, type LoopProfileDef } from './loop-profiles/loop-profiles';
 import { mapIteration, type PrismaIterationRow } from '../cards/iteration.mapper';
 import { deriveEpicStatus, type ColumnLike } from '../cards/cards.epic-status';
+import { MemoryIndexService } from '../memory/memory-index.service';
+import { MemoryGitService } from '../memory/memory-git.service';
+import { MemoryBootstrapService } from '../memory/memory-bootstrap.service';
 import {
   allTasksDone,
   dodAllDone,
@@ -72,6 +75,9 @@ export class Orchestrator implements OnModuleInit {
     private readonly realtime: RealtimeService,
     @Inject(AGENT_RUNNER) private readonly runner: AgentRunner,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly memoryIndex: MemoryIndexService,
+    private readonly memoryGit: MemoryGitService,
+    private readonly memoryBootstrap: MemoryBootstrapService,
   ) {}
 
   /** Salvaguarda #1: reconciliação no boot. */
@@ -165,6 +171,31 @@ export class Orchestrator implements OnModuleInit {
       await this.log(storyId, reason);
       this.finishAuto(storyId, 'graceful');
       return;
+    }
+
+    // US-A5 (EP-A/ADR-0027) — bootstrap on-ramp: na primeira vez que uma story
+    // deste repo-alvo entra em In Progress, semeia a memória em colmeia com
+    // neurônios iniciais por módulo (`modules/<modulo>.md`). É IDEMPOTENTE —
+    // bootstrapFromRepo pula módulos já existentes — e totalmente DEFENSIVO: se
+    // falhar, apenas registra um warning e o loop segue normalmente.
+    try {
+      const repoPath = await this.resolveStoryProject(storyId);
+      if (repoPath) {
+        const created = await this.memoryBootstrap.bootstrapFromRepo({
+          repoPath,
+          sessionId: storyId,
+        });
+        if (created.length) {
+          await this.log(
+            storyId,
+            `memória: bootstrap criou ${created.length} neurônio(s) inicial(is) do repo-alvo`,
+          );
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Falha no bootstrap de memória para story=${storyId}: ${(err as Error).message}`,
+      );
     }
 
     this.startAuto(storyId);
@@ -794,6 +825,31 @@ export class Orchestrator implements OnModuleInit {
       context.storyId
     ) {
       await this.persistAffectedFlows(context.storyId, runResult.affectedFlows);
+    }
+
+    // US-A3 (EP-A/ADR-0027) — persiste os aprendizados reportados pelo agent
+    // na memória em colmeia. Usa `commitAndReindex` (Camada 2), que respeita a
+    // ordem de escrita invariante git → índice. Totalmente DEFENSIVO: a memória
+    // NUNCA pode derrubar o loop; cada falha vira warning e segue.
+    if (runResult.learnings?.length) {
+      for (const learning of runResult.learnings) {
+        try {
+          const prev = await this.memoryGit.readNeuron(learning.path);
+          const stamp = new Date().toISOString();
+          const entry = `\n- (${stamp}, task ${taskId}) ${learning.summary.trim()}`;
+          const base = prev ?? `# ${learning.path}\n\ntags: memory\n\nAprendizados:`;
+          await this.memoryIndex.commitAndReindex({
+            path: learning.path,
+            content: base + entry,
+            sessionId: taskId,
+            message: `learn(${taskId}): ${learning.summary.slice(0, 60)}`,
+          });
+        } catch (err) {
+          this.logger.warn(
+            `Falha ao gravar learning em ${learning.path}: ${(err as Error).message}`,
+          );
+        }
+      }
     }
 
     // A task pode ir a `done` quando a AI declara `done` E isso é crível. Com
@@ -2343,6 +2399,13 @@ export class Orchestrator implements OnModuleInit {
     taskDescription: string;
     storyContext: { title: string; description: string } | null;
     epicContext: { title: string; description: string } | null;
+    /**
+     * US-A1 (EP-A/ADR-0027) — neurônios relevantes da memória em colmeia,
+     * recuperados do índice pelo título/flows da task. Injetados no prompt para
+     * a AI não começar "amnésica". Vazio quando não há memória ou em falha
+     * (defensivo: a memória NUNCA derruba o loop).
+     */
+    memoryNeurons: { path: string; title: string; content: string }[];
   }> {
     const task = await this.prisma.card.findUnique({
       where: { id: taskId },
@@ -2462,6 +2525,31 @@ export class Orchestrator implements OnModuleInit {
       epicNotes.push(...plain.slice(-5));
     }
 
+    // US-A1 (EP-A/ADR-0027) — recupera neurônios relevantes da colmeia para
+    // injetar no prompt. Totalmente defensivo: qualquer falha da memória cai
+    // para lista vazia e NUNCA interrompe o loop.
+    let memoryNeurons: { path: string; title: string; content: string }[] = [];
+    try {
+      const term = [taskTitle, ...flows.map((f) => f.name)]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      const hits = await this.memoryIndex.query(term || undefined, 5).catch(() => []);
+      const neurons: { path: string; title: string; content: string }[] = [];
+      for (const hit of hits.slice(0, 5)) {
+        const raw = await this.memoryGit.readNeuron(hit.path).catch(() => null);
+        neurons.push({
+          path: hit.path,
+          title: hit.title ?? '',
+          content: (raw ?? hit.summary ?? '').slice(0, 4000),
+        });
+      }
+      memoryNeurons = neurons;
+    } catch (err) {
+      this.logger.warn(`Falha ao recuperar memória em buildContext: ${(err as Error).message}`);
+      memoryNeurons = [];
+    }
+
     return {
       taskTitle,
       project,
@@ -2478,6 +2566,7 @@ export class Orchestrator implements OnModuleInit {
       taskDescription: task?.description ?? '',
       storyContext: story ? { title: story.title ?? '', description: story.description ?? '' } : null,
       epicContext: epic ? { title: epic.title ?? '', description: epic.description ?? '' } : null,
+      memoryNeurons,
     };
   }
 
@@ -2646,6 +2735,23 @@ export class Orchestrator implements OnModuleInit {
     // #3: histórico COMPLETO das iterações anteriores desta task, para a AI não
     // repetir erros de tentativas passadas. A última iteração entra com o
     // `detail` completo; as anteriores são resumidas para não estourar o prompt.
+    // US-A1 (EP-A/ADR-0027) — injeta a MEMÓRIA VIVA do projeto (neurônios da
+    // colmeia recuperados em buildContext) ANTES do histórico. É o que impede
+    // o agent de começar "amnésico".
+    if (context.memoryNeurons?.length) {
+      lines.push('');
+      lines.push('## Memória do projeto (colmeia — ADR-0027) — leia antes de agir:');
+      lines.push(
+        'Aprendizados acumulados por agents anteriores (decisões, convenções, armadilhas). ' +
+          'Use como contexto de trabalho; não repita erros já registrados aqui.',
+      );
+      for (const n of context.memoryNeurons) {
+        lines.push('');
+        lines.push(`### neurônio: ${n.path}${n.title ? ` — ${n.title}` : ''}`);
+        lines.push(n.content.trim());
+      }
+    }
+
     lines.push('');
     const history = context.iterationHistory;
     if (history.length > 0) {
@@ -2746,6 +2852,7 @@ export class Orchestrator implements OnModuleInit {
     lines.push('  "dodTouched": ["<id de DOD que VOCÊ concluiu>"],');
     lines.push('  "affectedFlows": [{ "name": "<fluxo>", "files": ["<path>"], "note": "<o que muda>" }],');
     lines.push('  "nextStep": "<o que a PRÓXIMA iteração deve fazer; vazio se acabou>",');
+    lines.push('  "learnings": [{ "path": "modules/<modulo>.md", "summary": "<aprendizado durável e verdadeiro>", "scope": "<modulo opcional>" }],');
     if (this.config.agent.requireStructuredEvidence) {
       lines.push(
         '  "evidence": { "checks": [{ "name": "test", "passed": true, "output": "12 passed" }], "filesChanged": ["<path>"], "note": "<opcional>" },',
@@ -2765,6 +2872,13 @@ export class Orchestrator implements OnModuleInit {
     lines.push('- `affectedFlows`: registre onde você mexeu (arquivos + o efeito). VOCÊ é a fonte disso. Os arquivos são verificados contra o filesystem real — não liste arquivos que não existem.');
     lines.push('- `done`: `true` só quando o trabalho de código da task terminou e o DOD está todo marcado.');
     lines.push('- `nextStep`: seja específico — a próxima iteração começa a partir dele.');
+    lines.push(
+      '- `learnings` (OPCIONAL, memória viva — ADR-0027): se você descobriu algo DURÁVEL e ' +
+        'reutilizável (decisão de arquitetura, convenção, armadilha, contrato), registre-o aqui. ' +
+        'Cada item é `{ "path": "modules/<modulo>.md", "summary": "<aprendizado conciso>", "scope": "<modulo opcional>" }`. ' +
+        'Esses aprendizados são PERSISTIDOS na memória em colmeia e lidos por iterações futuras — ' +
+        'é assim que o projeto deixa de recomeçar amnésico. NÃO invente; só registre o que for verdadeiro e útil. Omita se não houver nada durável.',
+    );
     lines.push('- `evidence`: obrigatório quando `done: true` — resuma a verificação que você fez (ver seção abaixo).');
 
     // #6: exigir que a AI verifique o próprio trabalho ANTES de marcar done.
