@@ -102,6 +102,15 @@ export interface AgentRunResult {
    * ainda não sabem os fluxos devolvem `[]`/omitido.
    */
   affectedFlows?: { name: string; files: string[]; note?: string }[];
+  /**
+   * US-A4 — Aprendizados que o agent quer PERSISTIR na memória em colmeia
+   * (ADR-0027). Cada item vira/atualiza um neurônio `.md`. O orchestrator
+   * consome esta lista ao fechar a iteração (US-A3): grava via MemoryWriteService.
+   * `path` é o neurônio-alvo (ex.: `modules/<modulo>.md`); `summary` é o texto
+   * do aprendizado; `scope` (opcional) é uma dica do módulo/escopo. Opcional e
+   * retrocompatível: ausência = nenhum aprendizado reportado.
+   */
+  learnings?: { path: string; summary: string; scope?: string }[];
   /** O que a próxima iteração deve fazer. */
   nextStep: string;
   /** Sinaliza que o trabalho terminou (gate para validação final). */

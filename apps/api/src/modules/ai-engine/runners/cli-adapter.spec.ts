@@ -23,6 +23,52 @@ function makeAdapter(): CliAdapter {
   return new CliAdapter(config);
 }
 
+// US-A4 — contrato `learnings` no KANBAN_RESULT: auto-report de aprendizado do
+// agent que o orchestrator persiste na memória em colmeia (ADR-0027). Deve ser
+// defensivo e retrocompatível (ausência = undefined).
+test('parseLine result: learnings válido preserva os itens', () => {
+  const a = makeAdapter();
+  const line = JSON.stringify({
+    kind: 'result',
+    summary: 's',
+    learnings: [
+      { path: 'modules/ai-engine.md', summary: 'loop consome memória', scope: 'ai-engine' },
+      { path: 'modules/cards.md', summary: 'epic é derivado' },
+    ],
+  });
+  const ev = a.parseLine(line);
+  assert.equal(ev?.kind, 'result');
+  assert.deepEqual((ev as { learnings?: unknown }).learnings, [
+    { path: 'modules/ai-engine.md', summary: 'loop consome memória', scope: 'ai-engine' },
+    { path: 'modules/cards.md', summary: 'epic é derivado' },
+  ]);
+});
+
+test('parseLine result: learnings filtra item sem path/summary', () => {
+  const a = makeAdapter();
+  const line = JSON.stringify({
+    kind: 'result',
+    summary: 's',
+    learnings: [
+      { path: '', summary: 'sem path' },
+      { path: 'modules/x.md', summary: '   ' },
+      { path: 'modules/ok.md', summary: 'válido' },
+    ],
+  });
+  const ev = a.parseLine(line);
+  assert.deepEqual((ev as { learnings?: unknown }).learnings, [
+    { path: 'modules/ok.md', summary: 'válido' },
+  ]);
+});
+
+test('parseLine result: sem learnings → undefined (retrocompat)', () => {
+  const a = makeAdapter();
+  const line = JSON.stringify({ kind: 'result', summary: 's', done: true });
+  const ev = a.parseLine(line);
+  assert.equal(ev?.kind, 'result');
+  assert.equal((ev as { learnings?: unknown }).learnings, undefined);
+});
+
 test('parseTokenUsage: rótulos explícitos input=/output=', () => {
   const a = makeAdapter();
   assert.deepEqual(a.parseTokenUsage('Token usage: input=1234 output=567'), {

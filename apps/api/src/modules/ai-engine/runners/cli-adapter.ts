@@ -31,6 +31,7 @@ export type CliEvent =
       /** DOD proposto pela AI na fase de análise (opcional). */
       proposedDod?: string[];
       affectedFlows?: { name: string; files: string[]; note?: string }[];
+      learnings?: { path: string; summary: string; scope?: string }[];
       nextStep: string;
       done: boolean;
       /** #6: evidência de verificação — string livre (legado) ou estruturada. */
@@ -139,6 +140,7 @@ export class CliAdapter {
           ? obj.proposedDod.map((d) => String(d)).filter((s) => s.trim().length > 0)
           : undefined,
         affectedFlows: parseAffectedFlows(obj.affectedFlows),
+        learnings: parseLearnings(obj.learnings),
         nextStep: str(obj.nextStep),
         done: obj.done === true,
         evidence: parseEvidence(obj.evidence),
@@ -236,6 +238,23 @@ function matchNum(text: string, re: RegExp): number | undefined {
 }
 
 /** Normaliza a lista de fluxos afetados reportada pela AI (tolerante a lixo). */
+function parseLearnings(
+  raw: unknown,
+): { path: string; summary: string; scope?: string }[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: { path: string; summary: string; scope?: string }[] = [];
+  for (const item of raw) {
+    if (item == null || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const path = rec.path != null ? String(rec.path).trim() : "";
+    const summary = rec.summary != null ? String(rec.summary).trim() : "";
+    if (!path || !summary) continue;
+    const scope = rec.scope != null ? String(rec.scope).trim() : undefined;
+    out.push(scope ? { path, summary, scope } : { path, summary });
+  }
+  return out;
+}
+
 function parseAffectedFlows(
   v: unknown,
 ): { name: string; files: string[]; note?: string }[] | undefined {
