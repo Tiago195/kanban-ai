@@ -358,6 +358,49 @@ export class MemoryGitService implements OnModuleInit {
     }));
   }
 
+  /**
+   * Resolve o SHA do commit apontado por `ref` (default `main`). Usado pela
+   * Camada 2 para gravar o `headCommit` de origem de cada projeção.
+   */
+  async resolveHead(ref: string = MEMORY_DEFAULT_BRANCH): Promise<string> {
+    const dir = this.gitDir;
+    return git.resolveRef({ fs, dir, gitdir: dir, ref });
+  }
+
+  /**
+   * Lista os paths de TODOS os neurônios (blobs) existentes num `ref` (default
+   * `main`). Base para o rebuild do índice (US-161). Percorre a árvore do
+   * commit recursivamente. Ignora branches efêmeras `mem/ai/*` — só o estado
+   * integrado em `main` conta como fonte da verdade.
+   */
+  async listNeurons(ref: string = MEMORY_DEFAULT_BRANCH): Promise<string[]> {
+    const dir = this.gitDir;
+    let oid: string;
+    try {
+      oid = await git.resolveRef({ fs, dir, gitdir: dir, ref });
+    } catch (err) {
+      if (this.isNotFound(err)) {
+        return [];
+      }
+      throw err;
+    }
+    const paths: string[] = [];
+    const walk = async (treeOid: string, prefix: string): Promise<void> => {
+      const { tree } = await git.readTree({ fs, dir, gitdir: dir, oid: treeOid });
+      for (const entry of tree) {
+        const full = prefix ? `${prefix}/${entry.path}` : entry.path;
+        if (entry.type === 'tree') {
+          await walk(entry.oid, full);
+        } else if (entry.type === 'blob') {
+          paths.push(full);
+        }
+      }
+    };
+    const { commit } = await git.readCommit({ fs, dir, gitdir: dir, oid });
+    await walk(commit.tree, '');
+    return paths.sort();
+  }
+
   // ---------------------------------------------------------------------------
   // Helpers internos (Camada 1).
   // ---------------------------------------------------------------------------

@@ -349,3 +349,41 @@ test('normalizePath: rejeita path com ".." (evita escapar do repo)', async () =>
     cleanup(gitDir);
   }
 });
+
+test('resolveHead + listNeurons: refletem os neuronios integrados em main', async () => {
+  const gitDir = makeTmpGitDir();
+  try {
+    const svc = makeService(gitDir);
+    await svc.provision();
+
+    // Sem neuronios: lista vazia; resolveHead aponta o bootstrap.
+    assert.deepEqual(await svc.listNeurons(), []);
+    const bootstrap = await svc.resolveHead();
+    assert.match(bootstrap, /^[0-9a-f]{40}$/);
+
+    // Escreve e integra dois neuronios (em subpastas distintas).
+    await svc.writeNeuron({ path: 'a/one.md', content: '# One', sessionId: 's', message: 'm' });
+    await svc.mergeSessionBranch({ sessionId: 's', path: 'a/one.md' });
+    await svc.writeNeuron({ path: 'b/two.md', content: '# Two', sessionId: 's', message: 'm' });
+    await svc.mergeSessionBranch({ sessionId: 's', path: 'b/two.md' });
+
+    const paths = await svc.listNeurons();
+    assert.deepEqual(paths, ['a/one.md', 'b/two.md']);
+
+    // HEAD avancou apos os merges.
+    assert.notEqual(await svc.resolveHead(), bootstrap);
+  } finally {
+    cleanup(gitDir);
+  }
+});
+
+test('listNeurons: ref inexistente retorna lista vazia (nao lanca)', async () => {
+  const gitDir = makeTmpGitDir();
+  try {
+    const svc = makeService(gitDir);
+    await svc.provision();
+    assert.deepEqual(await svc.listNeurons('refs/heads/naoexiste'), []);
+  } finally {
+    cleanup(gitDir);
+  }
+});

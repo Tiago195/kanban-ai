@@ -12,9 +12,11 @@ em JS puro, sem binário nativo) rodando dentro da API Node.
 
 ```
 memory/
-├── memory-git.service.ts       # MemoryGitService: init/open idempotente do bare repo
-├── memory-git.service.spec.ts  # Testes (node:test + node:assert) em tmpdir isolado
-└── memory.module.ts            # @Global
+├── memory-git.service.ts        # Camada 1: init/open + read/write/merge/diff/history
+├── memory-git.service.spec.ts   # Testes Camada 1 (node:test) em tmpdir isolado
+├── memory-index.service.ts      # Camada 2: indice Postgres derivado (reindex/rebuild/query)
+├── memory-index.service.spec.ts # Testes Camada 2 (git real em tmpdir + prisma fake)
+└── memory.module.ts             # @Global (exporta os dois serviços)
 ```
 
 ## Contrato (Camada 1)
@@ -28,8 +30,29 @@ memory/
   - `readNeuron(path, ref?)`, `writeNeuron({...})`, `mergeSessionBranch({...})`,
     `diffNeuron({...})`, `historyNeuron(path, ref?)` — read/write/merge/diff/
     history de neurônios (ver "Estado atual").
+  - `resolveHead(ref?)`, `listNeurons(ref?)` — SHA do `main` e paths de todos os
+    neurônios integrados (base do índice da Camada 2).
   - `get gitDir(): string` — caminho do bare repo (lido de `config.memory.gitDir`).
   - `MEMORY_DEFAULT_BRANCH` (`'main'`) — branch inicial garantida.
+
+### Contrato (Camada 2 — índice Postgres derivado)
+
+- `MemoryIndexService` é **@Injectable** e **@Global** (via `MemoryModule`).
+- O índice (`model MemoryIndex`) é uma **PROJEÇÃO DERIVADA e DESCARTÁVEL** dos
+  neurônios `.md` do git; o git é a **fonte da verdade** e o índice pode ser
+  reconstruído do zero (`rebuildAll`) sem perda.
+- **Ordem de escrita invariante:** **git commit → reindexa → (emite WS)**.
+  `commitAndReindex` encapsula os dois primeiros passos: o índice **nunca**
+  reflete um estado que ainda não existe no git.
+- Público:
+  - `commitAndReindex({path, content, sessionId, message})` (US-163) — escreve no
+    git (branch da sessão + merge em `main`) e só então projeta no índice; em
+    conflito de merge lança `MemoryWriteConflictError` sem tocar o índice.
+  - `reindexOne(path)` (US-160) — reprojeta UM neurônio (idempotente); remove a
+    projeção e retorna `null` se o neurônio não existir mais no git.
+  - `rebuildAll()` (US-161) — reconstrói o índice inteiro a partir do git.
+  - `query(term?, limit?)` (US-162) — retrieval case-insensitive por
+    title/summary/searchText/path.
 - Config via `MEMORY_GIT_DIR` (default `./.kanban-ai-memory/git`, **gitignored** —
   é volume de runtime, nunca versionado no repo-alvo).
 
@@ -47,12 +70,16 @@ memory/
    Se o repo existente apontar para uma branch diferente de `main`, `provision()`
    **falha cedo** com mensagem acionável citando `MEMORY_GIT_DIR`.
 
-## Fora de escopo (Camada 1 — NÃO implementar aqui)
+## Fora de escopo (NÃO implementar aqui ainda)
 
-- **Locks, WebSocket e índice** — são **Camada 2**, NÃO vivem neste módulo.
-- **Resolução de conflito** de merge (árbitro/REVIEW) — o serviço apenas
-  **sinaliza** o conflito (`mergeSessionBranch` → `conflict: true`); resolver é
-  Camada 2 (EP-80).
+- **Locks/presença ativos** (EP-78), **CAS** (EP-79) — o índice já ARMAZENA os
+  campos de coordenação (`lockState`, `holder`, `baseCommit`, `activeBranch`,
+  `reviewQueued`), mas o COMPORTAMENTO (portões, expiração, presença) é EP-78+.
+- **WebSocket** (EP-81) — o 3º passo da ordem de escrita (emitir evento) NÃO vive
+  aqui; `commitAndReindex` para na reindexação.
+- **Resolução de conflito** de merge (árbitro/REVIEW) — Camada 1 e 2 apenas
+  **sinalizam** (`mergeSessionBranch` → `conflict: true`; `MemoryWriteConflictError`);
+  resolver é EP-80.
 
 ## O que NÃO mexer
 
