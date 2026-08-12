@@ -204,6 +204,18 @@ nem os mocks/testes:
   re-escanear as colunas: sessões duráveis cujas stories não estão mais
   "In Progress" são marcadas `stalled` (base do recovery por lease — US-ROB4).
   O construtor do manager agora recebe `(config, prisma)`.
+- **Lease/claim por execução (US-ROB4)**: quando `AGENT_CLAIM_ENABLED=true`, cada
+  story em execução mantém um **lease** em `AgentRuntimeState`
+  (`claimLock`/`claimExpiresAt`). `onStoryEnterInProgress` adquire o claim
+  (`claimStory`); `runIteration` renova por iteração (`renewClaim`, heartbeat);
+  `finishAuto` solta (`releaseClaim`). Um **tick global** in-process (cadência =
+  `watchdogIntervalMs`, `unref()` + `try/catch`, **SEM Redis** — invariante 7) +
+  `reconcileOnBoot` chamam `recoverStaleClaims()`: leases vencidos (`claimExpiresAt
+  <= now`) têm a sessão removida, watchdog limpo, worktree liberado e a linha
+  marcada `stalled`, destravando a serialização (`resumeDeferredForStory`). A
+  salvaguarda #3 é preservada: o watchdog só age em sessão `dead` **ou** claim
+  vencido — por isso `claimTtlMs` **deve** ser `> watchdogIntervalMs` (validado com
+  warning no boot). Off por default (retrocompat total).
 
 Ao mudar esses contratos, mantenha este arquivo em dia.
 

@@ -197,6 +197,19 @@ export interface AppConfig {
      * AGENT_RUNTIME_PERSIST_ENABLED (`false` desliga).
      */
     runtimePersistEnabled: boolean;
+    /**
+     * US-ROB4 — liga o lease/claim por execução (claimLock/claimExpiresAt em
+     * AgentRuntimeState). O watchdog renova o lease enquanto a sessão vive e
+     * recupera o slot quando vence. Off por default (retrocompat: boot/watchdog
+     * como hoje). Env: AGENT_CLAIM_ENABLED (`true` liga).
+     */
+    claimEnabled: boolean;
+    /**
+     * US-ROB4 — TTL do lease em ms. DEVE ser > `watchdogIntervalMs` para o
+     * heartbeat renovar antes do vencimento (senão o watchdog recuperaria
+     * sessões vivas). Default 5 min. Env: AGENT_CLAIM_TTL_MS.
+     */
+    claimTtlMs: number;
   };
 }
 
@@ -289,6 +302,8 @@ export function loadConfig(): AppConfig {
       requireStructuredEvidence: process.env.AGENT_REQUIRE_STRUCTURED_EVIDENCE === 'true',
       requireMinArtifact: process.env.AGENT_REQUIRE_MIN_ARTIFACT === 'true',
       runtimePersistEnabled: process.env.AGENT_RUNTIME_PERSIST_ENABLED !== 'false',
+      claimEnabled: process.env.AGENT_CLAIM_ENABLED === 'true',
+      claimTtlMs: num(process.env.AGENT_CLAIM_TTL_MS, 300_000),
     },
   };
 }

@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { StopMode } from '@kanban-ai/shared';
 import type { ExecState, AffectedFlow, LoopMetrics } from '@kanban-ai/shared';
 import { isVerifiableEvidence, minimumArtifactSatisfied } from '@kanban-ai/shared';
@@ -57,7 +57,7 @@ export type { LoopMetrics } from '@kanban-ai/shared';
  * no mock; `createDerivedTask` está implementado mas só é exercitado pela AI real.
  */
 @Injectable()
-export class Orchestrator implements OnModuleInit {
+export class Orchestrator implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(Orchestrator.name);
   private readonly watchdogs = new Map<string, NodeJS.Timeout>();
   private readonly autoTimers = new Map<string, NodeJS.Timeout>();
@@ -67,6 +67,8 @@ export class Orchestrator implements OnModuleInit {
   // auto-play não deve iniciar outra — senão a pergunta pendente seria
   // substituída. Ver ADR-0018.
   private readonly inFlight = new Set<string>();
+  /** US-ROB4: tick global de recuperação de claims vencidos (SEM Redis). */
+  private claimSweepTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -83,7 +85,44 @@ export class Orchestrator implements OnModuleInit {
 
   /** Salvaguarda #1: reconciliação no boot. */
   async onModuleInit(): Promise<void> {
+    // US-ROB4: TTL do lease DEVE ser > intervalo do watchdog, senão o watchdog
+    // recuperaria sessões vivas antes do heartbeat renovar.
+    if (
+      this.config.agent.claimEnabled &&
+      this.config.agent.claimTtlMs <= this.config.agent.watchdogIntervalMs
+    ) {
+      this.logger.warn(
+        `AGENT_CLAIM_TTL_MS (${this.config.agent.claimTtlMs}ms) <= ` +
+          `AGENT_WATCHDOG_INTERVAL_MS (${this.config.agent.watchdogIntervalMs}ms): ` +
+          'o lease pode vencer antes do heartbeat renovar. Aumente o TTL.',
+      );
+    }
     await this.reconcileOnBoot();
+    this.startClaimSweep(); // US-ROB4: recuperação periódica de claims vencidos
+  }
+
+  onModuleDestroy(): void {
+    if (this.claimSweepTimer) {
+      clearInterval(this.claimSweepTimer);
+      this.claimSweepTimer = null;
+    }
+  }
+
+  /**
+   * US-ROB4 — tick GLOBAL de recuperação de claims vencidos (espelha
+   * `MemorySchedulerService.sweepLocks`): puro `setInterval` com `unref()` e
+   * `try/catch` por job (nunca derruba o processo). Recupera stories cujo
+   * watchdog por-story já não existe (ex.: sessão perdida num restart).
+   */
+  private startClaimSweep(): void {
+    if (!this.config.agent.claimEnabled || this.claimSweepTimer) return;
+    const handle = setInterval(() => {
+      void this.recoverStaleClaims().catch((err) =>
+        this.logger.warn(`claimSweep: ${(err as Error).message}`),
+      );
+    }, this.config.agent.watchdogIntervalMs);
+    handle.unref?.();
+    this.claimSweepTimer = handle;
   }
 
   /**
@@ -91,6 +130,10 @@ export class Orchestrator implements OnModuleInit {
    * auto-play. O estado de verdade é o banco, não a memória.
    */
   async reconcileOnBoot(): Promise<void> {
+    // US-ROB4 — recovery no boot: libera claims vencidos antes de reconciliar
+    // (unifica recovery boot + runtime). No-op se claimEnabled=false.
+    await this.recoverStaleClaims();
+
     // US-ROB2 — leitura DURÁVEL: antes de re-escanear as colunas, lê a tabela
     // AgentRuntimeState para (a) saber quais sessões existiam antes do restart e
     // (b) marcar como `stalled` as que perderam o processo (base do recovery por
@@ -181,6 +224,7 @@ export class Orchestrator implements OnModuleInit {
     }
 
     const session = this.sessions.start(storyId);
+    void this.claimStory(storyId); // US-ROB4: adquire o lease da execução
     this.realtime.broadcast({
       type: 'agent.session.state_changed',
       storyId,
@@ -371,6 +415,8 @@ export class Orchestrator implements OnModuleInit {
       : null;
     const context = await this.buildContext(taskId, raw?.title ?? '(task)');
     const storyId = context.storyId ?? taskId;
+
+    void this.renewClaim(storyId); // US-ROB4: heartbeat do lease por iteração
 
     // Gate de custo (#1) + anti-thrash (#3): ANTES de gastar uma nova iteração
     // (worktree + spawn), verifica se a task já estourou o orçamento de tempo/
@@ -1265,6 +1311,7 @@ export class Orchestrator implements OnModuleInit {
     // desejado). O cleanupWorktree apenas solta o tracking em memória.
     this.sessions.remove(storyId);
     this.clearWatchdog(storyId);
+    void this.releaseClaim(storyId); // US-ROB4: solta o lease ao encerrar
     void this.workspaces.cleanupWorktree(storyId).catch(() => undefined);
     // SERIALIZAÇÃO: destrava a próxima story que estava aguardando este epic/repo.
     void this.resumeDeferredForStory(storyId).catch(() => undefined);
@@ -1591,6 +1638,86 @@ export class Orchestrator implements OnModuleInit {
       void this.tickWatchdog(storyId);
     }, this.config.agent.watchdogIntervalMs);
     this.watchdogs.set(storyId, handle);
+  }
+
+  // ── US-ROB4 · claim/lease por execução ──────────────────────────────────
+  // O lease vive em Postgres (AgentRuntimeState.claimLock/claimExpiresAt) + um
+  // tick in-process (SEM Redis, invariante 7). O watchdog RENOVA o lease
+  // enquanto a sessão vive (heartbeat por iteração) e RECUPERA o slot quando
+  // vence. Preserva a salvaguarda #3: só age em claim vencido (ou sessão dead).
+
+  /** Adquire/renova o claim da story por TTL. leaseId = sessionId estável. */
+  private async claimStory(storyId: string): Promise<void> {
+    if (!this.config.agent.claimEnabled) return;
+    const ttl = this.config.agent.claimTtlMs;
+    try {
+      await this.prisma.agentRuntimeState.update({
+        where: { sessionId: storyId },
+        data: { claimLock: storyId, claimExpiresAt: new Date(Date.now() + ttl) },
+      });
+    } catch (err) {
+      // Defensivo: a linha pode ainda não existir (persistState é fire-and-
+      // forget). Um claim perdido só adia a recuperação até o próximo tick.
+      this.logger.warn(
+        `claimStory falhou (story=${storyId}) — loop segue: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /** Heartbeat: renova o lease enquanto a sessão itera (chamado por iteração). */
+  private async renewClaim(storyId: string): Promise<void> {
+    if (!this.config.agent.claimEnabled) return;
+    await this.claimStory(storyId);
+  }
+
+  /** Solta o claim ao encerrar a story (junto do remove/finishAuto). */
+  private async releaseClaim(storyId: string): Promise<void> {
+    if (!this.config.agent.claimEnabled) return;
+    try {
+      await this.prisma.agentRuntimeState.update({
+        where: { sessionId: storyId },
+        data: { claimLock: null, claimExpiresAt: null },
+      });
+    } catch {
+      /* defensivo: linha pode não existir — nada a soltar */
+    }
+  }
+
+  /**
+   * Recovery de claims vencidos — espelha `MemoryLockService.expireStale`. Busca
+   * execuções com `claimExpiresAt <= now` cujo processo não as mantém vivas e as
+   * libera: remove a sessão in-process (se houver), limpa o watchdog e marca a
+   * linha como `stalled` para a serialização liberar o slot. Idempotente.
+   */
+  private async recoverStaleClaims(nowMs = Date.now()): Promise<number> {
+    if (!this.config.agent.claimEnabled) return 0;
+    let stale: Array<{ storyId: string }> = [];
+    try {
+      stale = await this.prisma.agentRuntimeState.findMany({
+        where: { claimExpiresAt: { lte: new Date(nowMs) }, NOT: { claimLock: null } },
+        select: { storyId: true },
+      });
+    } catch (err) {
+      this.logger.warn(`recoverStaleClaims: leitura falhou: ${(err as Error).message}`);
+      return 0;
+    }
+    for (const { storyId } of stale) {
+      this.logger.warn(`Claim vencido para story=${storyId} — recuperando slot`);
+      this.sessions.remove(storyId);
+      this.clearWatchdog(storyId);
+      void this.workspaces.cleanupWorktree(storyId).catch(() => undefined);
+      try {
+        await this.prisma.agentRuntimeState.update({
+          where: { sessionId: storyId },
+          data: { claimLock: null, claimExpiresAt: null, livenessState: 'stalled' },
+        });
+      } catch {
+        /* defensivo: não pode derrubar o recovery dos demais */
+      }
+      // Libera a serialização (mesmo caminho de finishAuto).
+      void this.resumeDeferredForStory(storyId).catch(() => undefined);
+    }
+    return stale.length;
   }
 
   private async tickWatchdog(storyId: string): Promise<void> {
