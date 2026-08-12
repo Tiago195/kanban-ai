@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import type { AgentId } from '@kanban-ai/shared';
 
 /**
@@ -32,8 +32,8 @@ export type MemoryWriteScope = 'in-scope' | 'out-of-scope';
 export class MemoryPolicyService {
   private readonly scopeEnforced: boolean;
 
-  constructor(scopeEnforced: boolean = readScopeEnforcedFromEnv()) {
-    this.scopeEnforced = scopeEnforced;
+  constructor(@Optional() scopeEnforced?: boolean) {
+    this.scopeEnforced = scopeEnforced ?? readScopeEnforcedFromEnv();
   }
 
   /**
