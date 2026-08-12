@@ -22,7 +22,9 @@ adicione ao contrato compartilhado e o cliente reage com `isEvent(...)`.
 
 Eventos atuais: `card.moved`, `card.created`, `task.state.changed`, `dod.checked`,
 `iteration.appended`, `story.entered_in_progress`, `task.derived`,
-`agent.session.state_changed`, `auto.started`, `auto.stopped`, `ping`.
+`agent.session.state_changed`, `auto.started`, `auto.stopped`,
+`memory.locked`, `memory.released`, `memory.updated`, `memory.conflict`,
+`memory.review`, `ping`.
 
 ## Invariantes
 

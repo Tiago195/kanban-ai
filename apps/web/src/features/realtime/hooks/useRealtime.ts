@@ -119,6 +119,34 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
           useAgentChatStore.getState().setStreaming(event.taskId, false);
         }
 
+        // ── Memória viva (ADR-0027, EP-81/US-206): reflete estado sem F5 ──
+        // Os eventos memory.* NÃO dependem de boardId (a memória é global à
+        // colmeia). O cliente reage refazendo fetch contra o índice: invalida a
+        // chave do neurônio afetado (quando o evento carrega `path`) e a lista.
+        if (
+          event.type === "memory.locked" ||
+          event.type === "memory.released" ||
+          event.type === "memory.updated"
+        ) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.memory(event.path) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.memory() });
+          return;
+        }
+
+        if (event.type === "memory.conflict") {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.memory(event.conflict.path),
+          });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.memory() });
+          return;
+        }
+
+        if (event.type === "memory.review") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.memory(event.item.path) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.memory() });
+          return;
+        }
+
         if (!boardId) return;
 
         if (event.type === "card.moved") {

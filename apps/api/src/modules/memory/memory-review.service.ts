@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../../shared/db/prisma.service';
 import { MEMORY_DEFAULT_BRANCH, MemoryGitService } from './memory-git.service';
 import { MemoryIndexService } from './memory-index.service';
+import { MemoryEventsService } from './memory-events.service';
 
 /**
  * Serviço de **REVIEW + arbitragem** da memória (ADR-0027, **EP-80**).
@@ -33,8 +34,9 @@ import { MemoryIndexService } from './memory-index.service';
  * - **descartar** (`content` ausente): nada é commitado, o `HEAD` estável
  *   permanece, o ramo do agent é podado.
  *
- * Emitir os eventos `memory.review`/`memory.conflict`/`memory.updated` no WS é
- * EP-81; aqui só marcamos o estado no índice e devolvemos o payload.
+ * Emitir os eventos `memory.review`/`memory.conflict`/`memory.updated`/
+ * `memory.released` no WS é feito aqui via {@link MemoryEventsService} (EP-81),
+ * como 3º passo da ordem de escrita.
  */
 @Injectable()
 export class MemoryReviewService {
@@ -44,6 +46,7 @@ export class MemoryReviewService {
     private readonly prisma: PrismaService,
     private readonly gitStore: MemoryGitService,
     private readonly index: MemoryIndexService,
+    private readonly events: MemoryEventsService,
   ) {}
 
   /**
@@ -101,13 +104,19 @@ export class MemoryReviewService {
     this.logger.debug(
       `Neuronio "${input.path}" entrou em REVIEW (${input.reason}); holder=${input.holder}.`,
     );
-    return {
+    const item: MemoryReviewItem = {
       path: input.path,
       baseCommit,
       reason: input.reason,
       conflict,
       holder: input.holder,
     };
+    // EP-81 — emite no WS: o conflito (quando houver) e a entrada na fila.
+    if (conflict) {
+      this.events.conflict(conflict);
+    }
+    this.events.review(item);
+    return item;
   }
 
   /**
@@ -185,6 +194,9 @@ export class MemoryReviewService {
       const headCommit = result.projection.headCommit;
       await this.releaseFromReview(input.path, headCommit);
       await this.pruneIfSession(sessionId, input.path);
+      // EP-81 — mutação arbitrada integrada + saída do REVIEW.
+      this.events.updated(input.path, headCommit, input.arbiter ?? `ai:${sessionId ?? ''}`);
+      this.events.released(input.path, headCommit, row.holder ?? '');
       this.logger.debug(`REVIEW de "${input.path}" fechado (aceitar) → ${headCommit}.`);
       return { headCommit };
     }
@@ -192,6 +204,7 @@ export class MemoryReviewService {
     // Desfecho DESCARTAR: HEAD estável permanece; só poda o ramo e libera.
     await this.releaseFromReview(input.path, stableHead);
     await this.pruneIfSession(sessionId, input.path);
+    this.events.released(input.path, stableHead, row.holder ?? '');
     this.logger.debug(`REVIEW de "${input.path}" fechado (descartar); HEAD mantido ${stableHead}.`);
     return { headCommit: stableHead };
   }

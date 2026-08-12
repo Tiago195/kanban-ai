@@ -22,7 +22,9 @@ memory/
 ├── memory-write.service.spec.ts # Testes EP-79 (git real + prisma fake in-memory)
 ├── memory-review.service.ts     # EP-80: REVIEW + arbitragem (enterReview/resolve)
 ├── memory-review.service.spec.ts# Testes EP-80 (git real + prisma fake in-memory)
-└── memory.module.ts             # @Global (exporta os cinco servicos)
+├── memory-events.service.ts     # EP-81: fachada de broadcast tipado dos eventos memory.*
+├── memory-events.service.spec.ts# Testes EP-81 (spy sobre RealtimeService)
+└── memory.module.ts             # @Global (exporta os seis servicos)
 ```
 
 ## Contrato (Camada 1)
@@ -135,9 +137,30 @@ memory/
     - **descartar** (sem `content`): mantém o HEAD estável; `headCommit`
       permanece inalterado.
   - Se o neurônio não estiver em `REVIEW` → `MemoryNotInReviewError`.
-- **Fora de escopo aqui:** emitir `memory.conflict`/`memory.resolved` no WS é
-  EP-81; a **política** de quem PODE arbitrar (autoridade/escopo) vive fora deste
-  serviço — aqui só o mecanismo.
+- **Fora de escopo aqui:** a **política** de quem PODE arbitrar
+  (autoridade/escopo) vive fora deste serviço — aqui só o mecanismo.
+
+### Contrato (EP-81 — broadcast dos eventos `memory.*` no WS)
+
+- `MemoryEventsService` é **@Injectable** e **@Global** (via `MemoryModule`):
+  uma **fachada tipada** sobre `RealtimeService.broadcast(...)`. Isola a emissão
+  do gateway → os serviços de domínio dependem só desta fachada, e os specs
+  injetam um `RealtimeService` no-op sem subir o gateway.
+- Público (um método por evento da união `ServerEvent`, ver
+  `packages/shared/src/events.ts`):
+  - `locked(path, headCommit, owner)` → `memory.locked`;
+  - `released(path, headCommit, owner)` → `memory.released`;
+  - `updated(path, headCommit, agentId)` → `memory.updated`;
+  - `conflict(conflict)` → `memory.conflict`;
+  - `review(item)` → `memory.review`.
+- **Pontos de emissão** (o emit é o **3º passo** da ordem canônica git → índice → WS):
+  - `MemoryLockService.acquire` → `locked`; `toFree` (release/expire) → `released`;
+  - `MemoryWriteService.commit` (sucesso) → `updated` (`agentId = ai:<sessionId>`);
+  - `MemoryReviewService.enterReview` → `conflict` (só em `semantic-conflict`) + `review`;
+    `resolve` aceitar → `updated` + `released`; descartar → `released`.
+- **Lado cliente (US-206):** `useRealtime` reage aos `memory.*` invalidando a
+  query key `queryKeys.memory(path?)`. Os handlers ficam **antes** do guard
+  `if (!boardId) return;` porque a memória é **global** (não pertence a um board).
 
 ## Invariantes
 
@@ -155,12 +178,10 @@ memory/
 
 ## Fora de escopo (NÃO implementar aqui ainda)
 
-- **WebSocket** (EP-81) — o 3º passo da ordem de escrita (emitir evento) NÃO vive
-  aqui; `commitAndReindex`/`commit` param na reindexação; nada emite `memory.*`.
 - **Resolução de conflito** de merge — o **mecanismo** (transição para `REVIEW`,
   montagem do `MemoryConflict`, arbitragem via `MemoryReviewService.resolve`) já
-  vive aqui (EP-80). O que segue fora: **emitir** os eventos `memory.conflict`/
-  `memory.resolved` no WS (EP-81) e a **política** de quem PODE arbitrar.
+  vive aqui (EP-80) e sua **emissão** no WS já vive aqui (EP-81). O que segue
+  fora: a **política** de quem PODE arbitrar.
 - **Agendamento** do `expireStale` (tick periódico) — o método existe; quem o
   chama periodicamente vive fora (infra/EP-85).
 

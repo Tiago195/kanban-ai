@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { MEMORY_DEFAULT_BRANCH, MemoryGitService } from './memory-git.service';
 import { MemoryIndexService, NeuronProjection } from './memory-index.service';
+import { MemoryEventsService } from './memory-events.service';
 
 /** Nº máximo de tentativas do laço reread→rebase→write após 409 (US-199). */
 export const MEMORY_WRITE_MAX_RETRIES = 3;
@@ -40,6 +41,7 @@ export class MemoryWriteService {
     private readonly prisma: PrismaService,
     private readonly gitStore: MemoryGitService,
     private readonly index: MemoryIndexService,
+    private readonly events: MemoryEventsService,
   ) {}
 
   /**
@@ -119,6 +121,8 @@ export class MemoryWriteService {
       if (!projection) {
         throw new Error(`Falha ao reindexar "${input.path}" após merge ${oid}.`);
       }
+      // EP-81 — 3º passo da ordem de escrita: emite memory.updated no WS.
+      this.events.updated(input.path, headCommit, `ai:${input.sessionId}`);
       return { oid, branch, headCommit, projection, retries: attempt };
     }
 

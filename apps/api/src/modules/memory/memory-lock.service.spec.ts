@@ -6,6 +6,8 @@ import * as path from 'node:path';
 import type { AppConfig } from '../../shared/config/config';
 import type { PrismaService } from '../../shared/db/prisma.service';
 import { MemoryGitService } from './memory-git.service';
+import { MemoryEventsService } from './memory-events.service';
+import type { RealtimeService } from '../../realtime/realtime.service';
 import {
   MemoryLeaseExpiredError,
   MemoryLockHeldError,
@@ -100,7 +102,8 @@ async function makeHarness() {
   const gitStore = new MemoryGitService(config);
   await gitStore.provision();
   const fake = new FakeIndex();
-  const lock = new MemoryLockService(fake as unknown as PrismaService, gitStore);
+  const events = new MemoryEventsService({ broadcast: () => undefined } as unknown as RealtimeService);
+  const lock = new MemoryLockService(fake as unknown as PrismaService, gitStore, events);
   return { gitDir, git: gitStore, lock, fake };
 }
 

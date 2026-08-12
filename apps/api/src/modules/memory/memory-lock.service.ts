@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { MemoryLockState } from '@kanban-ai/shared';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { MEMORY_DEFAULT_BRANCH, MemoryGitService } from './memory-git.service';
+import { MemoryEventsService } from './memory-events.service';
 
 /** TTL default do lease advisory (ms) — renovado por heartbeat (US-193). */
 export const MEMORY_LEASE_TTL_MS = 60_000;
@@ -35,6 +36,7 @@ export class MemoryLockService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gitStore: MemoryGitService,
+    private readonly events: MemoryEventsService,
   ) {}
 
   /**
@@ -82,6 +84,7 @@ export class MemoryLockService {
         baseCommit,
       },
     });
+    this.events.locked(path, baseCommit, holder);
     return { baseCommit, leaseId, expiresAt: expiresAt.getTime() };
   }
 
@@ -181,7 +184,8 @@ export class MemoryLockService {
   }
 
   private async toFree(path: string): Promise<void> {
-    await this.prisma.memoryIndex.update({
+    const current = await this.prisma.memoryIndex.findUnique({ where: { path } });
+    const updated = await this.prisma.memoryIndex.update({
       where: { path },
       data: {
         lockState: MemoryLockState.FREE,
@@ -192,6 +196,8 @@ export class MemoryLockService {
         activeBranch: null,
       },
     });
+    const owner = current?.holder ?? '';
+    this.events.released(path, updated.headCommit, owner);
   }
 
   private newLeaseId(holder: string): string {

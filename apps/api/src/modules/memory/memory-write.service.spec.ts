@@ -7,6 +7,8 @@ import type { AppConfig } from '../../shared/config/config';
 import type { PrismaService } from '../../shared/db/prisma.service';
 import { MemoryGitService } from './memory-git.service';
 import { MemoryIndexService } from './memory-index.service';
+import { MemoryEventsService } from './memory-events.service';
+import type { RealtimeService } from '../../realtime/realtime.service';
 import { MemoryStaleWriteError, MemoryWriteService } from './memory-write.service';
 
 // --- MemoryWriteService: escrita otimista + compare-and-swap (ADR-0027, EP-79) ---
@@ -86,7 +88,8 @@ async function makeHarness() {
   await gitStore.provision();
   const fake = new FakeIndex();
   const index = new MemoryIndexService(fake as unknown as PrismaService, gitStore);
-  const write = new MemoryWriteService(fake as unknown as PrismaService, gitStore, index);
+  const events = new MemoryEventsService({ broadcast: () => undefined } as unknown as RealtimeService);
+  const write = new MemoryWriteService(fake as unknown as PrismaService, gitStore, index, events);
   return { gitDir, git: gitStore, index, write, fake };
 }
 
