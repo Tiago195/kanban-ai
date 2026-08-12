@@ -30,7 +30,9 @@ memory/
 ├── memory-policy.service.spec.ts# Testes EP-83 (servico puro, sem I/O)
 ├── memory-bootstrap.service.ts  # EP-84: bootstrap (varredura idempotente) + neuronio lazy
 ├── memory-bootstrap.service.spec.ts# Testes EP-84 (deteccao/mapeamento/semente puros)
-└── memory.module.ts             # @Global (controller + oito servicos)
+├── memory-gc.service.ts         # EP-85: GC (stale/arquivo, sumarizacao, poda de ramos)
+├── memory-gc.service.spec.ts    # Testes EP-85 (git real + prisma fake in-memory)
+└── memory.module.ts             # @Global (controller + nove servicos)
 ```
 
 ## Contrato (Camada 1)
@@ -241,14 +243,36 @@ memory/
   `POST /memory/ensure-neuron` (→ `{neuronPath}`); tools MCP `memory_bootstrap` e
   `memory_ensure_neuron`. Ambas idempotentes.
 
+### Contrato (EP-85 — garbage collection)
 
+- `MemoryGcService` (**@Global**) reúne 3 jobs de baixa prioridade que mantêm a
+  colmeia relevante e o repo enxuto **sem perder a fonte da verdade** (git
+  preserva o histórico; GC nunca `git rm` conteúdo estável nem apaga commits):
+  - `sweepStale({repoPath})` (US-215) — reconcilia o índice contra o repo-alvo:
+    neurônio de módulo (`modules/<x>.md`) cujo diretório sumiu vira `stale` +
+    `archivedAt`; se o módulo reaparece, é reativado. Grava `lastSeenCommit`.
+    Idempotente. Campos novos no `MemoryIndex`: `stale`, `archivedAt`,
+    `lastSeenCommit` (migration `20260812165119_memory_gc`).
+  - `summarizeHistory(path, keep?)` (US-216) — condensa o histórico longo do
+    neurônio num bloco **determinístico** (mantém os `keep`=10 commits recentes),
+    sem apagar commits.
+  - `pruneEphemeralBranches()` (US-217) — poda ramos `mem/ai/*` órfãos (sem
+    `activeBranch` no índice), preservando `main` e os ramos com edição ativa.
+    Usa `git.listBranches()`/`git.deleteBranchByRef()`. Idempotente.
+- **Rotas:** `POST /memory/gc/sweep-stale`, `/memory/gc/summarize`,
+  `/memory/gc/prune-branches`; tools MCP `memory_gc_sweep_stale`,
+  `memory_gc_summarize`, `memory_gc_prune_branches`.
+
+## Fora de escopo (NÃO implementar aqui ainda)
 
 - **Resolução de conflito** de merge — o **mecanismo** (transição para `REVIEW`,
   montagem do `MemoryConflict`, arbitragem via `MemoryReviewService.resolve`) já
   vive aqui (EP-80) e sua **emissão** no WS já vive aqui (EP-81). O que segue
   fora: a **política** de quem PODE arbitrar.
-- **Agendamento** do `expireStale` (tick periódico) — o método existe; quem o
-  chama periodicamente vive fora (infra/EP-85).
+- **Agendamento periódico** (tick/cron) dos jobs de GC (`sweepStale`,
+  `summarizeHistory`, `pruneEphemeralBranches`) e do `expireStale` de locks — os
+  métodos existem e são chamáveis; **quem os dispara periodicamente vive fora**
+  (infra/loop engine).
 
 ## O que NÃO mexer
 

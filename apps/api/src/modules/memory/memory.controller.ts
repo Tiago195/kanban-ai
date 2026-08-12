@@ -3,6 +3,7 @@ import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { MemoryGitService } from './memory-git.service';
 import { MemoryBootstrapService } from './memory-bootstrap.service';
+import { MemoryGcService } from './memory-gc.service';
 import { MemoryLockService } from './memory-lock.service';
 import { MemoryPolicyService } from './memory-policy.service';
 import { MemoryReviewService } from './memory-review.service';
@@ -11,6 +12,8 @@ import {
   memoryAcquireSchema,
   memoryBootstrapSchema,
   memoryEnsureNeuronSchema,
+  memoryGcSummarizeSchema,
+  memoryGcSweepStaleSchema,
   memoryHeartbeatSchema,
   memoryReadQuerySchema,
   memoryReleaseSchema,
@@ -19,6 +22,8 @@ import {
   type MemoryAcquireDto,
   type MemoryBootstrapDto,
   type MemoryEnsureNeuronDto,
+  type MemoryGcSummarizeDto,
+  type MemoryGcSweepStaleDto,
   type MemoryHeartbeatDto,
   type MemoryReadQueryDto,
   type MemoryReleaseDto,
@@ -42,6 +47,7 @@ export class MemoryController {
     private readonly review: MemoryReviewService,
     private readonly policy: MemoryPolicyService,
     private readonly bootstrap: MemoryBootstrapService,
+    private readonly gc: MemoryGcService,
   ) {}
 
   /**
@@ -137,5 +143,36 @@ export class MemoryController {
   async ensureNeuron(@Body() dto: MemoryEnsureNeuronDto) {
     const neuronPath = await this.bootstrap.ensureNeuronForFile(dto);
     return { neuronPath };
+  }
+
+  /**
+   * GC — varredura de staleness (US-215). Arquiva neurônios de módulo que sumiram
+   * do repo-alvo e reativa os que voltaram. Idempotente; nada é apagado do git.
+   */
+  @Post('gc/sweep-stale')
+  @UsePipes(new ZodValidationPipe(memoryGcSweepStaleSchema))
+  gcSweepStale(@Body() dto: MemoryGcSweepStaleDto) {
+    return this.gc.sweepStale(dto);
+  }
+
+  /**
+   * GC — sumarização de histórico longo (US-216). Retorna o bloco condensado
+   * (ou `null` se o neurônio não tem histórico longo o bastante).
+   */
+  @Post('gc/summarize')
+  @UsePipes(new ZodValidationPipe(memoryGcSummarizeSchema))
+  async gcSummarize(@Body() dto: MemoryGcSummarizeDto) {
+    const summary = await this.gc.summarizeHistory(dto.path, dto.keep);
+    return { path: dto.path, summary };
+  }
+
+  /**
+   * GC — poda de ramos efêmeros `mem/ai/*` órfãos (US-217). Idempotente. Retorna
+   * os ramos podados nesta execução.
+   */
+  @Post('gc/prune-branches')
+  async gcPruneBranches() {
+    const pruned = await this.gc.pruneEphemeralBranches();
+    return { pruned, count: pruned.length };
   }
 }

@@ -448,10 +448,16 @@ model MemoryIndex {
   activeBranch String? // branch efêmera do agent (mem/ai/<sessao>/<path>)
   reviewQueued Boolean   @default(false) // marcador de fila de REVIEW (conflito semântico)
 
+  // Garbage collection (EP-85) -------------------------------------------------
+  stale      Boolean   @default(false) // path some do repo-alvo (candidato a arquivo)
+  archivedAt DateTime? // instante em que foi arquivado (git preserva o histórico)
+  lastSeenCommit String? // último SHA de main em que o path ainda existia no repo
+
   updatedAt DateTime @updatedAt
 
   @@index([lockState])
   @@index([holder])
+  @@index([stale])
 }
 
 // ─────────────────────────────────────────────────────────────

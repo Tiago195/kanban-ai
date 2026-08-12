@@ -132,4 +132,36 @@ export function registerMemoryTools(server: McpServer, client: KanbanClient): vo
     },
     async (args) => ok(await client.post('/memory/ensure-neuron', args)),
   );
+
+  registerTool(
+    server,
+    'memory_gc_sweep_stale',
+    'GC — varredura de staleness (POST /memory/gc/sweep-stale, EP-85). Reconcilia a ' +
+      'colmeia contra o repo-alvo (`repoPath`): arquiva neurônios de módulo cujo diretório ' +
+      'sumiu do código e reativa os que voltaram. NUNCA apaga do git (histórico preservado). ' +
+      'Idempotente. Retorna `archived` e `revived`.',
+    { repoPath: z.string().min(1) },
+    async (args) => ok(await client.post('/memory/gc/sweep-stale', args)),
+  );
+
+  registerTool(
+    server,
+    'memory_gc_summarize',
+    'GC — sumariza o histórico longo de um neurônio (POST /memory/gc/summarize, EP-85). ' +
+      'Condensa o aprendizado antigo num bloco determinístico, mantendo os `keep` commits ' +
+      'mais recentes (default 10). NÃO apaga commits — a fonte da verdade continua no git. ' +
+      'Retorna `summary` (ou null se não há histórico longo o bastante).',
+    { path: z.string().min(1), keep: z.number().int().positive().optional() },
+    async (args) => ok(await client.post('/memory/gc/summarize', args)),
+  );
+
+  registerTool(
+    server,
+    'memory_gc_prune_branches',
+    'GC — poda ramos efêmeros `mem/ai/*` órfãos (POST /memory/gc/prune-branches, EP-85). ' +
+      'Descarta ramos sem lease/edição ativa após merge/expiração — ramo não é conteúdo ' +
+      'estável, então nada da fonte da verdade se perde. Idempotente. Retorna `pruned` e `count`.',
+    {},
+    async () => ok(await client.post('/memory/gc/prune-branches', {})),
+  );
 }

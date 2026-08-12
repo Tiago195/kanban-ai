@@ -404,6 +404,34 @@ export class MemoryGitService implements OnModuleInit {
   }
 
   /**
+   * Lista TODAS as branches locais do repo de memória (nomes completos, ex.:
+   * `main`, `mem/ai/<sessao>/<path>`). Base para a poda de ramos efêmeros
+   * (US-217). O `isomorphic-git` já retorna nomes sem o prefixo `refs/heads/`.
+   */
+  async listBranches(): Promise<string[]> {
+    const dir = this.gitDir;
+    return git.listBranches({ fs, dir, gitdir: dir });
+  }
+
+  /**
+   * **Poda** um ramo pelo nome completo (`ref`). Genérico — usado pela GC
+   * (US-217) para descartar ramos efêmeros órfãos. Idempotente: retorna `false`
+   * (em vez de lançar) se o ramo já não existe.
+   */
+  async deleteBranchByRef(ref: string): Promise<boolean> {
+    const dir = this.gitDir;
+    try {
+      await git.deleteBranch({ fs, dir, gitdir: dir, ref });
+      return true;
+    } catch (err) {
+      if (this.isNotFound(err)) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Resolve o SHA do commit apontado por `ref` (default `main`). Usado pela
    * Camada 2 para gravar o `headCommit` de origem de cada projeção.
    */

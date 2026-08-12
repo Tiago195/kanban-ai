@@ -94,3 +94,23 @@ export const memoryEnsureNeuronSchema = z.object({
   sessionId: z.string().min(1).optional(),
 });
 export type MemoryEnsureNeuronDto = z.infer<typeof memoryEnsureNeuronSchema>;
+
+/**
+ * Varredura de staleness (POST /memory/gc/sweep-stale, EP-85/US-215). Reconcilia
+ * o índice contra o repo-alvo (`repoPath`): arquiva neurônios de módulo que
+ * sumiram e reativa os que voltaram. Idempotente; não apaga nada do git.
+ */
+export const memoryGcSweepStaleSchema = z.object({
+  repoPath: z.string().min(1),
+});
+export type MemoryGcSweepStaleDto = z.infer<typeof memoryGcSweepStaleSchema>;
+
+/**
+ * Sumarização de histórico (POST /memory/gc/summarize, EP-85/US-216). Condensa o
+ * histórico longo de um neurônio, mantendo os `keep` commits mais recentes.
+ */
+export const memoryGcSummarizeSchema = z.object({
+  path: z.string().min(1),
+  keep: z.number().int().positive().optional(),
+});
+export type MemoryGcSummarizeDto = z.infer<typeof memoryGcSummarizeSchema>;
