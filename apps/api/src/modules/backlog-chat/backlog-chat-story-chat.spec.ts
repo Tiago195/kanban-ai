@@ -7,6 +7,7 @@ import type { PrismaService } from '../../shared/db/prisma.service';
 import type { RealtimeService } from '../../realtime/realtime.service';
 import type { BacklogCliRunner } from './runner/backlog-cli.runner';
 import type { CardsService } from '../cards/cards.service';
+import type { AssigneesService } from '../assignees/assignees.service';
 
 /**
  * story-chat-threads: valida o rastreio Card ↔ BacklogChatSession.
@@ -68,6 +69,7 @@ test('apply(): carimba backlogChatSessionId em épico, story e task', async () =
     { broadcast() {} } as unknown as RealtimeService,
     {} as unknown as BacklogCliRunner,
     cards,
+    { findAll: async () => [] } as unknown as AssigneesService,
   );
 
   await orch.apply('sess-1', 1);
@@ -112,6 +114,7 @@ test('openStorySession(): reusa a sessão original quando a story veio de backlo
     { broadcast() {} } as unknown as RealtimeService,
     {} as unknown as BacklogCliRunner,
     {} as unknown as CardsService,
+    { findAll: async () => [] } as unknown as AssigneesService,
   );
 
   const res = await orch.openStorySession('story-1');
@@ -147,6 +150,7 @@ test('openStorySession(): cria sessão zerada e vincula para story manual', asyn
     { broadcast() {} } as unknown as RealtimeService,
     {} as unknown as BacklogCliRunner,
     {} as unknown as CardsService,
+    { findAll: async () => [] } as unknown as AssigneesService,
   );
 
   const res = await orch.openStorySession('story-2');
@@ -188,6 +192,7 @@ test('materializeStoryTasks(): cria tasks em To Do e limpa needsHuman', async ()
     { broadcast() {} } as unknown as RealtimeService,
     {} as unknown as BacklogCliRunner,
     cards,
+    { findAll: async () => [] } as unknown as AssigneesService,
   );
 
   const res = await orch.materializeStoryTasks('story-3', [
@@ -224,6 +229,7 @@ test('resolveAppliedStoryCard(): casa a story-card do board pelo título (sessã
     { broadcast() {} } as unknown as RealtimeService,
     {} as unknown as BacklogCliRunner,
     {} as unknown as CardsService,
+    { findAll: async () => [] } as unknown as AssigneesService,
   );
 
   const res = await orch.resolveAppliedStoryCard('sess-1', '  Story 1 ');
@@ -253,6 +259,7 @@ test('resolveAppliedStoryCard(): retorna null quando nenhuma story-card casa', a
     { broadcast() {} } as unknown as RealtimeService,
     {} as unknown as BacklogCliRunner,
     {} as unknown as CardsService,
+    { findAll: async () => [] } as unknown as AssigneesService,
   );
 
   const res = await orch.resolveAppliedStoryCard('sess-1', 'Inexistente');
@@ -271,6 +278,7 @@ test('resolveAppliedStoryCard(): fallback para a única story-card da sessão', 
     { broadcast() {} } as unknown as RealtimeService,
     {} as unknown as BacklogCliRunner,
     {} as unknown as CardsService,
+    { findAll: async () => [] } as unknown as AssigneesService,
   );
 
   const res = await orch.resolveAppliedStoryCard('sess-1', 'Título original diferente');
@@ -305,6 +313,7 @@ test('materializeStoryTasks() numa sessão applied: cria filhos sem tocar épico
     { broadcast() {} } as unknown as RealtimeService,
     {} as unknown as BacklogCliRunner,
     cards,
+    { findAll: async () => [] } as unknown as AssigneesService,
   );
 
   const res = await orch.materializeStoryTasks('story-applied', [
@@ -442,6 +451,7 @@ test('applyTaskPatch(): aplica ops cirúrgicas e incrementa a versão', async ()
     { broadcast: (e: Record<string, unknown>) => broadcasts.push(e) } as unknown as RealtimeService,
     {} as unknown as BacklogCliRunner,
     {} as unknown as CardsService,
+    { findAll: async () => [] } as unknown as AssigneesService,
   );
 
   await (orch as unknown as {
@@ -504,6 +514,7 @@ test('resolveStoryCardContext(): resolve a story-card única vinculada à sessã
     { broadcast() {} } as unknown as RealtimeService,
     {} as unknown as BacklogCliRunner,
     {} as unknown as CardsService,
+    { findAll: async () => [] } as unknown as AssigneesService,
   );
 
   const ctx = await (
@@ -532,6 +543,7 @@ test('resolveStoryCardContext(): retorna undefined quando há 0 ou >1 story vinc
       { broadcast() {} } as unknown as RealtimeService,
       {} as unknown as BacklogCliRunner,
       {} as unknown as CardsService,
+      { findAll: async () => [] } as unknown as AssigneesService,
     );
   };
   const call = (orch: BacklogChatOrchestrator) =>

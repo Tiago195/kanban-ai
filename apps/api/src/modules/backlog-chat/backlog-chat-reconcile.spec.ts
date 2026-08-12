@@ -5,6 +5,7 @@ import type { PrismaService } from '../../shared/db/prisma.service';
 import type { RealtimeService } from '../../realtime/realtime.service';
 import type { BacklogCliRunner } from './runner/backlog-cli.runner';
 import type { CardsService } from '../cards/cards.service';
+import type { AssigneesService } from '../assignees/assignees.service';
 
 /**
  * bug-dropped-turn: se o browser fecha (ou a API reinicia) DURANTE um turno do
@@ -43,7 +44,7 @@ function makeOrchestrator(sessions: FakeSession[], messages: FakeMessage[]) {
   const realtime = { broadcast() {} } as unknown as RealtimeService;
   const runner = {} as unknown as BacklogCliRunner;
   const cards = {} as unknown as CardsService;
-  const orch = new BacklogChatOrchestrator(prisma, realtime, runner, cards);
+  const orch = new BacklogChatOrchestrator(prisma, realtime, runner, cards, { findAll: async () => [] } as unknown as AssigneesService);
 
   // Espiona `runTurn` (privado) sem invocar o runner real.
   const calls: Array<{ sessionId: string; boardId: string; text: string; channel: string }> = [];

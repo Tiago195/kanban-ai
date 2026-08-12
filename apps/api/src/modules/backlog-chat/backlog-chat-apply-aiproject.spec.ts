@@ -7,6 +7,7 @@ import type { PrismaService } from '../../shared/db/prisma.service';
 import type { RealtimeService } from '../../realtime/realtime.service';
 import type { BacklogCliRunner } from './runner/backlog-cli.runner';
 import type { CardsService } from '../cards/cards.service';
+import type { AssigneesService } from '../assignees/assignees.service';
 
 /**
  * imp-aiproject-missing: o épico criado pelo PO deve persistir `aiProject`
@@ -70,6 +71,7 @@ test('apply(): épico é criado com aiProject vindo da proposta', async () => {
     realtime,
     runner,
     cards,
+    { findAll: async () => [] } as unknown as AssigneesService,
   );
 
   const res = await orch.apply('s1', 1);
@@ -111,6 +113,7 @@ test('apply(): sem aiProject na proposta, épico não recebe o campo (retrocompa
     { broadcast() {} } as unknown as RealtimeService,
     {} as unknown as BacklogCliRunner,
     cards,
+    { findAll: async () => [] } as unknown as AssigneesService,
   );
 
   await orch.apply('s1', 1);

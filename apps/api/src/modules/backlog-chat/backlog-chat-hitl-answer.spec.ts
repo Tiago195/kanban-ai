@@ -5,6 +5,7 @@ import type { PrismaService } from '../../shared/db/prisma.service';
 import type { RealtimeService } from '../../realtime/realtime.service';
 import type { BacklogCliRunner } from './runner/backlog-cli.runner';
 import type { CardsService } from '../cards/cards.service';
+import type { AssigneesService } from '../assignees/assignees.service';
 
 /**
  * bug-backlog-hitl-hang: o adapter da CLI é one-shot — ao emitir a pergunta, o
@@ -58,7 +59,7 @@ function makeOrchestrator(messages: FakeMessage[]) {
   } as unknown as RealtimeService;
   const runner = {} as unknown as BacklogCliRunner;
   const cards = {} as unknown as CardsService;
-  const orch = new BacklogChatOrchestrator(prisma, realtime, runner, cards);
+  const orch = new BacklogChatOrchestrator(prisma, realtime, runner, cards, { findAll: async () => [] } as unknown as AssigneesService);
 
   const calls: Array<{ text: string; channel: string }> = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

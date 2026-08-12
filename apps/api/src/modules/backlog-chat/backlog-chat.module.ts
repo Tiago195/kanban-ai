@@ -3,6 +3,7 @@ import { BacklogChatController, BacklogStoryChatController } from './backlog-cha
 import { BacklogChatOrchestrator } from './backlog-chat.orchestrator';
 import { BacklogCliRunner } from './runner/backlog-cli.runner';
 import { CardsModule } from '../cards/cards.module';
+import { AssigneesModule } from '../assignees/assignees.module';
 
 /**
  * Módulo do ecossistema "Chat de criação de Épicos/Histórias".
@@ -12,7 +13,7 @@ import { CardsModule } from '../cards/cards.module';
  * próprio) e o `CardsService` (executor seguro) para materializar o backlog.
  */
 @Module({
-  imports: [CardsModule],
+  imports: [CardsModule, AssigneesModule],
   controllers: [BacklogChatController, BacklogStoryChatController],
   providers: [BacklogChatOrchestrator, BacklogCliRunner],
   exports: [BacklogChatOrchestrator],

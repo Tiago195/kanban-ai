@@ -343,3 +343,47 @@ export const BACKLOG_TASKS_PATCH_MARKERS = {
   open: '<<<KANBAN_TASKS_PATCH>>>',
   close: '<<<END_KANBAN_TASKS_PATCH>>>',
 } as const;
+
+/**
+ * US-COLAB4 — uma diretiva de delegação extraída de uma mensagem do chat.
+ *
+ * Escrever `@<handle> <texto>` numa mensagem do backlog-chat delega trabalho a
+ * um agent: cria uma task (via `CardsService.create`, invariantes garantidos) na
+ * story da sessão e a atribui ao assignee/perfil mencionado. Ver ADR-0033 e a
+ * seção US-COLAB4 de `docs/specs/ep-colab.md`.
+ */
+export interface MentionDirective {
+  /** Handle mencionado, sem o '@' (ex.: 'backend', 'orchestrator'). */
+  handle: string;
+  /**
+   * Título da task derivado do texto após a menção (até o fim da linha ou
+   * próxima menção). Pode ser vazio se a menção estiver sozinha.
+   */
+  taskTitle: string;
+}
+
+/** Regex canônica de menção: '@' seguido de [A-Za-z0-9_-]+ (case-insensitive). */
+export const MENTION_PATTERN = /@([A-Za-z0-9_-]+)/g;
+
+/**
+ * Extrai as diretivas de menção de um texto de chat. Retrocompatível: texto sem
+ * '@' retorna `[]`. Usada pelo backlog-chat para delegar tasks a agents.
+ *
+ * O título de cada diretiva é o trecho entre a menção e a próxima menção (ou o
+ * fim do texto), com espaços normalizados. Função **pura** (sem I/O), consumível
+ * tanto pela api (delegação) quanto pela web (realce).
+ */
+export function parseMentions(text: string): MentionDirective[] {
+  const out: MentionDirective[] = [];
+  if (!text) return out;
+  const matches = [...text.matchAll(MENTION_PATTERN)];
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
+    const handle = m[1];
+    const start = (m.index ?? 0) + m[0].length;
+    const end = matches[i + 1]?.index ?? text.length;
+    const taskTitle = text.slice(start, end).trim().replace(/\s+/g, ' ');
+    out.push({ handle, taskTitle });
+  }
+  return out;
+}

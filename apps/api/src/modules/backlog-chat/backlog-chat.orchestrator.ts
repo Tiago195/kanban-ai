@@ -18,10 +18,14 @@ import {
   BACKLOG_MAIN_CHANNEL,
   parseBacklogStoryChannel,
   parseBacklogTaskChannel,
+  parseMentions,
 } from '@kanban-ai/shared';
+import type { MentionDirective } from '@kanban-ai/shared';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { CardsService } from '../cards/cards.service';
+import { AssigneesService } from '../assignees/assignees.service';
+import { BUILTIN_LOOP_PROFILES } from '../ai-engine/loop-profiles/loop-profiles';
 import { BacklogCliRunner } from './runner/backlog-cli.runner';
 import { buildBacklogPrompt, type BacklogPromptTurn } from './skill/backlog-po.prompt';
 import { applyBacklogPatch } from './backlog-patch';
@@ -83,6 +87,7 @@ export class BacklogChatOrchestrator implements OnModuleInit {
     private readonly realtime: RealtimeService,
     private readonly runner: BacklogCliRunner,
     private readonly cards: CardsService,
+    private readonly assignees: AssigneesService,
   ) {}
 
   /**
@@ -246,6 +251,19 @@ export class BacklogChatOrchestrator implements OnModuleInit {
       });
     }
 
+    // US-COLAB4: menções `@<handle>` delegam trabalho a agents ANTES do turno.
+    // São determinísticas (não precisam da CLI): cada menção conhecida cria e
+    // atribui uma task na story da sessão. Retrocompat: sem `@`, `parseMentions`
+    // retorna `[]` e nada muda no fluxo do chat.
+    const directives = parseMentions(text);
+    if (directives.length) {
+      await this.delegateFromMentions(sessionId, directives).catch((err) => {
+        this.logger.error(
+          `delegateFromMentions falhou (sessão ${sessionId}): ${String(err)}`,
+        );
+      });
+    }
+
     // O turno é disparado em background: a CLI faz streaming e pode FAZER UMA
     // PERGUNTA (HITL), bloqueando em `waitForAnswer` até o humano responder via
     // POST /answer. Se `await`ássemos aqui, a request de /messages ficaria
@@ -256,6 +274,85 @@ export class BacklogChatOrchestrator implements OnModuleInit {
         `runTurn falhou (sessão ${sessionId}): ${String(err)}`,
       );
     });
+  }
+
+  /**
+   * US-COLAB4 — cria e atribui uma task por menção `@<handle>` da mensagem.
+   *
+   * Reusa APIs existentes (não reinventa): `CardsService.create` (invariantes
+   * garantidos — task só em Backlog/To Do, sem pontos, auto-retoma o loop se a
+   * story está In Progress via `maybeResumeLoopOnTaskAdded`) e
+   * `CardsService.attachAssignee` (emite `assignee.attached`). Resolve a
+   * story-card da sessão pelo mesmo caminho de `resolveStoryCardContext`
+   * (`Card.backlogChatSessionId`, `type:'story'`).
+   *
+   * Política de resolução do handle (determinística — ADR-0033):
+   * 1. Assignee do board por `name` (case-insensitive) — tem prioridade.
+   * 2. `loopType` (perfil de loop) se o handle for um profile válido.
+   * Se o handle bater nos DOIS (ambiguidade), a task é criada com o `loopType`
+   * E o assignee é anexado (assignee-first + loopType). Menção desconhecida
+   * (nem assignee nem profile) é IGNORADA — nunca cria task órfã.
+   *
+   * Dedup: no máximo UMA task por `handle` distinto por mensagem.
+   */
+  private async delegateFromMentions(
+    sessionId: string,
+    directives: MentionDirective[],
+  ): Promise<void> {
+    const story = await this.prisma.card.findFirst({
+      where: { backlogChatSessionId: sessionId, type: 'story' },
+      select: { id: true, boardId: true },
+    });
+    // Sem story materializada ainda: nada a delegar (retrocompat, ignora).
+    if (!story) return;
+
+    const assignees = await this.assignees.findAll(story.boardId);
+    const seen = new Set<string>();
+
+    for (const d of directives) {
+      const key = d.handle.toLowerCase();
+      if (seen.has(key)) continue; // dedup por handle distinto por mensagem
+      seen.add(key);
+
+      const assignee = assignees.find((a) => a.name.toLowerCase() === key);
+      const loopType = (await this.resolveLoopTypeHandle(story.boardId, key))
+        ? key
+        : undefined;
+      // Menção desconhecida: não cria task órfã.
+      if (!assignee && !loopType) continue;
+
+      const task = await this.cards.create({
+        boardId: story.boardId,
+        type: 'task',
+        title: d.taskTitle || `Delegado para @${d.handle}`,
+        description: '',
+        parentId: story.id,
+        ...(loopType ? { loopType } : {}),
+      });
+
+      if (assignee) {
+        await this.cards.attachAssignee(task.id, { assigneeId: assignee.id });
+      }
+    }
+  }
+
+  /**
+   * Verifica se `handle` é um `loopType` (profile de loop) válido para o board —
+   * builtin (`feature`/`bug`/`refactor`/…) ou custom (`LoopProfile`). Delegado ao
+   * mesmo critério que `CardsService.create` usa para validar `loopType`, para
+   * não hardcodar (nem desatualizar) a lista de perfis — inclui perfis futuros
+   * como `orchestrator` (US-COLAB2) assim que existirem.
+   */
+  private async resolveLoopTypeHandle(
+    boardId: string,
+    handle: string,
+  ): Promise<boolean> {
+    if (BUILTIN_LOOP_PROFILES[handle]) return true;
+    const custom = await this.prisma.loopProfile.findUnique({
+      where: { boardId_profileId: { boardId, profileId: handle } },
+      select: { profileId: true },
+    });
+    return custom != null;
   }
 
   /**
