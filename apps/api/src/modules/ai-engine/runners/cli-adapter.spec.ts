@@ -83,3 +83,21 @@ test('parseTokenUsage: sufixo m (milhões)', () => {
     outputTokens: 1_500_000,
   });
 });
+
+// Formato REAL capturado da Copilot CLI 1.0.79 (rodape de stats):
+//   Tokens     ↑ 48.4k (48.2k written) • ↓ 4
+// O texto "(48.2k written)" entre o ↑ e o ↓ NAO pode contaminar o output.
+test('parseTokenUsage: formato real da Copilot CLI (setas + written + bullet)', () => {
+  const a = makeAdapter();
+  assert.deepEqual(a.parseTokenUsage('Tokens     \u2191 48.4k (48.2k written) \u2022 \u2193 4'), {
+    inputTokens: 48_400,
+    outputTokens: 4,
+  });
+  assert.deepEqual(a.parseTokenUsage('Tokens     \u2191 12k \u2022 \u2193 3.5k'), {
+    inputTokens: 12_000,
+    outputTokens: 3_500,
+  });
+  // linhas vizinhas do rodape nao devem casar
+  assert.equal(a.parseTokenUsage('Changes    +0 -0'), undefined);
+  assert.equal(a.parseTokenUsage('AI Credits 0 (14s)'), undefined);
+});
