@@ -57,6 +57,24 @@ export type ValidationStrategy = 'flows+regression' | 'bug-gone+regression' | 'r
  */
 export type AgentSessionState = 'running' | 'idle' | 'dead';
 
+/**
+ * US-ROB2 — estado de vivacidade PERSISTIDO de uma sessão de agent. Diferente de
+ * AgentSessionState (efêmero, in-process), este sobrevive a restart e alimenta a
+ * reconciliação durável + o recovery por lease (US-ROB4).
+ *
+ *  - starting: sessão recém-criada, ainda sem heartbeat consolidado.
+ *  - alive:    processando normalmente (heartbeat recente).
+ *  - stalled:  sem heartbeat há > TTL (candidato a recovery).
+ *  - dead:     encerrada (limpa ou abortada).
+ */
+export const LivenessState = {
+  Starting: 'starting',
+  Alive: 'alive',
+  Stalled: 'stalled',
+  Dead: 'dead',
+} as const;
+export type LivenessState = (typeof LivenessState)[keyof typeof LivenessState];
+
 /** Modo de parada manual de uma sessão de agent. */
 export type StopMode = 'graceful' | 'hard';
 

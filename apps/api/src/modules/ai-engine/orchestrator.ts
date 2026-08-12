@@ -91,6 +91,30 @@ export class Orchestrator implements OnModuleInit {
    * auto-play. O estado de verdade é o banco, não a memória.
    */
   async reconcileOnBoot(): Promise<void> {
+    // US-ROB2 — leitura DURÁVEL: antes de re-escanear as colunas, lê a tabela
+    // AgentRuntimeState para (a) saber quais sessões existiam antes do restart e
+    // (b) marcar como `stalled` as que perderam o processo (base do recovery por
+    // lease — US-ROB4). Totalmente defensivo: falha aqui NÃO impede o re-scan.
+    let persistedByStory = new Map<string, { livenessState: string }>();
+    if (this.config.agent.runtimePersistEnabled) {
+      try {
+        const rows = await this.prisma.agentRuntimeState.findMany({
+          where: { livenessState: { in: ['starting', 'alive', 'stalled'] } },
+          select: { storyId: true, livenessState: true },
+        });
+        persistedByStory = new Map(rows.map((r) => [r.storyId, { livenessState: r.livenessState }]));
+        if (rows.length) {
+          this.logger.log(
+            `reconcileOnBoot() — ${rows.length} sessão(ões) durável(is) encontrada(s) no boot`,
+          );
+        }
+      } catch (err) {
+        this.logger.warn(
+          `reconcileOnBoot() — leitura durável falhou (segue com re-scan): ${(err as Error).message}`,
+        );
+      }
+    }
+
     const stories = await this.prisma.card.findMany({
       where: {
         type: 'story',
@@ -98,6 +122,26 @@ export class Orchestrator implements OnModuleInit {
       },
       select: { id: true },
     });
+
+    // US-ROB2 — stories que tinham sessão durável mas NÃO estão mais In Progress
+    // (perderam o processo/coluna): marca como `stalled` para o watchdog/lease.
+    const activeIds = new Set(stories.map((s) => s.id));
+    for (const [storyId, row] of persistedByStory) {
+      if (!activeIds.has(storyId) && row.livenessState !== 'stalled') {
+        try {
+          await this.prisma.agentRuntimeState.update({
+            where: { sessionId: storyId },
+            data: { livenessState: 'stalled' },
+          });
+          this.logger.warn(
+            `reconcileOnBoot() — sessão durável story=${storyId} sem story ativa; marcada stalled`,
+          );
+        } catch {
+          /* defensivo: ignora — não pode derrubar o boot */
+        }
+      }
+    }
+
     if (stories.length === 0) {
       this.logger.log('reconcileOnBoot() — nenhuma story ativa');
       return;
@@ -518,7 +562,17 @@ export class Orchestrator implements OnModuleInit {
     // acumulado. Reutilizado em ambos os call sites de appendIteration abaixo.
     const iterationDiff = await this.captureDiff(cwd, diffBaseline);
 
-    // BUG-A7: ERRO FATAL de infraestrutura (spawn falhou, modelo indisponível,
+    // US-ROB2 — acumula tokens da iteração no estado durável da story (por
+    // session, chaveado por storyId). Defensivo: só quando há tokens; o próprio
+    // addTokens é best-effort (persistência guardada por flag + try/catch).
+    if (runResult.inputTokens || runResult.outputTokens) {
+      await this.sessions.addTokens(storyId, {
+        input: runResult.inputTokens ?? 0,
+        output: runResult.outputTokens ?? 0,
+      });
+    }
+
+
     // não autenticado, crash da CLI). Esta "iteração" NÃO é trabalho da AI —
     // não pode virar `done` (fecharia a task por engano) nem iteração `ok`
     // silenciosa (o loop iteraria até o cap, mascarando a causa raiz). Fail-fast:

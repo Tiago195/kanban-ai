@@ -104,6 +104,18 @@ function makeMemoryBootstrap(): MemoryBootstrapService {
 }
 
 /**
+ * PrismaService fake mínimo para o AgentSessionManager (US-ROB2). Só precisa de
+ * `agentRuntimeState.upsert`; os testes que exercitam persistência usam
+ * `makeRuntimeStatePrisma` (abaixo) para inspecionar o estado.
+ */
+function makeSessions(config: AppConfig): AgentSessionManager {
+  const prisma = {
+    agentRuntimeState: { upsert: async () => undefined },
+  } as unknown as PrismaService;
+  return new AgentSessionManager(config, prisma);
+}
+
+/**
  * PrismaService fake genérico. Cada método relevante é um stub configurável via
  * `overrides` (ex.: `iteration.findMany`). Métodos não configurados retornam
  * valores neutros. Registra chamadas de `card.update` em `updates`.
@@ -178,7 +190,7 @@ function makeOrchestrator(opts: {
 } = {}) {
   const config = opts.config ?? makeConfig();
   const prisma = opts.prisma ?? makePrisma();
-  const sessions = opts.sessions ?? new AgentSessionManager(config);
+  const sessions = opts.sessions ?? makeSessions(config);
   const realtime = opts.realtime ?? makeRealtime();
   const orch = new Orchestrator(
     prisma.svc,
@@ -520,7 +532,7 @@ test('createDerivedTask: cria derivada com derivedDepth+1 e dependência reversa
 
   const orch = new Orchestrator(
     prismaSvc,
-    new AgentSessionManager(makeConfig()),
+    makeSessions(makeConfig()),
     makeValidation(),
     makeWorkspaces(),
     realtime.svc,
@@ -563,7 +575,7 @@ test('countOpenDerivedForProblem: conta irmãs abertas pelo título canônico', 
 
   const orch = new Orchestrator(
     prismaSvc,
-    new AgentSessionManager(makeConfig()),
+    makeSessions(makeConfig()),
     makeValidation(),
     makeWorkspaces(),
     makeRealtime().svc,
@@ -595,7 +607,7 @@ test('countOpenDerivedForProblem: parentId nulo retorna 0 (sem irmãs)', async (
 
   const orch = new Orchestrator(
     prismaSvc,
-    new AgentSessionManager(makeConfig()),
+    makeSessions(makeConfig()),
     makeValidation(),
     makeWorkspaces(),
     makeRealtime().svc,
@@ -917,7 +929,7 @@ test('runIteration: fatalError do runner escala a humano, grava outcome=error e 
   } as unknown as AgentRunner;
 
   const config = makeConfig();
-  const sessions = new AgentSessionManager(config);
+  const sessions = makeSessions(config);
   const realtime = makeRealtime();
   const orch = new Orchestrator(
     prisma.svc,
@@ -1025,7 +1037,7 @@ test('runIteration: diff VAZIO + dodTouched reportado -> marca o DOD (não zera)
   } as unknown as AgentRunner;
 
   const config = makeConfig();
-  const sessions = new AgentSessionManager(config);
+  const sessions = makeSessions(config);
   const realtime = makeRealtime();
   const orch = new Orchestrator(
     prisma.svc,
@@ -1136,7 +1148,7 @@ test('runIteration: requireMinArtifact ON + validação passa mas sem artefato m
   } as unknown as AgentRunner;
 
   const config = makeConfig({ requireMinArtifact: true });
-  const sessions = new AgentSessionManager(config);
+  const sessions = makeSessions(config);
   const realtime = makeRealtime();
   const orch = new Orchestrator(
     prisma.svc,
@@ -1246,7 +1258,7 @@ test('runIteration: requireMinArtifact ON + code-change COM diff -> fecha normal
   } as unknown as AgentRunner;
 
   const config = makeConfig({ requireMinArtifact: true });
-  const sessions = new AgentSessionManager(config);
+  const sessions = makeSessions(config);
   const realtime = makeRealtime();
   const orch = new Orchestrator(
     prisma.svc,

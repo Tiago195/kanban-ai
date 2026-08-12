@@ -191,6 +191,19 @@ nem os mocks/testes:
   `ValidationRunner` (não duplica I/O). Faltando o artefato, `effectivePassed`
   vira false e a iteração roteia pelo caminho de derivação/needs-human
   (`outcome=derived`). Off por default (retrocompat).
+- **Estado de runtime durável (US-ROB2)**: o `AgentSessionManager` mantém o `Map`
+  em memória como **cache quente** e, quando `AGENT_RUNTIME_PERSIST_ENABLED=true`
+  (default), espelha o estado na tabela **`AgentRuntimeState`** (Prisma):
+  `sessionId` **estável** (`== storyId`, sobrevive a restart — não usar
+  `Date.now()`), `livenessState` (`LivenessState` em `@kanban-ai/shared`:
+  starting/alive/stalled/dead) e `tokenTotals` acumulados. `start`/`setState`/
+  `abort`/`remove` persistem best-effort (fire-and-forget, guardado por flag e
+  `try/catch` — uma falha de DB **nunca** derruba o loop, só gera warning). O
+  orquestrador chama `sessions.addTokens(storyId, {input, output})` ao fim de
+  cada iteração. No boot, `reconcileOnBoot()` **lê** `AgentRuntimeState` antes de
+  re-escanear as colunas: sessões duráveis cujas stories não estão mais
+  "In Progress" são marcadas `stalled` (base do recovery por lease — US-ROB4).
+  O construtor do manager agora recebe `(config, prisma)`.
 
 Ao mudar esses contratos, mantenha este arquivo em dia.
 

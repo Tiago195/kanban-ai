@@ -190,6 +190,13 @@ export interface AppConfig {
      * Env: AGENT_REQUIRE_MIN_ARTIFACT.
      */
     requireMinArtifact: boolean;
+    /**
+     * US-ROB2 — persiste o estado de runtime da sessão (AgentRuntimeState) para
+     * sobreviver a restart. Default LIGADO (persistir é seguro e idempotente).
+     * Off = comportamento legado (só Map in-process). Env:
+     * AGENT_RUNTIME_PERSIST_ENABLED (`false` desliga).
+     */
+    runtimePersistEnabled: boolean;
   };
 }
 
@@ -281,6 +288,7 @@ export function loadConfig(): AppConfig {
       thrashWindow: num(process.env.AGENT_THRASH_WINDOW, 2),
       requireStructuredEvidence: process.env.AGENT_REQUIRE_STRUCTURED_EVIDENCE === 'true',
       requireMinArtifact: process.env.AGENT_REQUIRE_MIN_ARTIFACT === 'true',
+      runtimePersistEnabled: process.env.AGENT_RUNTIME_PERSIST_ENABLED !== 'false',
     },
   };
 }

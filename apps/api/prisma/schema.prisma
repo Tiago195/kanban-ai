@@ -276,7 +276,41 @@ model Iteration {
   @@index([cardId])
 }
 
-// Transcript persistido do chat do agent (streaming + HITL). Espelha
+/// US-ROB2/US-ROB4 — estado de runtime PERSISTIDO da sessão de agent (por story).
+/// Sobrevive a restart (ADR-0029): sessionId estável = storyId da execução.
+/// A orquestração continua in-process (SEM Redis); esta tabela é só durabilidade.
+model AgentRuntimeState {
+  /// sessionId estável (== storyId da execução). Chave natural.
+  sessionId String @id
+
+  /// Story cuja execução esta linha representa.
+  storyId String @unique
+
+  /// Snapshot serializado do estado de runtime (JSON: fase, task corrente, etc.).
+  stateJson String @default("{}")
+
+  /// Totais de tokens acumulados na sessão (JSON: { input, output }).
+  tokenTotals String @default("{\"input\":0,\"output\":0}")
+
+  /// Última mensagem de erro observada (null quando saudável).
+  lastError String?
+
+  /// Estado de vivacidade persistido (ver LivenessState em @kanban-ai/shared).
+  livenessState String @default("starting")
+
+  // ── Lease/claim (US-ROB4) ───────────────────────────────────────────────
+  /// Token do claim ativo (quem "segura" a execução). Null = livre.
+  claimLock String?
+
+  /// Instante de expiração do lease (TTL + heartbeat). Null = sem claim.
+  claimExpiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([livenessState])
+  @@index([claimExpiresAt])
+}
 // AgentChatMessage de @kanban-ai/shared. Diferente de Iteration (registro
 // minucioso lido pela próxima iteração), aqui vive a CONVERSA: chunks
 // consolidados da AI, a pergunta HITL e a RESPOSTA do humano — para reidratar
