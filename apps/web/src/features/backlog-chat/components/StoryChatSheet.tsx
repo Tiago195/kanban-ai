@@ -97,9 +97,9 @@ export function StoryChatSheet({
   } = useBacklogChat(sessionId, boardId, mainChannel);
 
   const materialize = useMutation({
-    mutationFn: (titles: string[]) => {
+    mutationFn: (tasks: { title: string; description?: string }[]) => {
       if (!storyId) return Promise.reject(new Error("sem story"));
-      return apiClient.materializeStoryTasks(storyId, titles);
+      return apiClient.materializeStoryTasks(storyId, tasks);
     },
     onSuccess: (res) => {
       showToast(`${res.cards.length} task(s) criada(s) em To Do ✅`);
@@ -158,11 +158,14 @@ export function StoryChatSheet({
   };
 
   const handleMaterialize = () => {
-    const titles = (taskProposal?.tasks ?? [])
-      .map((t) => t.title.trim())
-      .filter(Boolean);
-    if (titles.length === 0) return;
-    materialize.mutate(titles);
+    const tasks = (taskProposal?.tasks ?? [])
+      .map((t) => ({
+        title: t.title.trim(),
+        description: t.description?.trim() || undefined,
+      }))
+      .filter((t) => t.title.length > 0);
+    if (tasks.length === 0) return;
+    materialize.mutate(tasks);
   };
 
   return (

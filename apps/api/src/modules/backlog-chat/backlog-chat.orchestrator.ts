@@ -11,6 +11,7 @@ import type {
   BacklogTaskProposal,
   BacklogTaskProposalItem,
   BacklogTaskProposalPatch,
+  MaterializeStoryTaskInput,
   StoryChatSession,
 } from '@kanban-ai/shared';
 import {
@@ -1002,7 +1003,7 @@ export class BacklogChatOrchestrator implements OnModuleInit {
           boardId: session.boardId,
           type: 'task',
           title: task.title,
-          description: '',
+          description: task.description ?? '',
           parentId: s.id,
           backlogChatSessionId: sessionId,
         });
@@ -1137,11 +1138,11 @@ export class BacklogChatOrchestrator implements OnModuleInit {
    * `CardsService.create` → `maybeResumeLoopOnTaskAdded`.
    *
    * @param storyCardId id do card `type:story` que recebe as tasks.
-   * @param titles      títulos das tasks a criar (vazios são ignorados).
+   * @param tasks       tasks a criar `{ title, description? }` (títulos vazios são ignorados).
    */
   async materializeStoryTasks(
     storyCardId: string,
-    titles: string[],
+    tasks: MaterializeStoryTaskInput[],
   ): Promise<{ cards: BacklogAppliedCard[] }> {
     const story = await this.prisma.card.findUnique({
       where: { id: storyCardId },
@@ -1152,14 +1153,16 @@ export class BacklogChatOrchestrator implements OnModuleInit {
       throw new ConflictException('só é possível materializar tasks numa story');
     }
 
-    const clean = titles.map((t) => t?.trim()).filter((t): t is string => !!t);
+    const clean = (tasks ?? [])
+      .map((t) => ({ title: (t?.title ?? '').trim(), description: t?.description }))
+      .filter((t) => t.title.length > 0);
     const created: BacklogAppliedCard[] = [];
-    for (const title of clean) {
+    for (const task of clean) {
       const t = await this.cards.create({
         boardId: story.boardId,
         type: 'task',
-        title,
-        description: '',
+        title: task.title,
+        description: task.description ?? '',
         parentId: story.id,
         ...(story.backlogChatSessionId
           ? { backlogChatSessionId: story.backlogChatSessionId }

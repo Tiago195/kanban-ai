@@ -150,6 +150,6 @@ export class BacklogStoryChatController {
     @Param('storyId') storyId: string,
     @Body(new ZodValidationPipe(materializeStoryTasksSchema)) dto: MaterializeStoryTasksDto,
   ): Promise<{ cards: BacklogAppliedCard[] }> {
-    return this.orchestrator.materializeStoryTasks(storyId, dto.titles);
+    return this.orchestrator.materializeStoryTasks(storyId, dto.tasks);
   }
 }

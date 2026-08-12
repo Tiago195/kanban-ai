@@ -41,10 +41,26 @@ export type BacklogApplyDto = z.infer<typeof backlogApplySchema>;
 /**
  * Materializa (cria no board) tasks rascunhadas no chat de uma story existente,
  * como cards `type:task` filhos em To Do. Ver ADR-0026.
+ *
+ * Aceita o formato novo `tasks: [{ title, description? }]` (preserva a descrição
+ * refinada na thread) e, por retrocompatibilidade, o legado `titles: string[]`.
+ * Ambos são normalizados para uma lista de `{ title, description? }`.
  */
-export const materializeStoryTasksSchema = z.object({
-  titles: z.array(z.string().min(1)).min(1),
+const materializeTaskItemSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
 });
+export const materializeStoryTasksSchema = z
+  .object({
+    tasks: z.array(materializeTaskItemSchema).min(1).optional(),
+    titles: z.array(z.string().min(1)).min(1).optional(),
+  })
+  .refine((v) => (v.tasks?.length ?? 0) > 0 || (v.titles?.length ?? 0) > 0, {
+    message: 'informe ao menos uma task (tasks ou titles)',
+  })
+  .transform((v) => ({
+    tasks: v.tasks ?? (v.titles ?? []).map((title) => ({ title })),
+  }));
 export type MaterializeStoryTasksDto = z.infer<typeof materializeStoryTasksSchema>;
 
 /**

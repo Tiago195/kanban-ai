@@ -28,7 +28,7 @@ function fullProposal(): BacklogProposal {
         title: 'Story 1',
         description: 'd',
         points: 3,
-        tasks: [{ id: 't-0', title: 'Task A' }],
+        tasks: [{ id: 't-0', title: 'Task A', description: 'implementa a Task A' }],
       },
     ],
   };
@@ -79,6 +79,7 @@ test('apply(): carimba backlogChatSessionId em épico, story e task', async () =
   assert.equal(epicCall!.backlogChatSessionId, 'sess-1');
   assert.equal(storyCall!.backlogChatSessionId, 'sess-1');
   assert.equal(taskCall!.backlogChatSessionId, 'sess-1');
+  assert.equal(taskCall!.description, 'implementa a Task A', 'apply preserva a descrição da task');
 });
 
 test('openStorySession(): reusa a sessão original quando a story veio de backlog-chat', async () => {
@@ -189,10 +190,16 @@ test('materializeStoryTasks(): cria tasks em To Do e limpa needsHuman', async ()
     cards,
   );
 
-  const res = await orch.materializeStoryTasks('story-3', ['Task 1', '  ', 'Task 2']);
+  const res = await orch.materializeStoryTasks('story-3', [
+    { title: 'Task 1', description: 'faz o A e o B' },
+    { title: '  ' },
+    { title: 'Task 2' },
+  ]);
   assert.equal(res.cards.length, 2, 'títulos vazios são ignorados');
   assert.ok(createCalls.every((c) => c.type === 'task' && c.parentId === 'story-3'));
   assert.ok(createCalls.every((c) => c.backlogChatSessionId === 'sess-x'));
+  assert.equal(createCalls[0].description, 'faz o A e o B', 'descrição é preservada');
+  assert.equal(createCalls[1].description, '', 'sem descrição vira string vazia');
   assert.ok(updated, 'needsHuman deve ter sido limpo');
   assert.equal((updated as Record<string, unknown>).needsHuman, false);
   assert.equal((updated as Record<string, unknown>).needsHumanReason, null);
@@ -300,7 +307,10 @@ test('materializeStoryTasks() numa sessão applied: cria filhos sem tocar épico
     cards,
   );
 
-  const res = await orch.materializeStoryTasks('story-applied', ['Nova task 1', 'Nova task 2']);
+  const res = await orch.materializeStoryTasks('story-applied', [
+    { title: 'Nova task 1' },
+    { title: 'Nova task 2' },
+  ]);
   assert.equal(res.cards.length, 2);
   assert.ok(
     createCalls.every((c) => c.type === 'task'),

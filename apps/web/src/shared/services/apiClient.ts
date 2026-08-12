@@ -441,11 +441,11 @@ export const apiClient = {
    */
   materializeStoryTasks(
     storyId: string,
-    titles: string[],
+    tasks: { title: string; description?: string }[],
   ): Promise<{ cards: BacklogAppliedCard[] }> {
     return request<{ cards: BacklogAppliedCard[] }>(`/backlog-chat/story/${storyId}/tasks`, {
       method: "POST",
-      body: JSON.stringify({ titles }),
+      body: JSON.stringify({ tasks }),
     });
   },
 };

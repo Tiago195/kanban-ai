@@ -2,16 +2,6 @@
 
 <!-- Stories de correção derivadas do QA rodada 2 (2026-08-06). Prioridade: 🔴 crítico > 🟠 alto > 🟡 médio > 🟢 baixo -->
 
-- [ ] **🟠 Descrições das tasks propostas no chat são descartadas ao materializar** — descoberto 2026-08-12 (via chat da story US-176 / "Review Story do Epic EP-74")
-  - **Sintoma:** no chat da story o usuário pediu explicitamente "adicione descrição para cada uma das tasks"; a proposta (`task_proposal` version 2) veio com descrições ricas em todas as 6 tasks, e o agent respondeu que adicionou. Porém as tasks materializadas no board (TK-177..TK-182, filhas da US-176) foram criadas com `description = ''` (string vazia). Título e id vieram; a descrição foi perdida.
-  - **Causa-raiz (`apps/api/src/modules/backlog-chat/`):** o fluxo de materialização incremental de tasks do story-chat (ADR-0026) **descarta a descrição no nível do contrato**:
-    1. `backlog-chat.schema.ts` → `materializeStoryTasksSchema` aceita apenas `{ titles: string[] }` — não há campo `description`.
-    2. `backlog-chat.controller.ts` (`POST :storyId/tasks`) chama `orchestrator.materializeStoryTasks(storyId, dto.titles)` — só passa títulos.
-    3. `backlog-chat.orchestrator.ts` → `materializeStoryTasks(storyCardId, titles: string[])` faz `cards.create({ ..., description: '' })` fixo (por volta da linha 1162). A descrição da proposta nunca chega até aqui.
-  - **Bug irmão:** o apply de épico completo (`applyProposal`, `backlog-chat.orchestrator.ts` ~linha 1005) também cria as tasks com `description: ''` fixo em vez de `task.description`. Mesma perda de dado nos dois caminhos.
-  - **Correção sugerida (NÃO aplicada):** propagar `description` ponta-a-ponta — estender `materializeStoryTasksSchema` para aceitar `description` por task (ou trocar `titles` por objetos `{ title, description }`), repassar no controller, e usar `task.description ?? ''` no `cards.create` de ambos os caminhos (`materializeStoryTasks` e `applyProposal`). Atualizar os specs de story-chat/apply e o front que monta o payload de materialização.
-  - **DOD:** materializar tasks a partir de uma proposta com descrições cria os cards `type:task` com a `description` preservada (len > 0); apply de épico idem; specs cobrindo a propagação da descrição nos dois fluxos; `npm run build && npm run lint && npm test` verdes.
-
 - [ ] **🟠 Tokens de entrada/saída sempre zero no painel de custo do loop** — REINCIDENTE / não corrigido (revalidado 2026-08-12)
   - **Sintoma:** o `LoopMetricsPanel` ("📊 Custo & qualidade do loop") mostra sempre 0 em "Tokens de entrada (↑)" e "Tokens de saída (↓)". Confirmado nos dados: **todas as 401 linhas de `Iteration` têm `inputTokens`/`outputTokens = NULL`** (nunca populados) — nenhuma iteração real registrou tokens.
   - **Causa-raiz (`apps/api/src/modules/ai-engine/`):** o pipeline de tokens depende **exclusivamente** do agent auto-reportar os tokens no bloco `KANBAN_RESULT`, o que nunca acontece:
@@ -49,14 +39,17 @@
 
 - [ ] tentar disponibilizar tudo em docker
 
-- [ ] Gravar um video de como usar a ferramenta
-
 
 # in progress
 
 
 # done
 <!-- apenas ultimas 2 tarefas, para n poluir o arquivo -->
+
+- [x] **🟠 Descrições das tasks propostas no chat são descartadas ao materializar** — **CONCLUÍDO 2026-08-12 (build+lint+test verdes; 155/155 specs)**
+  - **Causa-raiz:** o contrato `materializeStoryTasksSchema` só aceitava `{ titles: string[] }`; controller/orchestrator repassavam só títulos e `cards.create` gravava `description: ''` fixo — tanto no `materializeStoryTasks` (incremental) quanto no `applyProposal` (apply de épico).
+  - **Correção aplicada:** `description` propagada ponta-a-ponta. `packages/shared` ganhou `MaterializeStoryTaskInput` e `BacklogProposalTask.description?`. `materializeStoryTasksSchema` aceita `tasks: [{title, description?}]` (novo) OU `titles: string[]` (legado, normalizado via transform). Controller passa `dto.tasks`; `materializeStoryTasks(storyId, tasks)` e `applyProposal` usam `task.description ?? ''`. Front (`apiClient.materializeStoryTasks` + `StoryChatSheet.handleMaterialize`) envia `{title, description}`. Specs de story-chat cobrindo preservação nos dois fluxos.
+  - **DOD atingido:** materializar/aplicar tasks com descrição preserva `description` (len > 0); specs cobrindo os dois caminhos; `npm run build && npm run lint && npm test` verdes.
 
 - [x] **🔴 Deadlock ao FECHAR o DOD: iterações de verificação (diff vazio) puniam o `dodTouched`** — **CONCLUÍDO 2026-08-11 (build+lint+test verdes; 75/75 specs)**
   - **Causa-raiz (`orchestrator.ts`):** (1) `emptyWorktreeBypass` tratava marcar `dodTouched` como "reivindicação de código novo" e **zerava** o DOD quando o diff da iteração estava vazio — mas fechar itens de DOD de VERIFICAÇÃO (build/lint/test verde, tipo exportado) é legítimo e nunca gera diff; (2) o cap de improdutivas contava qualquer iteração `implementation` sem diff como improdutiva, sem distinguir "não escreveu o código que deveria" de "está fechando DOD de código já escrito". Combinados → deadlock de re-escalação.

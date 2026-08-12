@@ -183,6 +183,8 @@ export interface BacklogProposalTask {
   /** Id estável da task dentro da story; gerado/preservado ao persistir. */
   id: string;
   title: string;
+  /** Descrição da task; preservada ao materializar/aplicar (vira o corpo do card). */
+  description?: string;
 }
 
 /**
@@ -236,6 +238,19 @@ export interface BacklogTaskProposal {
 export interface BacklogTaskProposalPatch {
   baseVersion: number;
   ops: BacklogPatchOp[];
+}
+
+/**
+ * Payload de uma task ao **materializar** (criar no board) tasks rascunhadas no
+ * chat da story (ADR-0026). Carrega `title` e a `description` refinada na thread
+ * `task:<id>` — a descrição é preservada no card `type:task` criado. Ver o bug
+ * "descricoes das tasks propostas no chat sao descartadas ao materializar".
+ */
+export interface MaterializeStoryTaskInput {
+  /** Título curto e acionável (vira o título do card). */
+  title: string;
+  /** Detalhamento opcional (vira a `description` do card). */
+  description?: string;
 }
 
 
