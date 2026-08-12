@@ -41,7 +41,7 @@ export type ExecState =
 export type IterationPhase = 'reproduce' | 'analysis' | 'implementation' | 'validation';
 
 /** Perfis de loop embutidos; labels sem perfil próprio usam `__default`. */
-export type LoopProfileId = 'feature' | 'bug' | 'refactor' | '__default';
+export type LoopProfileId = 'feature' | 'bug' | 'refactor' | 'orchestrator' | '__default';
 
 /**
  * Estratégia de validação de um loop profile.

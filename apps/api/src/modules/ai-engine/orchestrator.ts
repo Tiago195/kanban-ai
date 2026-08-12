@@ -955,6 +955,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // código). `done` com todo o DOD fechado é conclusão legítima (tratada em
     // `canFinish` adiante) e não deve alarmar.
     const claimsNewCodeWithoutDiff =
+      profile.toolset !== 'board-only' &&
       this.runner.id !== 'mock' &&
       phase === 'implementation' &&
       iterationDiff.trim().length === 0 &&
@@ -966,6 +967,20 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
           'está VAZIO nesta iteração. A reivindicação de mudança em fluxos foi ' +
           'IGNORADA — marque os itens de DOD que você validou; para fechar a task, ' +
           'edite de fato os arquivos ou conclua o DOD item a item.',
+      );
+    }
+
+    // US-COLAB2 / ADR-0031: a restrição do board-manager é COOPERATIVA (imposta
+    // por prompt, não por sandbox). Se um profile `board-only` produziu diff
+    // não-vazio, ele desobedeceu ("não coda") — logamos como warning para
+    // auditoria; o enforcement real (allow/deny de tools) fica para runners
+    // futuros.
+    if (profile.toolset === 'board-only' && iterationDiff.trim().length > 0) {
+      await this.log(
+        taskId,
+        'aviso: o perfil ORQUESTRADOR (board-only) NÃO deveria editar arquivos, mas o ' +
+          'git diff do repo-alvo veio NÃO-VAZIO nesta iteração. A restrição é cooperativa ' +
+          '(imposta por prompt) — o board-manager deve apenas criar/atribuir/linkar cards.',
       );
     }
 
@@ -3008,54 +3023,87 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // colisão entre stories concorrentes é evitada por SERIALIZAÇÃO no engine
     // (uma story por aiProject), então o agent pode e deve editar os arquivos
     // reais do projeto no diretório atual.
-    lines.push('');
-    lines.push('## Escopo e diretório de trabalho (LEIA COM ATENÇÃO)');
-    if (workdir) {
+    //
+    // US-COLAB2 / ADR-0031: quando o profile é `board-only` (orquestrador), a
+    // seção de escopo "edite os arquivos" é SUBSTITUÍDA por um mandato de board
+    // manager — o agent NÃO coda; ele organiza o board via ferramentas MCP.
+    if (profile.toolset === 'board-only') {
+      lines.push('');
+      lines.push('## 🧭 Você é o ORQUESTRADOR do board (board manager)');
       lines.push(
-        `- Seu diretório de trabalho (\`cwd\`) é \`${workdir}\` — é o repositório-alvo, na branch ` +
-          'que já está aberta. **Faça TODAS as mudanças AQUI, editando os arquivos reais do projeto.**',
+        '- Seu trabalho é ORGANIZAR o board: criar stories/tasks, atribuí-las aos ' +
+          'agents certos e linkar dependências — via as ferramentas MCP do kanban-ai.',
       );
       lines.push(
-        '- Trabalhe relativo ao `cwd` (ex.: `./ping.js`, `test/x.test.js`). Não rode `cd` para ' +
-          'outro caminho nem edite arquivos fora deste diretório. As mudanças devem aparecer no ' +
-          '`git diff` do projeto — se você não editar arquivos de fato, o loop não converge.',
+        '- ❌ Você **NÃO PODE editar, criar ou apagar NENHUM arquivo** do ' +
+          'repositório-alvo. Você não coda. Se algo precisa de código, CRIE uma task ' +
+          'e atribua a um agent codador (feature/bug/refactor).',
+      );
+      lines.push(
+        '- ❌ NÃO rode comandos de shell que alterem o filesystem. Comandos de LEITURA ' +
+          'para entender o board são permitidos.',
+      );
+      lines.push(
+        '- ✅ Ferramentas permitidas: criar card (task/story), atribuir assignee, ' +
+          'linkar dependência, mover card entre colunas do board.',
+      );
+      lines.push(
+        '- Tasks só podem ser criadas nas colunas **Backlog** ou **To Do** — respeite ' +
+          'essa regra do board ao decompor o escopo.',
       );
     } else {
+      lines.push('');
+      lines.push('## Escopo e diretório de trabalho (LEIA COM ATENÇÃO)');
+      if (workdir) {
+        lines.push(
+          `- Seu diretório de trabalho (\`cwd\`) é \`${workdir}\` — é o repositório-alvo, na branch ` +
+            'que já está aberta. **Faça TODAS as mudanças AQUI, editando os arquivos reais do projeto.**',
+        );
+        lines.push(
+          '- Trabalhe relativo ao `cwd` (ex.: `./ping.js`, `test/x.test.js`). Não rode `cd` para ' +
+            'outro caminho nem edite arquivos fora deste diretório. As mudanças devem aparecer no ' +
+            '`git diff` do projeto — se você não editar arquivos de fato, o loop não converge.',
+        );
+      } else {
+        lines.push(
+          '- Trabalhe apenas no diretório atual (`cwd`). Não crie arquivos fora dele e ' +
+            'não invente estrutura. Se faltar contexto, faça UMA pergunta objetiva.',
+        );
+      }
       lines.push(
-        '- Trabalhe apenas no diretório atual (`cwd`). Não crie arquivos fora dele e ' +
-          'não invente estrutura. Se faltar contexto, faça UMA pergunta objetiva.',
+        '- NUNCA crie features, arquivos ou pastas no repositório do próprio kanban-ai ' +
+          '(este é a ferramenta, não o produto). Entregue estritamente o que a task pede, no projeto-alvo.',
       );
     }
-    lines.push(
-      '- NUNCA crie features, arquivos ou pastas no repositório do próprio kanban-ai ' +
-        '(este é a ferramenta, não o produto). Entregue estritamente o que a task pede, no projeto-alvo.',
-    );
 
     // Proibição de operações git que ALTERAM estado. O agent deve deixar as
     // mudanças no working tree, NÃO commitadas — o engine não cria branch nem
     // commit; a integração é feita depois pelo humano. Se o agent commitar/trocar
     // de branch, o `git diff` que o gate de validação inspeciona fica
-    // dessincronizado do trabalho real e o loop diverge.
-    lines.push('');
-    lines.push('## ❌ PROIBIDO — operações de git que alteram estado (NÃO NEGOCIÁVEL)');
-    lines.push(
-      '- Você **NÃO PODE** rodar `git commit`, `git add`, `git branch`, `git checkout`, ' +
-        '`git switch`, `git merge`, `git rebase`, `git reset`, `git stash`, `git push`, ' +
-        '`git worktree` ou QUALQUER comando git que altere o estado do repositório.',
-    );
-    lines.push(
-      '- **Apenas EDITE os arquivos** no diretório atual (leia/escreva/crie arquivos normalmente). ' +
-        'Deixe as mudanças no working tree, NÃO commitadas — a integração é feita depois por um humano.',
-    );
-    lines.push(
-      '- Se você commitar ou criar/trocar branch, o `git diff` que o gate de validação inspeciona ' +
-        'fica dessincronizado do seu trabalho real — os arquivos que você declara em `affectedFlows` ' +
-        'podem aparecer como "inexistentes" e o sistema deriva tasks de correção em loop.',
-    );
-    lines.push(
-      '- Comandos git de LEITURA (`git status`, `git diff`, `git log`) são permitidos apenas ' +
-        'para inspeção — nunca comandos que mudem estado.',
-    );
+    // dessincronizado do trabalho real e o loop diverge. (Para o board-manager
+    // essa seção não se aplica — ele não toca o working tree.)
+    if (profile.toolset !== 'board-only') {
+      lines.push('');
+      lines.push('## ❌ PROIBIDO — operações de git que alteram estado (NÃO NEGOCIÁVEL)');
+      lines.push(
+        '- Você **NÃO PODE** rodar `git commit`, `git add`, `git branch`, `git checkout`, ' +
+          '`git switch`, `git merge`, `git rebase`, `git reset`, `git stash`, `git push`, ' +
+          '`git worktree` ou QUALQUER comando git que altere o estado do repositório.',
+      );
+      lines.push(
+        '- **Apenas EDITE os arquivos** no diretório atual (leia/escreva/crie arquivos normalmente). ' +
+          'Deixe as mudanças no working tree, NÃO commitadas — a integração é feita depois por um humano.',
+      );
+      lines.push(
+        '- Se você commitar ou criar/trocar branch, o `git diff` que o gate de validação inspeciona ' +
+          'fica dessincronizado do seu trabalho real — os arquivos que você declara em `affectedFlows` ' +
+          'podem aparecer como "inexistentes" e o sistema deriva tasks de correção em loop.',
+      );
+      lines.push(
+        '- Comandos git de LEITURA (`git status`, `git diff`, `git log`) são permitidos apenas ' +
+          'para inspeção — nunca comandos que mudem estado.',
+      );
+    }
 
     // DOD real — o ÚNICO checklist do v1. É a AI quem marca os ids concluídos.
     lines.push('');

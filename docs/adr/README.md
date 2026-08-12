@@ -33,5 +33,6 @@ Registro das decisões de arquitetura da fundação. Formato leve
 | [0028](0028-completion-gate-minimum-artifact.md) | Gate de completude por artefato mínimo verificável (`done` não fecha por "falso sucesso"; estende `isVerifiableEvidence` por `ResultClass`) | Proposto |
 | [0029](0029-agent-runtime-state-persisted.md) | Estado de runtime do agent persistido (`AgentRuntimeState` sobrevive a restart; colunas de lease p/ stale-claim) | Proposto |
 | [0030](0030-multi-tenant-nullable-column.md) | Multi-tenant por coluna `tenantId` nullable (isolamento lógico retrocompatível; ecoa escopo da memória viva) | Aceito |
+| [0031](0031-orchestrator-loop-profile.md) | Loop profile "orquestrador" (board-manager) com toolset `board-only` restrito por prompt (cria/atribui/linka cards, NUNCA edita arquivos; gate de `git diff` vazio neutralizado) | Aceito |
 | [0032](0032-wakeup-queue-persistent-idempotent.md) | Wakeup queue persistente, idempotente e com coalescing (`WakeupQueue` no Postgres; índice único parcial; executor in-process, sem Redis) | Aceito |
 | [0033](0033-mention-delegation-backlog-chat.md) | `@mention` delegation no backlog-chat (`parseMentions` + `MentionDirective`; menção cria e atribui task via `CardsService`, sem schema novo) | Aceito |
