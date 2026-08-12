@@ -26,7 +26,9 @@ memory/
 ├── memory-events.service.spec.ts# Testes EP-81 (spy sobre RealtimeService)
 ├── memory.controller.ts         # EP-82: control plane REST /memory/* (consumido pelo MCP)
 ├── memory.schema.ts             # EP-82: schemas zod da borda HTTP
-└── memory.module.ts             # @Global (controller + seis servicos)
+├── memory-policy.service.ts     # EP-83: identidade estavel + escopo + enforcement (puro)
+├── memory-policy.service.spec.ts# Testes EP-83 (servico puro, sem I/O)
+└── memory.module.ts             # @Global (controller + sete servicos)
 ```
 
 ## Contrato (Camada 1)
@@ -185,6 +187,25 @@ memory/
 - **Lado MCP:** `apps/mcp/src/tools/memory.ts` expõe uma tool por rota
   (`memory_read/write/acquire/heartbeat/release/resolve`). Os erros 4xx/5xx viram
   texto acionável (`mapping.ts`). O MCP não fala com Postgres — só chama estas rotas.
+
+### Contrato (EP-83 — identidade estável + escopo + enforcement)
+
+- `MemoryPolicyService` é **puro** (sem I/O) e **@Global** (via `MemoryModule`):
+  concentra as três decisões de governança da colmeia sem reimplementar
+  git/lock/review.
+  - `agentIdFor({sessionId, storyKey?})` (US-210) → `ai:<sessao>` — holder/autor
+    **estável** dentro da execução da story (sessão fixa); `storyKey` só audita.
+  - `scopeFor(module)` (US-211) → prefixo `modules/<modulo>/` (o escopo de
+    escrita do agent). O `module` da story é resolvido por projeto (label/campo).
+  - `canRead()` (US-212) → sempre `true`: **leitura é global**, não passa por
+    lock nem escopo.
+  - `classifyWrite({scopePrefix, path})` (US-212) → `in-scope` (aplica direto) ou
+    `out-of-scope` (→ REVIEW, ponte EP-80). `MEMORY_WRITE_SCOPE_ENFORCED=false`
+    desliga o enforcement por projeto (tudo vira `in-scope`).
+- **Ponto de enforcement:** `POST /memory/write` aceita `module?`; quando presente
+  e a escrita é `out-of-scope`, o controller **NÃO** commita — chama
+  `MemoryReviewService.enterReview({reason:'out-of-scope'})` e responde o
+  `MemoryReviewItem`. Sem `module`, escreve direto (chamadas internas já validadas).
 
 1. **Idempotência total** — rodar `provision()` N vezes converge para o MESMO
    estado (bare repo com branch `main` materializada). O commit de bootstrap é

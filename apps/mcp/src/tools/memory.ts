@@ -34,14 +34,16 @@ export function registerMemoryTools(server: McpServer, client: KanbanClient): vo
     'Escreve/atualiza um neurônio (POST /memory/write) com escrita otimista. EXIGE ' +
       '`baseCommit` (o `headCommit` que você leu em `memory_read`/`memory_acquire`): a API ' +
       'faz compare-and-swap — se o HEAD tiver avançado, tenta rebase e pode falhar com 409 ' +
-      '(releia e reescreva). Escreva DIRETO apenas nos neurônios do módulo da sua story; ' +
-      'proposta fora do escopo pode ir para REVIEW. `sessionId` identifica seu ramo efêmero.',
+      '(releia e reescreva). Informe `module` (o módulo da sua story) para ativar o ' +
+      'enforcement de escopo: escrita fora de `modules/<module>/` NÃO aplica direto — vira ' +
+      'proposta em REVIEW (a resposta será o item de REVIEW). `sessionId` identifica seu ramo efêmero.',
     {
       path: z.string().min(1),
       content: z.string(),
       sessionId: z.string().min(1),
       baseCommit: z.string().min(1),
       message: z.string().min(1),
+      module: z.string().min(1).optional(),
     },
     async (args) => ok(await client.post('/memory/write', args)),
   );

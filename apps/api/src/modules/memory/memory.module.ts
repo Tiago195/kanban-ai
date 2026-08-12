@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { MemoryController } from './memory.controller';
 import { MemoryEventsService } from './memory-events.service';
+import { MemoryPolicyService } from './memory-policy.service';
 import { MemoryGitService } from './memory-git.service';
 import { MemoryIndexService } from './memory-index.service';
 import { MemoryLockService } from './memory-lock.service';
@@ -35,6 +36,7 @@ import { MemoryWriteService } from './memory-write.service';
     MemoryLockService,
     MemoryWriteService,
     MemoryReviewService,
+    MemoryPolicyService,
   ],
   exports: [
     MemoryGitService,
@@ -43,6 +45,7 @@ import { MemoryWriteService } from './memory-write.service';
     MemoryLockService,
     MemoryWriteService,
     MemoryReviewService,
+    MemoryPolicyService,
   ],
 })
 export class MemoryModule {}

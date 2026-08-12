@@ -3,6 +3,7 @@ import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { MemoryGitService } from './memory-git.service';
 import { MemoryLockService } from './memory-lock.service';
+import { MemoryPolicyService } from './memory-policy.service';
 import { MemoryReviewService } from './memory-review.service';
 import { MemoryWriteService } from './memory-write.service';
 import {
@@ -34,6 +35,7 @@ export class MemoryController {
     private readonly write: MemoryWriteService,
     private readonly lock: MemoryLockService,
     private readonly review: MemoryReviewService,
+    private readonly policy: MemoryPolicyService,
   ) {}
 
   /**
@@ -53,10 +55,29 @@ export class MemoryController {
     return { path: query.path, content, headCommit };
   }
 
-  /** Escrita otimista (US-207) — delega ao compare-and-swap da EP-79. */
+  /**
+   * Escrita otimista (US-207) — delega ao compare-and-swap da EP-79. Quando
+   * `module` é informado (EP-83/US-211), aplica o enforcement de escopo (US-212):
+   * fora do escopo do agent a escrita NÃO aplica direto — vira proposta em
+   * REVIEW (ponte EP-80) e a resposta é o `MemoryReviewItem`.
+   */
   @Post('write')
   @UsePipes(new ZodValidationPipe(memoryWriteSchema))
   write_(@Body() dto: MemoryWriteDto) {
+    if (dto.module) {
+      const scopePrefix = this.policy.scopeFor(dto.module);
+      const scope = this.policy.classifyWrite({ scopePrefix, path: dto.path });
+      if (scope === 'out-of-scope') {
+        const holder = this.policy.agentIdFor({ sessionId: dto.sessionId });
+        return this.review.enterReview({
+          path: dto.path,
+          reason: 'out-of-scope',
+          sessionId: dto.sessionId,
+          holder,
+          baseCommit: dto.baseCommit,
+        });
+      }
+    }
     return this.write.commit(dto);
   }
 

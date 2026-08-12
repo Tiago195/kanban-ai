@@ -26,6 +26,13 @@ export const memoryWriteSchema = z.object({
   sessionId: z.string().min(1),
   baseCommit: z.string().min(1),
   message: z.string().min(1),
+  /**
+   * Módulo da story do autor (EP-83/US-211). Quando presente, ativa o
+   * enforcement de escopo: escrita fora de `modules/<module>/` NÃO aplica direto
+   * — vira proposta em REVIEW (US-212). Omitir preserva o comportamento anterior
+   * (escrita direta), útil para chamadas internas já validadas.
+   */
+  module: z.string().min(1).optional(),
 });
 export type MemoryWriteDto = z.infer<typeof memoryWriteSchema>;
 
