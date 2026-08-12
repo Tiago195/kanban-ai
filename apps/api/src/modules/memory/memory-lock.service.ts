@@ -131,7 +131,8 @@ export class MemoryLockService {
   /**
    * US-193 — Varredura de expiração: libera TODOS os leases vencidos (auto-release
    * das sessões mortas). Retorna quantos foram liberados. Pensado para ser
-   * chamado por um tick periódico (o agendamento vive fora — EP-85/infra).
+   * chamado por um tick periódico (o agendamento vive em `MemorySchedulerService`,
+   * EP-B, no mesmo módulo).
    */
   async expireStale(nowMs = Date.now()): Promise<number> {
     const stale = await this.prisma.memoryIndex.findMany({

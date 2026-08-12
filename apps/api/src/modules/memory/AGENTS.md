@@ -32,7 +32,9 @@ memory/
 ├── memory-bootstrap.service.spec.ts# Testes EP-84 (deteccao/mapeamento/semente puros)
 ├── memory-gc.service.ts         # EP-85: GC (stale/arquivo, sumarizacao, poda de ramos)
 ├── memory-gc.service.spec.ts    # Testes EP-85 (git real + prisma fake in-memory)
-└── memory.module.ts             # @Global (controller + nove servicos)
+├── memory-scheduler.service.ts  # EP-B: tick periodico (expireStale + GC) via setInterval
+├── memory-scheduler.service.spec.ts # Testes EP-B (ticks chamados direto, sem timer real)
+└── memory.module.ts             # @Global (controller + servicos)
 ```
 
 ## Contrato (Camada 1)
@@ -192,6 +194,28 @@ memory/
   (`memory_read/write/acquire/heartbeat/release/resolve`). Os erros 4xx/5xx viram
   texto acionável (`mapping.ts`). O MCP não fala com Postgres — só chama estas rotas.
 
+### Contrato (EP-C / US-C2 — AUTH + identidade/escopo por token)
+
+Abre o control plane a agents **externos** com segurança (ver
+[docs/how-to-plug-an-agent-into-the-hive.md](../../../../../docs/how-to-plug-an-agent-into-the-hive.md)).
+
+- `MemoryAuthGuard` (`@UseGuards` no `MemoryController`, provider em
+  `memory.module.ts`) valida `Authorization: Bearer <token>` contra o registro
+  `MemoryTokenRegistry` (parseia a env `MEMORY_API_TOKENS`).
+- **Formato** de `MEMORY_API_TOKENS`: csv de `token:agentId:scope` (agentId pode
+  conter `:`, ex.: `ai:claude-1`; `scope=*` → GLOBAL). Ex.:
+  `MEMORY_API_TOKENS=tok-abc:ai:claude-1:memory,tok-xyz:ai:cursor-2:*`.
+- **Identidade do TOKEN tem precedência:** quando autenticado, `sessionId`
+  (derivado do `agentId`, sem o prefixo `ai:`), `holder` e o `module` de
+  enforcement vêm do **token**, NÃO do body — fecha o buraco de "escrever como
+  qualquer sessão". Escrita fora do `scope` do token → **REVIEW** (EP-80).
+- **Retrocompat:** `MEMORY_API_TOKENS` ausente/vazia → auth **desligada** (dev
+  local): o guard deixa passar e o controller cai no comportamento antigo baseado
+  no body (o loop engine interno segue funcionando). Com auth ligada, requisição
+  sem token válido → `401`.
+- Arquivos: `memory-auth.tokens.ts` (registro puro), `memory-auth.guard.ts`
+  (guard + `MEMORY_AGENT_KEY`), specs `memory-auth.{tokens,guard,controller}.spec.ts`.
+
 ### Contrato (EP-83 — identidade estável + escopo + enforcement)
 
 - `MemoryPolicyService` é **puro** (sem I/O) e **@Global** (via `MemoryModule`):
@@ -263,16 +287,35 @@ memory/
   `/memory/gc/prune-branches`; tools MCP `memory_gc_sweep_stale`,
   `memory_gc_summarize`, `memory_gc_prune_branches`.
 
+### Contrato (EP-B — scheduler dos jobs de manutenção)
+
+- `MemorySchedulerService` (**provider**, não exportado) é o **tick periódico**
+  que dispara os jobs de manutenção da colmeia — os métodos já existiam, mas nada
+  os acionava em cadência. Fica DENTRO deste módulo (ADR-0027, EP-B).
+- **Sem `@nestjs/schedule`**: usa `setInterval`/`clearInterval` puros ligados a
+  `OnModuleInit`/`OnModuleDestroy`. Os timers usam `unref()` para não segurar o
+  event loop no shutdown.
+- **Defensivo:** cada job roda em `try/catch` próprio — uma exceção vira
+  `logger.warn` e NUNCA derruba o processo nem para o scheduler.
+- Ticks públicos (chamáveis direto pelos specs, sem timer real):
+  - `sweepLocks()` — chama `MemoryLockService.expireStale()` a cada
+    `lockSweepIntervalMs` (auto-release de leases vencidos).
+  - `runGc()` — a cada `gcIntervalMs`, com **guard de reentrância** (`gcRunning`)
+    que dá skip se o ciclo anterior ainda roda. Dispara só os jobs SEM `repoPath`/
+    `neuronPath` — hoje `MemoryGcService.pruneEphemeralBranches()`. `sweepStale`/
+    `summarizeHistory` precisam de um alvo não conhecido globalmente e ficam de
+    fora até um repo-alvo global ser configurado.
+- **Envs** (`config.memory`, ver `.env.example` e `config.ts`):
+  - `MEMORY_SCHEDULER_ENABLED` (default `true`; `'false'` desliga tudo).
+  - `MEMORY_LOCK_SWEEP_INTERVAL_MS` (default `30000`).
+  - `MEMORY_GC_INTERVAL_MS` (default `3600000` = 1h).
+
 ## Fora de escopo (NÃO implementar aqui ainda)
 
 - **Resolução de conflito** de merge — o **mecanismo** (transição para `REVIEW`,
   montagem do `MemoryConflict`, arbitragem via `MemoryReviewService.resolve`) já
   vive aqui (EP-80) e sua **emissão** no WS já vive aqui (EP-81). O que segue
   fora: a **política** de quem PODE arbitrar.
-- **Agendamento periódico** (tick/cron) dos jobs de GC (`sweepStale`,
-  `summarizeHistory`, `pruneEphemeralBranches`) e do `expireStale` de locks — os
-  métodos existem e são chamáveis; **quem os dispara periodicamente vive fora**
-  (infra/loop engine).
 
 ## O que NÃO mexer
 

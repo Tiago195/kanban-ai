@@ -29,6 +29,25 @@ export interface AppConfig {
      * cwd da API). A validação no boot garante que esteja configurado/válido.
      */
     gitDir: string;
+    /**
+     * EP-B (ADR-0027) — liga o `MemorySchedulerService`, que dispara em cadência
+     * os jobs de manutenção da colmeia (`expireStale` de locks + GC). Lido de
+     * `MEMORY_SCHEDULER_ENABLED`. Default `true`; `'false'` desliga TODOS os
+     * timers (nada é agendado no boot).
+     */
+    schedulerEnabled: boolean;
+    /**
+     * EP-B — intervalo (ms) do tick que varre e auto-libera leases vencidos
+     * (`MemoryLockService.expireStale`). Lido de `MEMORY_LOCK_SWEEP_INTERVAL_MS`.
+     * Default `30000` (30s).
+     */
+    lockSweepIntervalMs: number;
+    /**
+     * EP-B — intervalo (ms) do job de garbage collection da memória
+     * (`MemoryGcService`). Lido de `MEMORY_GC_INTERVAL_MS`. Default `3600000`
+     * (1h).
+     */
+    gcIntervalMs: number;
   };
   agent: {
     defaultModel: string;
@@ -214,6 +233,9 @@ export function loadConfig(): AppConfig {
     databaseUrl: process.env.DATABASE_URL ?? '',
     memory: {
       gitDir: resolveMemoryGitDir(process.env.MEMORY_GIT_DIR),
+      schedulerEnabled: process.env.MEMORY_SCHEDULER_ENABLED !== 'false',
+      lockSweepIntervalMs: num(process.env.MEMORY_LOCK_SWEEP_INTERVAL_MS, 30_000),
+      gcIntervalMs: num(process.env.MEMORY_GC_INTERVAL_MS, 3_600_000),
     },
     agent: {
       defaultModel: process.env.AGENT_DEFAULT_MODEL ?? 'opus',

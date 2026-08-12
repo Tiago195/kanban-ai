@@ -83,3 +83,56 @@ test('loadConfig: falha cedo quando MEMORY_GIT_DIR está vazio', () => {
     else process.env.MEMORY_GIT_DIR = prev;
   }
 });
+
+// --- EP-B: scheduler dos jobs de manutenção da memória (ADR-0027) ---
+
+function withEnv(key: string, value: string | undefined, fn: () => void): void {
+  const prev = process.env[key];
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+  try {
+    fn();
+  } finally {
+    if (prev === undefined) delete process.env[key];
+    else process.env[key] = prev;
+  }
+}
+
+test('loadConfig: scheduler da memória usa defaults quando envs ausentes', () => {
+  withEnv('MEMORY_SCHEDULER_ENABLED', undefined, () =>
+    withEnv('MEMORY_LOCK_SWEEP_INTERVAL_MS', undefined, () =>
+      withEnv('MEMORY_GC_INTERVAL_MS', undefined, () => {
+        const { memory } = loadConfig();
+        assert.equal(memory.schedulerEnabled, true);
+        assert.equal(memory.lockSweepIntervalMs, 30_000);
+        assert.equal(memory.gcIntervalMs, 3_600_000);
+      }),
+    ),
+  );
+});
+
+test('loadConfig: MEMORY_SCHEDULER_ENABLED=false desliga o scheduler', () => {
+  withEnv('MEMORY_SCHEDULER_ENABLED', 'false', () => {
+    assert.equal(loadConfig().memory.schedulerEnabled, false);
+  });
+});
+
+test('loadConfig: intervalos do scheduler respeitam override via env', () => {
+  withEnv('MEMORY_LOCK_SWEEP_INTERVAL_MS', '15000', () =>
+    withEnv('MEMORY_GC_INTERVAL_MS', '600000', () => {
+      const { memory } = loadConfig();
+      assert.equal(memory.lockSweepIntervalMs, 15_000);
+      assert.equal(memory.gcIntervalMs, 600_000);
+    }),
+  );
+});
+
+test('loadConfig: intervalos inválidos caem no default', () => {
+  withEnv('MEMORY_LOCK_SWEEP_INTERVAL_MS', 'abc', () =>
+    withEnv('MEMORY_GC_INTERVAL_MS', 'not-a-number', () => {
+      const { memory } = loadConfig();
+      assert.equal(memory.lockSweepIntervalMs, 30_000);
+      assert.equal(memory.gcIntervalMs, 3_600_000);
+    }),
+  );
+});

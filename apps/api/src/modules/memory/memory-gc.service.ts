@@ -29,8 +29,8 @@ export interface GcStaleResult {
  * - **US-217** `pruneEphemeralBranches`: poda ramos `mem/ai/*` órfãos após merge/
  *   expiração de lease. Ramo não é conteúdo estável; descartá-lo não perde nada.
  *
- * **Fora de escopo aqui:** o AGENDAMENTO periódico (tick/cron) que chama estes
- * métodos — a orquestração vive fora do módulo (infra/loop engine).
+ * **Agendamento:** o tick periódico que chama estes métodos vive em
+ * `MemorySchedulerService` (EP-B), no MESMO módulo.
  */
 @Injectable()
 export class MemoryGcService {
