@@ -24,7 +24,9 @@ memory/
 ├── memory-review.service.spec.ts# Testes EP-80 (git real + prisma fake in-memory)
 ├── memory-events.service.ts     # EP-81: fachada de broadcast tipado dos eventos memory.*
 ├── memory-events.service.spec.ts# Testes EP-81 (spy sobre RealtimeService)
-└── memory.module.ts             # @Global (exporta os seis servicos)
+├── memory.controller.ts         # EP-82: control plane REST /memory/* (consumido pelo MCP)
+├── memory.schema.ts             # EP-82: schemas zod da borda HTTP
+└── memory.module.ts             # @Global (controller + seis servicos)
 ```
 
 ## Contrato (Camada 1)
@@ -162,7 +164,27 @@ memory/
   query key `queryKeys.memory(path?)`. Os handlers ficam **antes** do guard
   `if (!boardId) return;` porque a memória é **global** (não pertence a um board).
 
-## Invariantes
+### Contrato (EP-82 — control plane REST `/memory/*` consumido pelo MCP)
+
+- `MemoryController` (`@Controller('memory')`) expõe o **segundo plano de
+  controle** (ADR-0020): o canal pelo qual os agents autônomos leem/escrevem a
+  colmeia via MCP. É uma **ponte fina** — zero regra de negócio; só valida a
+  borda (zod, `memory.schema.ts`) e delega aos serviços.
+- Rotas:
+  - `GET /memory/read?path=` (US-207) → `{path, content, headCommit}`. Leitura
+    **global**; `headCommit` = projeção do índice se houver, senão `resolveHead()`
+    — é o `baseCommit` a repassar num `write` (mesma âncora do CAS).
+  - `POST /memory/write` (US-207) → delega a `MemoryWriteService.commit` (CAS
+    EP-79). Exige `baseCommit`.
+  - `POST /memory/acquire` (US-208) → `MemoryLockService.acquire`, retorna
+    `{baseCommit, leaseId, expiresAt}`.
+  - `POST /memory/heartbeat` (US-208) → renova TTL, retorna `{expiresAt}`.
+  - `POST /memory/release` (US-208) → `MemoryLockService.release` (dispara merge).
+  - `POST /memory/resolve` (US-209) → `MemoryReviewService.resolve` (arbitragem
+    EP-80; sem `content` = descartar, com `content` = aceitar).
+- **Lado MCP:** `apps/mcp/src/tools/memory.ts` expõe uma tool por rota
+  (`memory_read/write/acquire/heartbeat/release/resolve`). Os erros 4xx/5xx viram
+  texto acionável (`mapping.ts`). O MCP não fala com Postgres — só chama estas rotas.
 
 1. **Idempotência total** — rodar `provision()` N vezes converge para o MESMO
    estado (bare repo com branch `main` materializada). O commit de bootstrap é

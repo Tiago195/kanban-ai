@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { MemoryController } from './memory.controller';
 import { MemoryEventsService } from './memory-events.service';
 import { MemoryGitService } from './memory-git.service';
 import { MemoryIndexService } from './memory-index.service';
@@ -26,6 +27,7 @@ import { MemoryWriteService } from './memory-write.service';
  */
 @Global()
 @Module({
+  controllers: [MemoryController],
   providers: [
     MemoryGitService,
     MemoryIndexService,

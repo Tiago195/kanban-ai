@@ -28,7 +28,7 @@ apps/mcp/src/
 ├── client.ts      # cliente HTTP tipado da API + tradução de erro
 ├── mapping.ts     # McpToolError + erros acionáveis
 ├── streaming.ts   # WS /ws → notifications/resources/updated (chat de tasks)
-├── tools/         # 1 arquivo por grupo (board, cards, loop, context, …)
+├── tools/         # 1 arquivo por grupo (board, cards, loop, context, memory, …)
 │   └── util.ts    # registerTool() + ok()/fail()
 └── resources/     # board/card como MCP resources (read-only)
 ```
