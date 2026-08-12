@@ -28,7 +28,9 @@ memory/
 ├── memory.schema.ts             # EP-82: schemas zod da borda HTTP
 ├── memory-policy.service.ts     # EP-83: identidade estavel + escopo + enforcement (puro)
 ├── memory-policy.service.spec.ts# Testes EP-83 (servico puro, sem I/O)
-└── memory.module.ts             # @Global (controller + sete servicos)
+├── memory-bootstrap.service.ts  # EP-84: bootstrap (varredura idempotente) + neuronio lazy
+├── memory-bootstrap.service.spec.ts# Testes EP-84 (deteccao/mapeamento/semente puros)
+└── memory.module.ts             # @Global (controller + oito servicos)
 ```
 
 ## Contrato (Camada 1)
@@ -219,7 +221,27 @@ memory/
    Se o repo existente apontar para uma branch diferente de `main`, `provision()`
    **falha cedo** com mensagem acionável citando `MEMORY_GIT_DIR`.
 
-## Fora de escopo (NÃO implementar aqui ainda)
+### Contrato (EP-84 — bootstrap + criação lazy de neurônios)
+
+- `MemoryBootstrapService` (**@Global**) semeia a colmeia para que as AIs não
+  comecem do zero. A detecção/mapeamento/semente são **funções puras** exportadas
+  (`detectModules`, `moduleForFile`, `seedFor`) — testáveis sem I/O de git.
+  - `bootstrapFromRepo({repoPath, sessionId?})` (US-213) — varre o repo-alvo
+    (`aiProject`), detecta módulos (containers `modules/`/`features/`/… sob
+    `apps/`/`src/`/`packages/`, ou cada `apps/<app>`/`packages/<pkg>` quando não há
+    container) e cria **1 neurônio `modules/<modulo>.md` por módulo** via
+    `MemoryIndexService.commitAndReindex` (ordem de escrita git → índice). É
+    **idempotente**: neurônios já existentes (checados por `git.readNeuron`) são
+    **preservados** — nunca sobrescreve o que as AIs já mantêm. Retorna os paths
+    efetivamente criados.
+  - `ensureNeuronForFile({filePath, sessionId?})` (US-214) — complemento **lazy**:
+    mapeia um arquivo tocado ao seu módulo (`moduleForFile`) e cria o neurônio-
+    semente se ausente. Cobre o que a varredura inicial não previu.
+- **Rotas:** `POST /memory/bootstrap` (→ `{created, count}`) e
+  `POST /memory/ensure-neuron` (→ `{neuronPath}`); tools MCP `memory_bootstrap` e
+  `memory_ensure_neuron`. Ambas idempotentes.
+
+
 
 - **Resolução de conflito** de merge — o **mecanismo** (transição para `REVIEW`,
   montagem do `MemoryConflict`, arbitragem via `MemoryReviewService.resolve`) já

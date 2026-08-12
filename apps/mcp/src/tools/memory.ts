@@ -103,4 +103,33 @@ export function registerMemoryTools(server: McpServer, client: KanbanClient): vo
     },
     async (args) => ok(await client.post('/memory/resolve', args)),
   );
+
+  registerTool(
+    server,
+    'memory_bootstrap',
+    'Semeia a colmeia a partir do repo-alvo (POST /memory/bootstrap, EP-84). Varre ' +
+      '`repoPath` (a raiz do projeto), detecta os módulos e cria 1 neurônio inicial por ' +
+      'módulo. É IDEMPOTENTE: neurônios já existentes são preservados (nunca sobrescreve o ' +
+      'que as AIs já mantêm), então pode ser chamado com segurança quantas vezes precisar. ' +
+      'Retorna `created` (paths criados agora) e `count`.',
+    {
+      repoPath: z.string().min(1),
+      sessionId: z.string().min(1).optional(),
+    },
+    async (args) => ok(await client.post('/memory/bootstrap', args)),
+  );
+
+  registerTool(
+    server,
+    'memory_ensure_neuron',
+    'Garante o neurônio do módulo de um arquivo (POST /memory/ensure-neuron, EP-84 lazy). ' +
+      'Dado um `filePath` (relativo à raiz do repo) que você vai tocar, cria o neurônio do ' +
+      'seu módulo se ainda não existir — útil quando o bootstrap inicial não previu o módulo. ' +
+      'Retorna o `neuronPath` garantido (ou null se o arquivo não mapeia um módulo).',
+    {
+      filePath: z.string().min(1),
+      sessionId: z.string().min(1).optional(),
+    },
+    async (args) => ok(await client.post('/memory/ensure-neuron', args)),
+  );
 }

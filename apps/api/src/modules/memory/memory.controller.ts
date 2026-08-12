@@ -2,18 +2,23 @@ import { Body, Controller, Get, Post, Query, UsePipes } from '@nestjs/common';
 import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { MemoryGitService } from './memory-git.service';
+import { MemoryBootstrapService } from './memory-bootstrap.service';
 import { MemoryLockService } from './memory-lock.service';
 import { MemoryPolicyService } from './memory-policy.service';
 import { MemoryReviewService } from './memory-review.service';
 import { MemoryWriteService } from './memory-write.service';
 import {
   memoryAcquireSchema,
+  memoryBootstrapSchema,
+  memoryEnsureNeuronSchema,
   memoryHeartbeatSchema,
   memoryReadQuerySchema,
   memoryReleaseSchema,
   memoryResolveSchema,
   memoryWriteSchema,
   type MemoryAcquireDto,
+  type MemoryBootstrapDto,
+  type MemoryEnsureNeuronDto,
   type MemoryHeartbeatDto,
   type MemoryReadQueryDto,
   type MemoryReleaseDto,
@@ -36,6 +41,7 @@ export class MemoryController {
     private readonly lock: MemoryLockService,
     private readonly review: MemoryReviewService,
     private readonly policy: MemoryPolicyService,
+    private readonly bootstrap: MemoryBootstrapService,
   ) {}
 
   /**
@@ -109,5 +115,27 @@ export class MemoryController {
   @UsePipes(new ZodValidationPipe(memoryResolveSchema))
   resolve(@Body() dto: MemoryResolveDto) {
     return this.review.resolve(dto);
+  }
+
+  /**
+   * Bootstrap da colmeia (US-213) — varre o repo-alvo e cria 1 neurônio inicial
+   * por módulo. Idempotente: retorna os paths efetivamente criados nesta chamada.
+   */
+  @Post('bootstrap')
+  @UsePipes(new ZodValidationPipe(memoryBootstrapSchema))
+  async bootstrapRepo(@Body() dto: MemoryBootstrapDto) {
+    const created = await this.bootstrap.bootstrapFromRepo(dto);
+    return { created, count: created.length };
+  }
+
+  /**
+   * Garantia lazy de neurônio (US-214) — dado um arquivo tocado, cria o neurônio
+   * do seu módulo se ausente. Retorna o `neuronPath` garantido (ou `null`).
+   */
+  @Post('ensure-neuron')
+  @UsePipes(new ZodValidationPipe(memoryEnsureNeuronSchema))
+  async ensureNeuron(@Body() dto: MemoryEnsureNeuronDto) {
+    const neuronPath = await this.bootstrap.ensureNeuronForFile(dto);
+    return { neuronPath };
   }
 }

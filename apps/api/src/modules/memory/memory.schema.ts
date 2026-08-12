@@ -72,3 +72,25 @@ export const memoryResolveSchema = z.object({
   sessionId: z.string().min(1).optional(),
 });
 export type MemoryResolveDto = z.infer<typeof memoryResolveSchema>;
+
+/**
+ * Bootstrap da colmeia (POST /memory/bootstrap, EP-84/US-213). Varre `repoPath`
+ * (o repo-alvo do board — `aiProject`) e cria 1 neurônio inicial por módulo,
+ * de forma idempotente. `sessionId` identifica o autor da semeadura.
+ */
+export const memoryBootstrapSchema = z.object({
+  repoPath: z.string().min(1),
+  sessionId: z.string().min(1).optional(),
+});
+export type MemoryBootstrapDto = z.infer<typeof memoryBootstrapSchema>;
+
+/**
+ * Garantia lazy de neurônio (POST /memory/ensure-neuron, EP-84/US-214). Dado um
+ * arquivo tocado (`filePath` relativo à raiz do repo), cria o neurônio do módulo
+ * desse arquivo se ainda não existir. Retorna o `neuronPath` garantido ou `null`.
+ */
+export const memoryEnsureNeuronSchema = z.object({
+  filePath: z.string().min(1),
+  sessionId: z.string().min(1).optional(),
+});
+export type MemoryEnsureNeuronDto = z.infer<typeof memoryEnsureNeuronSchema>;

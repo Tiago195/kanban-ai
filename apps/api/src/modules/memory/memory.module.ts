@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { MemoryController } from './memory.controller';
+import { MemoryBootstrapService } from './memory-bootstrap.service';
 import { MemoryEventsService } from './memory-events.service';
 import { MemoryPolicyService } from './memory-policy.service';
 import { MemoryGitService } from './memory-git.service';
@@ -22,6 +23,8 @@ import { MemoryWriteService } from './memory-write.service';
  * - **REVIEW + arbitragem** (`MemoryReviewService`, EP-80): `EDITING → REVIEW`
  *   por conflito semântico ou escrita fora de escopo, `memory.conflict` e
  *   `resolve` (aceitar/descartar) fechando `REVIEW → FREE`.
+ * - **Bootstrap** (`MemoryBootstrapService`, EP-84): semeia 1 neurônio por
+ *   módulo do repo-alvo (varredura idempotente) e criação lazy sob demanda.
  *
  * É `@Global` (como `workspaces`) para que consumidores (MCP, gateway WS)
  * injetem os serviços sem reimportar o módulo.
@@ -37,6 +40,7 @@ import { MemoryWriteService } from './memory-write.service';
     MemoryWriteService,
     MemoryReviewService,
     MemoryPolicyService,
+    MemoryBootstrapService,
   ],
   exports: [
     MemoryGitService,
@@ -46,6 +50,7 @@ import { MemoryWriteService } from './memory-write.service';
     MemoryWriteService,
     MemoryReviewService,
     MemoryPolicyService,
+    MemoryBootstrapService,
   ],
 })
 export class MemoryModule {}
