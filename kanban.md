@@ -4,6 +4,45 @@
 
 <!-- Épicos de adoção da memória em colmeia (memory-as-a-living-service, ADR-0027). Criados 2026-08-12 a partir da análise: a colmeia (EP-76..85) está construída mas o kanban-ai NÃO a consome, não há scheduler dos jobs e o MCP só serve stdio local. Ordem recomendada: EP-A (maior ROI) → EP-B → EP-C. -->
 
+- [ ] Precisamos melhorar o chat de conversa do backlog-chat
+  - ⚠️ **Bloqueado (aguarda clarificação):** item vago, sem sintoma nem critério de aceite. O que melhorar? (UX/layout, streaming de resposta, contexto injetado no prompt, persistência do histórico, latência?) Não é implementável "1 a 1" sem escopo definido pelo usuário.
+
+- [ ] tentar disponibilizar tudo em docker
+  - ⚠️ **Bloqueado (conflita com ADR-0019, aceito):** a API precisa rodar no **host** porque o loop engine dá `spawn` no Copilot CLI com `cwd` = git worktree dentro do repo-alvo (`aiProject`), que é um caminho arbitrário do FS do usuário; dentro do Docker a API só enxerga `/app`. O `docker-compose.yml` já expõe o profile opt-in `docker-app` para subir Nest+Vite em container (dev do próprio framework). Não há ação segura sem violar o ADR — reabrir só se o worktree isolado deixar de ser stub e o alvo for montável.
+
+
+# in progress
+
+# done
+<!-- apenas ultimas 2 tarefas, para n poluir o arquivo -->
+
+- [x] **🟠 EP-B — Scheduler dos jobs da memória (torna a colmeia operável de verdade)** — **CONCLUÍDO 2026-08-12 (build+lint+test verdes; 204/204 specs)**
+  - **Por quê:** os métodos de manutenção existem e são chamáveis, mas **nada os dispara em cadência** (documentado como "vive fora — infra/loop engine" no AGENTS.md do módulo). Sem isso, leases de sessões mortas ficam presos em `EDITING`, ramos `mem/ai/*` órfãos acumulam e o git da memória cresce sem poda.
+  - **DOD do épico:** jobs rodam periodicamente (cadência configurável por env, com defaults sãos), com log/observabilidade e sem competir com o loop; `build && lint && test` verdes.
+  - [x] **US-B1 — Tick periódico de `expireStale` dos locks**
+    - Agendar `MemoryLockService.expireStale` numa cadência curta (ex.: a cada 30s, `MEMORY_LOCK_SWEEP_INTERVAL_MS`) usando `@nestjs/schedule` (`@Interval`/`SchedulerRegistry`) ou um provider com `setInterval` no `onModuleInit`/`onModuleDestroy`. Emitir as transições via WS que o serviço já produz.
+    - **DOD:** lease de sessão morta volta a `FREE` sozinho dentro da janela do TTL sem intervenção; cadência configurável; spec do agendador (usa fake timer / injeta o serviço).
+  - [x] **US-B2 — Cron de GC: `sweepStale`, `pruneEphemeralBranches`, `summarizeHistory`**
+    - Agendar os jobs do `MemoryGcService` numa cadência maior (ex.: diária/hora, `MEMORY_GC_CRON`). Cada job deve ser reentrante e não sobrepor execuções (guard de "já rodando").
+    - **DOD:** ramos órfãos são podados e históricos sumarizados em execução agendada; jobs não se sobrepõem; specs cobrindo o disparo e o guard de reentrância.
+  - [x] **US-B3 — Config + `.env.example` + observabilidade dos jobs**
+    - Expor as cadências e um flag mestre `MEMORY_SCHEDULER_ENABLED` (default `true`, `false` desliga tudo — útil em teste/CI). Logar início/fim/contagem de cada varredura. Atualizar `.env.example` e o AGENTS.md do módulo (remover o item "fora de escopo: agendamento").
+    - **DOD:** flags documentadas e respeitadas; logs presentes; AGENTS.md atualizado; specs de config.
+
+- [x] **🟡 EP-C — Abrir a colmeia para agents EXTERNOS (API/MCP multi-agent seguro)** — **CONCLUÍDO 2026-08-12 (build+lint+test verdes; 204/204 specs)**
+  - **Por quê:** o control plane REST `/memory/*` e as 11 MCP tools já existem, mas o MCP usa **`StdioServerTransport`** (só um processo local) e o `MemoryController` é uma ponte "sem auth" com `agentId` derivado do `sessionId`. Para "agents diversos" (fora do kanban-ai) usarem com segurança, faltam transporte remoto, autenticação e isolamento.
+  - **DOD do épico:** um agent externo autenticado consegue ler/escrever a memória por rede com identidade/escopo próprios, sem se passar por outra sessão; `build && lint && test` verdes.
+  - [x] **US-C1 — Transporte MCP remoto (Streamable HTTP)**
+    - Além do stdio, expor o MCP via **Streamable HTTP transport** do SDK num endpoint de rede configurável (`MCP_HTTP_PORT`/host), preservando o stdio local. Documentar como um agent externo se conecta.
+    - **DOD:** cliente MCP externo conecta por HTTP e lista/chama as memory tools; stdio segue funcionando; smoke test/documentação.
+  - [x] **US-C2 — Autenticação + identidade/escopo por token**
+    - Introduzir auth no control plane de memória (token por agent) e derivar `agentId`/escopo do **token autenticado**, não de um `sessionId` livre no body (fecha o buraco de "escrever como qualquer sessão"). Integrar com `MemoryPolicyService` (o escopo do token alimenta `classifyWrite`).
+    - **DOD:** requisição sem token válido é recusada; `agentId` vem do token; escrita fora do escopo do token vai a REVIEW; specs de auth + escopo.
+  - [x] **US-C3 — Doc de integração "como plugar um agent na colmeia"**
+    - Guia (em `docs/`) com: fluxo `acquire → read → write → release`, formato do neurônio `.md`, contrato de erros (409 anti-stale, conflito/REVIEW), heartbeat em trabalhos longos, e exemplo mínimo de um agent externo. Referenciar ADR-0027 e ADR-0020.
+    - **DOD:** doc publicada e linkada no AGENTS.md do módulo/MCP; exemplo reproduzível.
+
+
 - [x] **🔴 EP-A — kanban-ai CONSOME a memória em colmeia (loop engine deixa de começar amnésico)** — **CONCLUÍDO 2026-08-12 (build+lint+test verdes; 175/175 specs)**
   - **Por quê:** a colmeia (`apps/api/src/modules/memory`, EP-76..85) está pronta e exposta via MCP, mas o `orchestrator.ts`/`buildPrompt` tem **zero** chamadas de memória (só um comentário histórico). Cada iteração começa sem o conhecimento acumulado — exatamente a amnésia que o ADR-0027 queria matar. Este épico é o de **maior ROI** para "entregar melhores agents com mais assertividade".
   - **Serviços já disponíveis (@Global) a consumir:** `MemoryIndexService.query`, `MemoryGitService.readNeuron`, `MemoryWriteService` (acquire→writeOptimistic→commit→release), `MemoryPolicyService.agentIdFor/scopeFor`, `MemoryBootstrapService.bootstrapFromRepo`.
@@ -23,45 +62,6 @@
   - [x] **US-A5 — Bootstrap on-ramp: semear neurônios de módulo no 1º uso do repo-alvo** — CONCLUÍDO (`bootstrapFromRepo` em `onStoryEnterInProgress` antes de `startAuto`; idempotente + defensivo)
     - Quando uma story entra em progresso pela 1ª vez num `aiProject` novo, chamar `bootstrapFromRepo` para varrer o repo e criar `modules/<modulo>.md` iniciais (idempotente — não recria se já existir). Disparar uma única vez por repo-alvo.
     - **DOD:** primeiro start num repo novo semeia os neurônios de módulo; chamadas subsequentes são no-op; spec cobrindo idempotência.
-
-- [ ] **🟠 EP-B — Scheduler dos jobs da memória (torna a colmeia operável de verdade)**
-  - **Por quê:** os métodos de manutenção existem e são chamáveis, mas **nada os dispara em cadência** (documentado como "vive fora — infra/loop engine" no AGENTS.md do módulo). Sem isso, leases de sessões mortas ficam presos em `EDITING`, ramos `mem/ai/*` órfãos acumulam e o git da memória cresce sem poda.
-  - **DOD do épico:** jobs rodam periodicamente (cadência configurável por env, com defaults sãos), com log/observabilidade e sem competir com o loop; `build && lint && test` verdes.
-  - **US-B1 — Tick periódico de `expireStale` dos locks**
-    - Agendar `MemoryLockService.expireStale` numa cadência curta (ex.: a cada 30s, `MEMORY_LOCK_SWEEP_INTERVAL_MS`) usando `@nestjs/schedule` (`@Interval`/`SchedulerRegistry`) ou um provider com `setInterval` no `onModuleInit`/`onModuleDestroy`. Emitir as transições via WS que o serviço já produz.
-    - **DOD:** lease de sessão morta volta a `FREE` sozinho dentro da janela do TTL sem intervenção; cadência configurável; spec do agendador (usa fake timer / injeta o serviço).
-  - **US-B2 — Cron de GC: `sweepStale`, `pruneEphemeralBranches`, `summarizeHistory`**
-    - Agendar os jobs do `MemoryGcService` numa cadência maior (ex.: diária/hora, `MEMORY_GC_CRON`). Cada job deve ser reentrante e não sobrepor execuções (guard de "já rodando").
-    - **DOD:** ramos órfãos são podados e históricos sumarizados em execução agendada; jobs não se sobrepõem; specs cobrindo o disparo e o guard de reentrância.
-  - **US-B3 — Config + `.env.example` + observabilidade dos jobs**
-    - Expor as cadências e um flag mestre `MEMORY_SCHEDULER_ENABLED` (default `true`, `false` desliga tudo — útil em teste/CI). Logar início/fim/contagem de cada varredura. Atualizar `.env.example` e o AGENTS.md do módulo (remover o item "fora de escopo: agendamento").
-    - **DOD:** flags documentadas e respeitadas; logs presentes; AGENTS.md atualizado; specs de config.
-
-- [ ] **🟡 EP-C — Abrir a colmeia para agents EXTERNOS (API/MCP multi-agent seguro)**
-  - **Por quê:** o control plane REST `/memory/*` e as 11 MCP tools já existem, mas o MCP usa **`StdioServerTransport`** (só um processo local) e o `MemoryController` é uma ponte "sem auth" com `agentId` derivado do `sessionId`. Para "agents diversos" (fora do kanban-ai) usarem com segurança, faltam transporte remoto, autenticação e isolamento.
-  - **DOD do épico:** um agent externo autenticado consegue ler/escrever a memória por rede com identidade/escopo próprios, sem se passar por outra sessão; `build && lint && test` verdes.
-  - **US-C1 — Transporte MCP remoto (Streamable HTTP)**
-    - Além do stdio, expor o MCP via **Streamable HTTP transport** do SDK num endpoint de rede configurável (`MCP_HTTP_PORT`/host), preservando o stdio local. Documentar como um agent externo se conecta.
-    - **DOD:** cliente MCP externo conecta por HTTP e lista/chama as memory tools; stdio segue funcionando; smoke test/documentação.
-  - **US-C2 — Autenticação + identidade/escopo por token**
-    - Introduzir auth no control plane de memória (token por agent) e derivar `agentId`/escopo do **token autenticado**, não de um `sessionId` livre no body (fecha o buraco de "escrever como qualquer sessão"). Integrar com `MemoryPolicyService` (o escopo do token alimenta `classifyWrite`).
-    - **DOD:** requisição sem token válido é recusada; `agentId` vem do token; escrita fora do escopo do token vai a REVIEW; specs de auth + escopo.
-  - **US-C3 — Doc de integração "como plugar um agent na colmeia"**
-    - Guia (em `docs/`) com: fluxo `acquire → read → write → release`, formato do neurônio `.md`, contrato de erros (409 anti-stale, conflito/REVIEW), heartbeat em trabalhos longos, e exemplo mínimo de um agent externo. Referenciar ADR-0027 e ADR-0020.
-    - **DOD:** doc publicada e linkada no AGENTS.md do módulo/MCP; exemplo reproduzível.
-
-- [ ] Precisamos melhorar o chat de conversa do backlog-chat
-  - ⚠️ **Bloqueado (aguarda clarificação):** item vago, sem sintoma nem critério de aceite. O que melhorar? (UX/layout, streaming de resposta, contexto injetado no prompt, persistência do histórico, latência?) Não é implementável "1 a 1" sem escopo definido pelo usuário.
-
-- [ ] tentar disponibilizar tudo em docker
-  - ⚠️ **Bloqueado (conflita com ADR-0019, aceito):** a API precisa rodar no **host** porque o loop engine dá `spawn` no Copilot CLI com `cwd` = git worktree dentro do repo-alvo (`aiProject`), que é um caminho arbitrário do FS do usuário; dentro do Docker a API só enxerga `/app`. O `docker-compose.yml` já expõe o profile opt-in `docker-app` para subir Nest+Vite em container (dev do próprio framework). Não há ação segura sem violar o ADR — reabrir só se o worktree isolado deixar de ser stub e o alvo for montável.
-
-
-# in progress
-
-
-# done
-<!-- apenas ultimas 2 tarefas, para n poluir o arquivo -->
 
 - [x] **🟠 Tokens de entrada/saída sempre zero no painel de custo do loop** — **CONCLUÍDO 2026-08-12 (build+lint+test verdes; 168/168 specs)**
   - **Causa-raiz:** o pipeline de tokens dependia exclusivamente do agent auto-reportar os tokens no `KANBAN_RESULT` (nunca acontece); o `CopilotCliRunner` (runner real) nunca lia/parseava o uso de tokens que a própria Copilot CLI imprime no rodapé de stats ao final da execução → todas as 401 `Iteration` gravavam `inputTokens`/`outputTokens = NULL`.
