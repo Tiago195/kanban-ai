@@ -326,6 +326,81 @@ export function isVerifiableEvidence(
 }
 
 /**
+ * US-ROB1 — Classe do resultado de uma conclusão de task. Determina QUAL
+ * artefato mínimo verificável é exigido para fechar. Deriva-se do desfecho da
+ * iteração + do que a AI reivindicou.
+ *
+ *  - 'code-change'  → houve edição de código nesta conclusão.
+ *  - 'test-green'   → o entregável é uma suíte verde.
+ *  - 'flow-artifact'→ o entregável são arquivos de affectedFlows.
+ */
+export type ResultClass = 'code-change' | 'test-green' | 'flow-artifact';
+
+/** US-ROB1 — Sinais objetivos para avaliar o artefato mínimo por classe. */
+export interface MinimumArtifactInput {
+  /** Classe reivindicada/derivada desta conclusão. */
+  resultClass: ResultClass;
+  /** Evidência estruturada anexada pela AI (ou string livre legada). */
+  evidence: string | StructuredEvidence | null | undefined;
+  /** Diff do worktree NESTA iteração (já capturado pelo orquestrador). */
+  diff: string;
+  /** true quando TODOS os arquivos de affectedFlows existem no cwd (verifyFlowFiles). */
+  flowFilesPresent: boolean;
+}
+
+/**
+ * US-ROB1 — porta de completude por CLASSE de resultado. Complementa (NÃO
+ * substitui) `isVerifiableEvidence`: uma conclusão só é aceita se o artefato
+ * MÍNIMO da sua classe existir de fato.
+ *
+ *  - 'code-change'  → diff não-vazio nesta conclusão.
+ *  - 'test-green'   → evidência verificável com ≥1 check de teste passed=true.
+ *  - 'flow-artifact'→ arquivos de affectedFlows presentes no worktree.
+ *
+ * Determinística e pura (testável sem I/O). Retorna null quando o artefato
+ * mínimo está presente, ou um problema acionável quando falta.
+ */
+export function minimumArtifactSatisfied(
+  input: MinimumArtifactInput,
+): { title: string; description: string } | null {
+  switch (input.resultClass) {
+    case 'code-change':
+      return input.diff.trim().length > 0
+        ? null
+        : {
+            title: 'conclusão sem diff verificável',
+            description:
+              'A conclusão foi classificada como mudança de código (code-change) ' +
+              'mas o diff do worktree está VAZIO. Edite de fato os arquivos antes de fechar.',
+          };
+    case 'test-green': {
+      const evidenceOk =
+        isVerifiableEvidence(input.evidence) &&
+        input.evidence.checks.some(
+          (c) => /test|spec/i.test(c.name) && c.passed === true,
+        );
+      return evidenceOk
+        ? null
+        : {
+            title: 'conclusão sem teste verde verificável',
+            description:
+              'A conclusão exige um teste verde (test-green) mas não há EvidenceCheck ' +
+              'de teste com passed:true. Rode a suíte e reporte o resultado em `evidence`.',
+          };
+    }
+    case 'flow-artifact':
+      return input.flowFilesPresent
+        ? null
+        : {
+            title: 'arquivos de fluxo declarados ausentes',
+            description:
+              'A conclusão referencia affectedFlows cujos arquivos não existem no ' +
+              'worktree. Crie os arquivos declarados ou corrija a lista de fluxos.',
+          };
+  }
+}
+
+/**
  * Identidade ESTÁVEL de um agent da colmeia, derivada da sessão + story em que
  * ele trabalha. É o handle que amarra tudo o que um agent faz na memória viva:
  * o `holder` de um lock de edição, o autor de uma mutação e o namespace do ramo

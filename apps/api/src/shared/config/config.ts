@@ -182,6 +182,14 @@ export interface AppConfig {
      * AGENT_REQUIRE_STRUCTURED_EVIDENCE.
      */
     requireStructuredEvidence: boolean;
+    /**
+     * US-ROB1 — quando ligado, o gate de `done` exige o artefato MÍNIMO por
+     * classe de resultado (code-change → diff não-vazio; test-green → check de
+     * teste passed:true; flow-artifact → arquivos de fluxo presentes).
+     * Complementa `requireStructuredEvidence`. Off por default (retrocompat).
+     * Env: AGENT_REQUIRE_MIN_ARTIFACT.
+     */
+    requireMinArtifact: boolean;
   };
 }
 
@@ -272,6 +280,7 @@ export function loadConfig(): AppConfig {
       thrashSimilarityThreshold: num(process.env.AGENT_THRASH_SIMILARITY, 0.9),
       thrashWindow: num(process.env.AGENT_THRASH_WINDOW, 2),
       requireStructuredEvidence: process.env.AGENT_REQUIRE_STRUCTURED_EVIDENCE === 'true',
+      requireMinArtifact: process.env.AGENT_REQUIRE_MIN_ARTIFACT === 'true',
     },
   };
 }

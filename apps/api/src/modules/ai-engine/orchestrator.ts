@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { StopMode } from '@kanban-ai/shared';
 import type { ExecState, AffectedFlow, LoopMetrics } from '@kanban-ai/shared';
-import { isVerifiableEvidence } from '@kanban-ai/shared';
+import { isVerifiableEvidence, minimumArtifactSatisfied } from '@kanban-ai/shared';
+import type { ResultClass } from '@kanban-ai/shared';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -599,6 +600,45 @@ export class Orchestrator implements OnModuleInit {
           taskId,
           'gate de done: validação passou mas evidência não é verificável — task NÃO fechada (evidence estruturada exigida).',
         );
+      }
+
+      // US-ROB1 — Gate de completude por CLASSE de resultado. Complementa o
+      // gate de evidência acima: mesmo com a validação empírica passando, se a
+      // conclusão não trouxer o artefato MÍNIMO da sua classe (diff, teste
+      // verde ou arquivo de fluxo), NÃO fechamos — roteamos pelo mesmo caminho
+      // de derivação/escala. Off por default (AGENT_REQUIRE_MIN_ARTIFACT).
+      if (effectivePassed && this.config.agent.requireMinArtifact) {
+        const hasFlows = (context.affectedFlows?.length ?? 0) > 0;
+        const hasDiff = iterationDiff.trim().length > 0;
+        // Deriva a classe dos sinais que o orquestrador já tem em escopo:
+        //  - código editado nesta iteração → code-change;
+        //  - fluxos declarados sem código novo → flow-artifact (o entregável
+        //    são os próprios arquivos de fluxo);
+        //  - caso contrário (ex.: strategy regression-only) → test-green.
+        const resultClass: ResultClass = hasDiff
+          ? 'code-change'
+          : hasFlows
+            ? 'flow-artifact'
+            : 'test-green';
+        // Reusa o sinal do ValidationRunner: ele já checou a existência dos
+        // arquivos de affectedFlows (verifyFlowFiles). Como este bloco só roda
+        // com `outcome.passed`, os arquivos declarados existem no worktree —
+        // NÃO duplicamos I/O de filesystem aqui.
+        const flowFilesPresent = outcome.passed;
+        const artifactProblem = minimumArtifactSatisfied({
+          resultClass,
+          evidence: runResult.evidence,
+          diff: iterationDiff,
+          flowFilesPresent,
+        });
+        if (artifactProblem) {
+          effectivePassed = false;
+          evidenceProblems.push(artifactProblem);
+          await this.log(
+            taskId,
+            `gate de done: artefato mínimo da classe "${resultClass}" ausente (${artifactProblem.title}) — task NÃO fechada.`,
+          );
+        }
       }
 
       await this.appendIteration(taskId, {

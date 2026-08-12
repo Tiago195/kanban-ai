@@ -179,6 +179,18 @@ nem os mocks/testes:
   `isVerifiableEvidence(...)` (≥1 check `passed=true`); caso contrário a validação
   "falha" e roteia para o caminho de derivação/needs-human. A string livre legada
   continua aceita (retrocompat) e é persistida via `evidenceToString(...)`.
+- **Gate de artefato mínimo por classe (US-ROB1)**: complementa o gate de
+  evidência acima. Quando `AGENT_REQUIRE_MIN_ARTIFACT=true`, mesmo com a
+  validação empírica passando, a fase `validation` só fecha se a conclusão
+  trouxer o **artefato mínimo** da sua `ResultClass` (`@kanban-ai/shared`:
+  `ResultClass`/`MinimumArtifactInput`/`minimumArtifactSatisfied`):
+  `code-change` → diff não-vazio; `test-green` → ≥1 `EvidenceCheck` de teste
+  com `passed=true`; `flow-artifact` → arquivos de `affectedFlows` presentes no
+  worktree. A classe é derivada dos sinais em escopo no gate (diff da iteração /
+  presença de `affectedFlows`); `flowFilesPresent` reusa o sinal do
+  `ValidationRunner` (não duplica I/O). Faltando o artefato, `effectivePassed`
+  vira false e a iteração roteia pelo caminho de derivação/needs-human
+  (`outcome=derived`). Off por default (retrocompat).
 
 Ao mudar esses contratos, mantenha este arquivo em dia.
 

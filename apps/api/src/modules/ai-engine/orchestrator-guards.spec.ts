@@ -1097,3 +1097,217 @@ test('runIteration: diff VAZIO + dodTouched reportado -> marca o DOD (não zera)
     'o dodTouched NÃO pode ser zerado por causa do diff vazio',
   );
 });
+
+// ── US-ROB1: gate de artefato mínimo por classe de resultado ─────────────────
+//
+// Com AGENT_REQUIRE_MIN_ARTIFACT ligado, mesmo a validação empírica passando,
+// uma conclusão SEM o artefato mínimo da sua classe NÃO fecha a task: o gate
+// rebaixa `effectivePassed` para false, grava a iteração com outcome=derived e
+// roteia pelo caminho de derivação/escala (nunca chama onTaskDone/done).
+test('runIteration: requireMinArtifact ON + validação passa mas sem artefato mínimo -> NÃO fecha (deriva)', async () => {
+  const prisma = makePrisma({
+    cardFindUnique: async (args) => ({
+      id: args.where.id,
+      title: 'task sem artefato',
+      type: 'task',
+      loopType: 'feature',
+      model: null,
+      parentId: null,
+      boardId: 'b1',
+      assignees: [],
+      execState: 'validating',
+      derivedDepth: 0,
+    }),
+  });
+
+  // Runner reivindica conclusão (done) mas SEM diff, SEM fluxos e com evidence
+  // que NÃO é um teste verde (apenas lint passou) -> classe test-green sem check
+  // de teste -> artefato mínimo AUSENTE.
+  const runner = {
+    id: 'copilot',
+    run: async () => ({
+      detail: 'tudo pronto',
+      summary: 'concluí',
+      dodTouched: [],
+      done: true,
+      affectedFlows: [],
+      evidence: { checks: [{ name: 'lint', passed: true }] },
+    }),
+  } as unknown as AgentRunner;
+
+  const config = makeConfig({ requireMinArtifact: true });
+  const sessions = new AgentSessionManager(config);
+  const realtime = makeRealtime();
+  const orch = new Orchestrator(
+    prisma.svc,
+    sessions,
+    makeValidation(), // validate() => passed:true
+    makeWorkspaces(),
+    realtime.svc,
+    runner,
+    config,
+    makeMemoryIndex(),
+    makeMemoryGit(),
+    makeMemoryBootstrap(),
+  );
+
+  const p = priv(orch);
+  p.loadTask = async () => ({
+    id: 'task-rob1',
+    execState: 'validating',
+    phases: ['validation'],
+    derivedDepth: 0,
+    dependsOn: [],
+    dodDone: [true], // DOD todo done => nextPhaseFor => 'validation'
+    type: 'task',
+  });
+  p.loadSiblingsById = async () => new Map();
+  p.buildContext = async () => ({
+    taskTitle: 'task sem artefato',
+    project: '/repo/target',
+    notes: '',
+    flowNames: [],
+    files: [],
+    storyId: 'story-rob1',
+    affectedFlows: [], // sem fluxos
+    dodItems: [{ id: 'd1', text: 'x', done: true }],
+    iterationHistory: [],
+    siblingHandoffs: [],
+  });
+  p.enforceLoopGuards = async () => false;
+  p.resolveCardModel = async () => 'valid-model';
+  p.captureTreeBaseline = async () => 'baseline';
+  p.captureDiff = async () => ''; // diff VAZIO
+  p.buildPrompt = () => 'prompt';
+  p.persistAffectedFlows = async () => undefined;
+
+  const execStates: string[] = [];
+  p.setExecState = async (_taskId: string, s: string) => {
+    execStates.push(s);
+  };
+  let onTaskDoneCalled = false;
+  p.onTaskDone = async () => {
+    onTaskDoneCalled = true;
+  };
+  let derived = false;
+  p.createDerivedTask = async () => {
+    derived = true;
+    return 'derived-id';
+  };
+  let escalated = false;
+  p.escalateToHuman = async () => {
+    escalated = true;
+  };
+  const appended: Array<Record<string, unknown>> = [];
+  p.appendIteration = async (_taskId: string, it: Record<string, unknown>) => {
+    appended.push(it);
+  };
+  p.log = async () => undefined;
+
+  await orch.runIteration('task-rob1');
+
+  assert.equal(onTaskDoneCalled, false, 'NÃO deve fechar a task (onTaskDone não chamado)');
+  assert.equal(
+    execStates.includes('done'),
+    false,
+    'exec state nunca deve virar done com artefato mínimo ausente',
+  );
+  assert.equal(appended.length, 1, 'grava exatamente uma iteração');
+  assert.equal(appended[0].outcome, 'derived', 'a iteração de validação rebaixada tem outcome=derived');
+  assert.ok(derived || escalated, 'deve rotear pelo caminho de derivação/escala');
+});
+
+test('runIteration: requireMinArtifact ON + code-change COM diff -> fecha normalmente', async () => {
+  const prisma = makePrisma({
+    cardFindUnique: async (args) => ({
+      id: args.where.id,
+      title: 'task com diff',
+      type: 'task',
+      loopType: 'feature',
+      model: null,
+      parentId: null,
+      boardId: 'b1',
+      assignees: [],
+      execState: 'validating',
+      derivedDepth: 0,
+    }),
+  });
+
+  const runner = {
+    id: 'copilot',
+    run: async () => ({
+      detail: 'implementei',
+      summary: 'concluí',
+      dodTouched: [],
+      done: true,
+      affectedFlows: [],
+      evidence: { checks: [{ name: 'test', passed: true, output: '3 passed' }] },
+    }),
+  } as unknown as AgentRunner;
+
+  const config = makeConfig({ requireMinArtifact: true });
+  const sessions = new AgentSessionManager(config);
+  const realtime = makeRealtime();
+  const orch = new Orchestrator(
+    prisma.svc,
+    sessions,
+    makeValidation(),
+    makeWorkspaces(),
+    realtime.svc,
+    runner,
+    config,
+    makeMemoryIndex(),
+    makeMemoryGit(),
+    makeMemoryBootstrap(),
+  );
+
+  const p = priv(orch);
+  p.loadTask = async () => ({
+    id: 'task-rob1b',
+    execState: 'validating',
+    phases: ['validation'],
+    derivedDepth: 0,
+    dependsOn: [],
+    dodDone: [true],
+    type: 'task',
+  });
+  p.loadSiblingsById = async () => new Map();
+  p.buildContext = async () => ({
+    taskTitle: 'task com diff',
+    project: '/repo/target',
+    notes: '',
+    flowNames: [],
+    files: [],
+    storyId: 'story-rob1b',
+    affectedFlows: [],
+    dodItems: [{ id: 'd1', text: 'x', done: true }],
+    iterationHistory: [],
+    siblingHandoffs: [],
+  });
+  p.enforceLoopGuards = async () => false;
+  p.resolveCardModel = async () => 'valid-model';
+  p.captureTreeBaseline = async () => 'baseline';
+  p.captureDiff = async () => 'diff --git a/x b/x\n+nova linha'; // diff NÃO-vazio
+  p.buildPrompt = () => 'prompt';
+  p.persistAffectedFlows = async () => undefined;
+
+  const execStates: string[] = [];
+  p.setExecState = async (_taskId: string, s: string) => {
+    execStates.push(s);
+  };
+  let onTaskDoneCalled = false;
+  p.onTaskDone = async () => {
+    onTaskDoneCalled = true;
+  };
+  const appended: Array<Record<string, unknown>> = [];
+  p.appendIteration = async (_taskId: string, it: Record<string, unknown>) => {
+    appended.push(it);
+  };
+  p.log = async () => undefined;
+
+  await orch.runIteration('task-rob1b');
+
+  assert.equal(onTaskDoneCalled, true, 'code-change com diff satisfaz o artefato mínimo -> fecha');
+  assert.equal(execStates.includes('done'), true, 'exec state deve virar done');
+  assert.equal(appended[0].outcome, 'ok', 'iteração fechada com outcome=ok');
+});

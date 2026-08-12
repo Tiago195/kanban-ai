@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isVerifiableEvidence } from '@kanban-ai/shared';
+import { isVerifiableEvidence, minimumArtifactSatisfied } from '@kanban-ai/shared';
 import type { StructuredEvidence } from '@kanban-ai/shared';
 import {
   evidenceToString,
@@ -106,4 +106,81 @@ test('isThrashing: janela só olha as últimas N amostras', () => {
     { summary: 'iteracao repetida identica aqui', nextStep: 'rodar build' },
   ];
   assert.equal(isThrashing(samples, 0.9, 2), true);
+});
+
+// --- US-ROB1: artefato mínimo por classe de resultado ---
+
+test('minimumArtifactSatisfied: code-change com diff não-vazio => ok (null)', () => {
+  assert.equal(
+    minimumArtifactSatisfied({
+      resultClass: 'code-change',
+      evidence: null,
+      diff: 'diff --git a/x b/x\n+linha',
+      flowFilesPresent: false,
+    }),
+    null,
+  );
+});
+
+test('minimumArtifactSatisfied: code-change com diff vazio => problema', () => {
+  const p = minimumArtifactSatisfied({
+    resultClass: 'code-change',
+    evidence: null,
+    diff: '   ',
+    flowFilesPresent: true,
+  });
+  assert.ok(p);
+  assert.match(p!.title, /sem diff/i);
+});
+
+test('minimumArtifactSatisfied: test-green com check de teste passado => ok (null)', () => {
+  const evidence: StructuredEvidence = {
+    checks: [{ name: 'test', passed: true, output: '10 passed' }],
+  };
+  assert.equal(
+    minimumArtifactSatisfied({
+      resultClass: 'test-green',
+      evidence,
+      diff: '',
+      flowFilesPresent: false,
+    }),
+    null,
+  );
+});
+
+test('minimumArtifactSatisfied: test-green sem check de teste verde => problema', () => {
+  const evidence: StructuredEvidence = {
+    checks: [{ name: 'lint', passed: true }],
+  };
+  const p = minimumArtifactSatisfied({
+    resultClass: 'test-green',
+    evidence,
+    diff: '',
+    flowFilesPresent: true,
+  });
+  assert.ok(p);
+  assert.match(p!.title, /teste verde/i);
+});
+
+test('minimumArtifactSatisfied: flow-artifact com arquivos presentes => ok (null)', () => {
+  assert.equal(
+    minimumArtifactSatisfied({
+      resultClass: 'flow-artifact',
+      evidence: null,
+      diff: '',
+      flowFilesPresent: true,
+    }),
+    null,
+  );
+});
+
+test('minimumArtifactSatisfied: flow-artifact com arquivos ausentes => problema', () => {
+  const p = minimumArtifactSatisfied({
+    resultClass: 'flow-artifact',
+    evidence: null,
+    diff: '',
+    flowFilesPresent: false,
+  });
+  assert.ok(p);
+  assert.match(p!.title, /fluxo/i);
 });
