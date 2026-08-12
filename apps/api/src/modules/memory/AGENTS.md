@@ -18,7 +18,9 @@ memory/
 ├── memory-index.service.spec.ts # Testes Camada 2 (git real em tmpdir + prisma fake)
 ├── memory-lock.service.ts       # EP-78: locks advisory + presenca (lease/TTL/heartbeat)
 ├── memory-lock.service.spec.ts  # Testes EP-78 (git real + prisma fake in-memory)
-└── memory.module.ts             # @Global (exporta os tres servicos)
+├── memory-write.service.ts      # EP-79: escrita otimista + compare-and-swap (CAS)
+├── memory-write.service.spec.ts # Testes EP-79 (git real + prisma fake in-memory)
+└── memory.module.ts             # @Global (exporta os quatro servicos)
 ```
 
 ## Contrato (Camada 1)
@@ -78,6 +80,32 @@ memory/
 - Config via `MEMORY_GIT_DIR` (default `./.kanban-ai-memory/git`, **gitignored** —
   é volume de runtime, nunca versionado no repo-alvo).
 
+### Contrato (EP-79 — escrita otimista + compare-and-swap)
+
+- `MemoryWriteService` é **@Injectable** e **@Global** (via `MemoryModule`).
+- É a peça que impede _lost-update_ com N agents escrevendo em paralelo. O
+  modelo é **otimista**: o holder leu um `baseCommit` no `acquire` (EP-78),
+  materializa a proposta num ramo efêmero por agent e só integra no fechamento.
+- **Ordem de escrita invariante preservada:** git commit/merge → reindexa (via
+  `MemoryIndexService.reindexOne`) → (emitir WS é EP-81, fora daqui).
+- Público:
+  - `writeOptimistic({path, content, sessionId, message})` (US-196) — materializa
+    a proposta APENAS no ramo `mem/ai/<sessao>/<path>`, **sem tocar `main`**.
+  - `commit({path, content, sessionId, baseCommit, message, maxRetries?})`
+    (US-197/198/199) — fecha a edição com **compare-and-swap** anti-stale:
+    - se o HEAD efetivo do path (o `headCommit` projetado no índice, ou o HEAD de
+      `main` quando o neurônio é novo) divergir do `baseCommit`, faz **rebase
+      inline** (adota o novo base e reescreve) e integra na MESMA iteração;
+    - integra o ramo efêmero em `main` via **merge 3-way** (`mergeSessionBranch`);
+    - em stale persistente, o laço reread→rebase→write esgota em
+      `MEMORY_WRITE_MAX_RETRIES` (default 3) e lança `MemoryStaleWriteError`
+      (`reason: 'stale'`);
+    - um **conflito de merge REAL** (não apenas stale) NÃO é resolvido aqui — é
+      sinalizado como `MemoryStaleWriteError` (`reason: 'conflict'`) e delegado
+      ao árbitro/REVIEW (EP-80).
+  - `WriteResult` expõe `{ oid, branch, headCommit, projection, retries }`
+    (`retries` = nº de iterações completas do laço; 0 quando o rebase é inline).
+
 ## Invariantes
 
 1. **Idempotência total** — rodar `provision()` N vezes converge para o MESMO
@@ -94,12 +122,11 @@ memory/
 
 ## Fora de escopo (NÃO implementar aqui ainda)
 
-- **CAS** (EP-79) — o índice já ARMAZENA `baseCommit`; o compare-and-swap do
-  write (409 anti-stale + merge 3-way + retry) é EP-79.
 - **WebSocket** (EP-81) — o 3º passo da ordem de escrita (emitir evento) NÃO vive
-  aqui; `commitAndReindex` para na reindexação; o lock não emite `memory.*`.
-- **Resolução de conflito** de merge (árbitro/REVIEW) — Camada 1 e 2 apenas
-  **sinalizam** (`mergeSessionBranch` → `conflict: true`; `MemoryWriteConflictError`);
+  aqui; `commitAndReindex`/`commit` param na reindexação; nada emite `memory.*`.
+- **Resolução de conflito** de merge (árbitro/REVIEW) — as Camadas 1/2 e o write
+  apenas **sinalizam** (`mergeSessionBranch` → `conflict: true`;
+  `MemoryWriteConflictError`; `MemoryStaleWriteError` com `reason: 'conflict'`);
   resolver é EP-80.
 - **Agendamento** do `expireStale` (tick periódico) — o método existe; quem o
   chama periodicamente vive fora (infra/EP-85).
