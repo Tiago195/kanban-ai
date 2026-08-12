@@ -2,19 +2,6 @@
 
 <!-- Stories de correção derivadas do QA rodada 2 (2026-08-06). Prioridade: 🔴 crítico > 🟠 alto > 🟡 médio > 🟢 baixo -->
 
-- [ ] **🟠 Tokens de entrada/saída sempre zero no painel de custo do loop** — REINCIDENTE / não corrigido (revalidado 2026-08-12)
-  - **Sintoma:** o `LoopMetricsPanel` ("📊 Custo & qualidade do loop") mostra sempre 0 em "Tokens de entrada (↑)" e "Tokens de saída (↓)". Confirmado nos dados: **todas as 401 linhas de `Iteration` têm `inputTokens`/`outputTokens = NULL`** (nunca populados) — nenhuma iteração real registrou tokens.
-  - **Causa-raiz (`apps/api/src/modules/ai-engine/`):** o pipeline de tokens depende **exclusivamente** do agent auto-reportar os tokens no bloco `KANBAN_RESULT`, o que nunca acontece:
-    1. `orchestrator.ts` → `buildPrompt` monta o schema do `KANBAN_RESULT` (por volta da linha 2648) e **NÃO inclui os campos `inputTokens`/`outputTokens`** — o modelo nunca é instruído a emiti-los.
-    2. `runners/cli-adapter.ts` (~linha 145) lê `inputTokens`/`outputTokens` do JSON do resultado → como o modelo não os emite, resultam sempre `undefined`.
-    3. `runners/copilot-cli.runner.ts` (~linha 255) repassa `event.inputTokens`/`event.outputTokens` (undefined) para `setResult`.
-    4. `orchestrator.ts` (linhas ~486, ~564, ~786) persiste `runResult.inputTokens`/`outputTokens` (undefined) → gravado como NULL na `Iteration`.
-    5. `computeStoryMetrics` (linhas ~1660-1661) soma com `?? 0` → total 0 → UI mostra zero.
-  - **Por que "funciona" no mock:** `runners/mock-agent.runner.ts` (linhas ~96-97) FALSIFICA tokens (`inputTokens ?? 1200`, `outputTokens ?? 300`). O `CopilotCliRunner` (runner real, `AGENT_RUNNER_KIND=cli`) não tem essa fonte — e a Copilot CLI real emite o uso de tokens no seu próprio output/telemetria, que o runner **nunca lê/parseia**. Confiar no modelo para se autorreportar tokens é a falha de projeto.
-  - **Correção sugerida (NÃO aplicada):** o `CopilotCliRunner` deve **extrair os tokens do output real da Copilot CLI** (parsear a linha/telemetria de usage emitida pela própria CLI ao final da execução) em vez de esperá-los no `KANBAN_RESULT`. Alimentar `inputTokens`/`outputTokens` do `AgentRunResult` a partir dessa fonte. Manter o mock como está. (Alternativa/complemento: registrar tokens por chamada via API do provider, se disponível.)
-  - **DOD:** após rodar uma iteração real (runner `cli`), a `Iteration` correspondente grava `inputTokens`/`outputTokens` > 0; o `LoopMetricsPanel` exibe os valores reais (não zero); specs cobrindo a extração de tokens do output da CLI no `CopilotCliRunner`; `npm run build && npm run lint && npm test` verdes.
-
-
 - [ ] Precisamos melhorar o chat de conversa do backlog-chat
 
 - [ ] tentar disponibilizar tudo em docker
@@ -25,6 +12,12 @@
 
 # done
 <!-- apenas ultimas 2 tarefas, para n poluir o arquivo -->
+
+- [x] **🟠 Tokens de entrada/saída sempre zero no painel de custo do loop** — **CONCLUÍDO 2026-08-12 (build+lint+test verdes; 168/168 specs)**
+  - **Causa-raiz:** o pipeline de tokens dependia exclusivamente do agent auto-reportar os tokens no `KANBAN_RESULT` (nunca acontece); o `CopilotCliRunner` (runner real) nunca lia/parseava o uso de tokens que a própria Copilot CLI imprime no rodapé de stats ao final da execução → todas as 401 `Iteration` gravavam `inputTokens`/`outputTokens = NULL`.
+  - **Correção aplicada (`ai-engine/runners/`):** novo `CliAdapter.parseTokenUsage(line)` extrai tokens do rodapé de stats CRU (não-JSON) da CLI, reconhecendo múltiplos formatos (`input=X output=Y`, `X input, Y output`, `1.2k input`, `↑ X ↓ Y`, `prompt_tokens/completion_tokens`); helper `matchNum` normaliza separadores de milhar e sufixos `k`/`m`. O `CopilotCliRunner` acumula a última leitura por linha (`parsedTokens`) e faz **backfill** no `close` handler quando o `result` não trouxe tokens. Mock preservado.
+  - **DOD atingido:** iterações reais (runner `cli`) gravam `inputTokens`/`outputTokens` > 0 a partir do output da CLI; `LoopMetricsPanel` já soma esses campos (`totalInputTokens`/`totalOutputTokens`) e passa a exibir valores reais; novo `cli-adapter.spec.ts` com 8 specs cobrindo a extração; `npm run build && npm run lint && npm test` verdes (168/168).
+
 
 - [x] **🟠 Serialização de story deveria ser por EPIC, não por aiProject (repo-alvo)** — **CONCLUÍDO 2026-08-12 (build+lint+test verdes; 160/160 specs)**
   - **Correção aplicada (`ai-engine/orchestrator.ts`):** a chave de conflito da serialização passou de "repo-alvo resolvido" para **epic** (`Card.parentId`). Novo `resolveStoryEpic(storyId)`; `findActiveStoryOnSameProject` → `findConflictingActiveStory` (compara epic da story com o das sessões ativas); `resumeDeferredForProject` → `resumeDeferredForStory` (retoma por epic). Stories de épicos diferentes rodam concorrentes (respeitando `AGENT_MAX_CONCURRENT_SESSIONS`); stories do mesmo epic continuam serializadas.
