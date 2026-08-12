@@ -440,11 +440,13 @@ model MemoryIndex {
   searchText String @default("") // ponteiro de busca (conteúdo/keywords achatados)
 
   // Coordenação (armazenamento apenas; comportamento vive em EP-78..EP-80) -----
-  lockState    String  @default("FREE") // FREE | EDITING | REVIEW (ver MemoryLockState)
+  lockState    String    @default("FREE") // FREE | EDITING | REVIEW (ver MemoryLockState)
   holder       String? // agentId dono do lock ativo (sessão+story), se houver
+  leaseId      String? // id do lease advisory ativo (EP-78)
+  expiresAt    DateTime? // instante de expiração do lease (TTL + heartbeat, EP-78)
   baseCommit   String? // baseCommit do lock/edição ativa (compare-and-swap)
   activeBranch String? // branch efêmera do agent (mem/ai/<sessao>/<path>)
-  reviewQueued Boolean @default(false) // marcador de fila de REVIEW (conflito semântico)
+  reviewQueued Boolean   @default(false) // marcador de fila de REVIEW (conflito semântico)
 
   updatedAt DateTime @updatedAt
 

@@ -16,7 +16,9 @@ memory/
 ├── memory-git.service.spec.ts   # Testes Camada 1 (node:test) em tmpdir isolado
 ├── memory-index.service.ts      # Camada 2: indice Postgres derivado (reindex/rebuild/query)
 ├── memory-index.service.spec.ts # Testes Camada 2 (git real em tmpdir + prisma fake)
-└── memory.module.ts             # @Global (exporta os dois serviços)
+├── memory-lock.service.ts       # EP-78: locks advisory + presenca (lease/TTL/heartbeat)
+├── memory-lock.service.spec.ts  # Testes EP-78 (git real + prisma fake in-memory)
+└── memory.module.ts             # @Global (exporta os tres servicos)
 ```
 
 ## Contrato (Camada 1)
@@ -53,6 +55,26 @@ memory/
   - `rebuildAll()` (US-161) — reconstrói o índice inteiro a partir do git.
   - `query(term?, limit?)` (US-162) — retrieval case-insensitive por
     title/summary/searchText/path.
+
+### Contrato (EP-78 — locks advisory + presença)
+
+- `MemoryLockService` é **@Injectable** e **@Global** (via `MemoryModule`).
+- O lock é **advisory** (coordenação social — "estou editando isto agora"),
+  **não** um portão de escrita: o que protege contra _lost-update_ é o
+  compare-and-swap do write (EP-79). O lease é projetado nos campos de
+  coordenação do `MemoryIndex` (`lockState`, `holder`, `leaseId`, `expiresAt`).
+- Público:
+  - `acquire(path, holder, ttlMs?)` (US-192) — `FREE → EDITING`; devolve
+    `{ baseCommit, leaseId, expiresAt }`. Idempotente para o mesmo holder;
+    lança `MemoryLockHeldError` se outro holder tem lease ativo; lease vencido é
+    sobrescrito (auto-release lazy).
+  - `heartbeat(path, holder, ttlMs?)` (US-193) — renova `expiresAt`; só o holder;
+    lança `MemoryLeaseExpiredError` (e libera) se o lease já venceu.
+  - `release(path, holder)` (US-194) — `EDITING → FREE` explícito (idempotente).
+  - `expireStale(nowMs?)` (US-193) — auto-release em lote dos leases vencidos.
+  - `acquireMany(paths, holder, ttlMs?)` (US-195) — ordena os paths (evita
+    hold-and-wait circular) e faz rollback total se algum estiver preso
+    (nunca deixa aquisição parcial → anti-deadlock).
 - Config via `MEMORY_GIT_DIR` (default `./.kanban-ai-memory/git`, **gitignored** —
   é volume de runtime, nunca versionado no repo-alvo).
 
@@ -72,14 +94,15 @@ memory/
 
 ## Fora de escopo (NÃO implementar aqui ainda)
 
-- **Locks/presença ativos** (EP-78), **CAS** (EP-79) — o índice já ARMAZENA os
-  campos de coordenação (`lockState`, `holder`, `baseCommit`, `activeBranch`,
-  `reviewQueued`), mas o COMPORTAMENTO (portões, expiração, presença) é EP-78+.
+- **CAS** (EP-79) — o índice já ARMAZENA `baseCommit`; o compare-and-swap do
+  write (409 anti-stale + merge 3-way + retry) é EP-79.
 - **WebSocket** (EP-81) — o 3º passo da ordem de escrita (emitir evento) NÃO vive
-  aqui; `commitAndReindex` para na reindexação.
+  aqui; `commitAndReindex` para na reindexação; o lock não emite `memory.*`.
 - **Resolução de conflito** de merge (árbitro/REVIEW) — Camada 1 e 2 apenas
   **sinalizam** (`mergeSessionBranch` → `conflict: true`; `MemoryWriteConflictError`);
   resolver é EP-80.
+- **Agendamento** do `expireStale` (tick periódico) — o método existe; quem o
+  chama periodicamente vive fora (infra/EP-85).
 
 ## O que NÃO mexer
 
