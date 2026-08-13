@@ -19,42 +19,23 @@ import {
   useUpdateLoopProfile,
 } from "@/features/board";
 import { useRealtime } from "@/features/realtime";
+import { useReviewNotifications } from "@/features/realtime/hooks/useReviewNotifications";
 import { BacklogChatView } from "@/features/backlog-chat";
 import { ProjectExplorer, ProjectsManager } from "@/features/projects";
 import { Toast } from "@/shared/components/Toast";
 import { getHealth } from "@/shared/services/apiClient";
 import { showToast } from "@/shared/services/toastStore";
 import type { ApiLoopProfile } from "@/shared/types";
-
-const THEME_KEY = "kanban-ai-theme";
-
-function useDarkMode() {
-  const [dark, setDark] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(THEME_KEY) === "dark";
-  });
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (dark) {
-      root.classList.add("dark");
-      window.localStorage.setItem(THEME_KEY, "dark");
-    } else {
-      root.classList.remove("dark");
-      window.localStorage.setItem(THEME_KEY, "light");
-    }
-  }, [dark]);
-
-  return { dark, toggle: () => setDark((value) => !value) };
-}
+import { useTheme } from "@/shared/hooks/useTheme";
 
 export default function App() {
   const [health, setHealth] = useState<string>("carregando…");
-  const { dark, toggle } = useDarkMode();
+  const { theme, setTheme } = useTheme();
   const { boardId } = usePrimaryBoardId();
   const { data: board } = useBoard(boardId);
   const { data: cards } = useCards(boardId);
-  const { status } = useRealtime(undefined, boardId);
+  const { status, lastEvent } = useRealtime(undefined, boardId);
+  const { prefEnabled, setNotificationsEnabled } = useReviewNotifications(lastEvent);
 
   const filters = useBoardUiStore((state) => state.filters);
   const setFilters = useBoardUiStore((state) => state.setFilters);
@@ -206,6 +187,16 @@ export default function App() {
           <button
             className="kb-btn kb-btn-ghost"
             type="button"
+            title="Ativar/desativar notificações de review"
+            onClick={async () => {
+              await setNotificationsEnabled(!prefEnabled);
+            }}
+          >
+            {prefEnabled ? "🔔 Review ON" : "🔕 Review OFF"}
+          </button>
+          <button
+            className="kb-btn kb-btn-ghost"
+            type="button"
             title="Gerenciar colunas requer suporte no backend (ainda indisponível)"
             onClick={() => showToast("Gestão de colunas ainda não disponível no backend")}
           >
@@ -227,15 +218,17 @@ export default function App() {
           >
             ⤒ Import
           </button>
-          <button
-            className="kb-btn-icon"
-            type="button"
-            title={"Alternar tema — API: " + health}
-            aria-label="Alternar tema"
-            onClick={toggle}
+          <select
+            className="kb-btn kb-btn-ghost"
+            title={"Tema: " + theme + " — API: " + health}
+            aria-label="Selecionar tema"
+            value={theme}
+            onChange={(event) => setTheme(event.target.value as "light" | "dark" | "high-contrast")}
           >
-            {dark ? "☀️" : "🌙"}
-          </button>
+            <option value="light">🌞 Claro</option>
+            <option value="dark">🌙 Escuro</option>
+            <option value="high-contrast">◐ Alto contraste</option>
+          </select>
         </div>
       </header>
 
