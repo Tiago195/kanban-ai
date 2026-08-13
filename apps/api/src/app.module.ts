@@ -14,6 +14,7 @@ import { AiEngineModule } from './modules/ai-engine/ai-engine.module';
 import { BacklogChatModule } from './modules/backlog-chat/backlog-chat.module';
 import { MemoryModule } from './modules/memory/memory.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { ReviewModule } from './modules/review/review.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     BacklogChatModule,
     MemoryModule,
     DashboardModule,
+    ReviewModule,
   ],
 })
 export class AppModule {}

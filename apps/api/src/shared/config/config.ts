@@ -266,6 +266,21 @@ export interface AppConfig {
      * (`false` desliga).
      */
     worktreePreservePatch: boolean;
+    /**
+     * US-OBS3 (ADR-0037) — auto-commit OPT-IN (default `false`). Quando `true`
+     * E a validação da iteração fecha VERDE (evidência verificável) E existe um
+     * worktree ISOLADO (ADR-0035), o ENGINE (nunca o agent) commita as mudanças
+     * do worktree na branch de execução. Default off = comportamento idêntico ao
+     * de hoje (zero commit). Env: AGENT_AUTO_COMMIT (`true` liga).
+     */
+    autoCommit: boolean;
+    /**
+     * US-OBS3 (ADR-0037) — abre PR OPCIONAL após um auto-commit bem-sucedido
+     * (só faz sentido com `autoCommit=true`). Default `false`. Env: AGENT_AUTO_PR
+     * (`true` liga). No v1 é um ponto de extensão: sem `gh`/token configurado,
+     * o commit é feito mas nenhum PR é aberto (sem erro).
+     */
+    autoPr: boolean;
   };
   /**
    * US-OBS1 — configuração do dashboard de frota (`GET /dashboard`).
@@ -405,6 +420,8 @@ export function loadConfig(): AppConfig {
       worktreeMirrorIgnored: process.env.AGENT_WORKTREE_MIRROR_IGNORED !== 'false',
       worktreeInitSubmodules: process.env.AGENT_WORKTREE_INIT_SUBMODULES !== 'false',
       worktreePreservePatch: process.env.AGENT_WORKTREE_PRESERVE_PATCH !== 'false',
+      autoCommit: process.env.AGENT_AUTO_COMMIT === 'true',
+      autoPr: process.env.AGENT_AUTO_PR === 'true',
     },
     dashboard: {
       staleMinutes: num(process.env.DASHBOARD_STALE_MINUTES, 30),

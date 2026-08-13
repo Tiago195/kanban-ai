@@ -147,6 +147,13 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
           return;
         }
 
+        if (event.type === "review.comment_added") {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.reviewComments(event.cardId),
+          });
+          return;
+        }
+
         if (!boardId) return;
 
         if (event.type === "card.moved") {

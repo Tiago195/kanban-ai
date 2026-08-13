@@ -569,3 +569,81 @@ export interface Neuron {
   /** Epoch ms da última atualização do neurônio. */
   updatedAt: number;
 }
+
+// ─────────────────────────────────────────────────────────────
+// US-OBS3 (ADR-0037) — Review inline por linha + auto-commit/PR opcional
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * US-OBS3 — Comentário de review por LINHA, persistido e vinculado a um card
+ * (task ou story) e, opcionalmente, à iteração que o originou. É tratado como
+ * OBSERVABILIDADE/evidência — NÃO reintroduz DOR/acceptance nem cria um novo
+ * checklist obrigatório (o único gate de conclusão continua sendo o DOD, ver
+ * ADR-0007). Contrato COMPARTILHADO entre api e web.
+ */
+export interface ReviewComment {
+  id: string;
+  /** Card alvo (task ou story). */
+  cardId: string;
+  /** Iteração que originou o comentário (opcional). */
+  iterationId: string | null;
+  /** Caminho relativo no repo-alvo. */
+  filePath: string;
+  /** Linha 1-based no arquivo pós-diff. */
+  line: number;
+  /** Corpo do comentário (markdown). */
+  body: string;
+  /** Autor: `agent:<runnerId>` | `human:<id>`. */
+  author: string;
+  /** Se o comentário foi resolvido. */
+  resolved: boolean;
+  /** ISO timestamp de criação. */
+  createdAt: string;
+  /** ISO timestamp da última atualização. */
+  updatedAt: string;
+}
+
+/** US-OBS3 — payload para criar um comentário de review por linha. */
+export interface ReviewCommentInput {
+  cardId: string;
+  iterationId?: string | null;
+  filePath: string;
+  line: number;
+  body: string;
+  author: string;
+}
+
+/**
+ * US-OBS3 — Desfecho do auto-commit/PR OPCIONAL (opt-in, default OFF).
+ *
+ * O commit é feito pelo ENGINE (nunca pelo agent, ver ADR-0008) e SÓ ocorre
+ * dentro de um worktree ISOLADO (ADR-0035) após a validação verde (todos os
+ * `EvidenceCheck` verificáveis com `passed=true`, ver `isVerifiableEvidence`).
+ * Quando pulado, `committed=false` e `skippedReason` explica o porquê.
+ */
+export interface CommitOutcome {
+  /** true só quando o engine efetivamente commitou no worktree isolado. */
+  committed: boolean;
+  /** SHA do commit criado (presente só se `committed=true`). */
+  commitSha?: string;
+  /** Branch de execução onde o commit foi feito. */
+  branch?: string;
+  /** URL do PR aberto (presente só se `AGENT_AUTO_PR` e o PR foi aberto). */
+  prUrl?: string;
+  /**
+   * Motivo do skip quando `committed=false`:
+   *  - 'disabled'              → opt-in desligado (default).
+   *  - 'not-verified'          → evidência não é verificável (algum check
+   *                              faltando/`passed=false`).
+   *  - 'no-isolated-worktree'  → não há worktree isolado (US-OBS2/ADR-0035);
+   *                              nunca commitamos direto no repo-alvo.
+   *  - 'commit-failed'         → o git do engine falhou (best-effort).
+   *  - 'nothing-to-commit'     → worktree sem mudanças.
+   */
+  skippedReason?:
+    | 'disabled'
+    | 'not-verified'
+    | 'no-isolated-worktree'
+    | 'commit-failed'
+    | 'nothing-to-commit';
+}

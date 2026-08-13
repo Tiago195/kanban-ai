@@ -652,6 +652,56 @@ export class WorkspaceService {
   }
 
   /**
+   * US-OBS3 (ADR-0037) — Informação do worktree ISOLADO ativo para uma `key`
+   * (storyId), ou `null` quando não há isolamento (flag off / não criado). O
+   * gate de auto-commit usa isto para decidir `skippedReason='no-isolated-worktree'`
+   * — nunca commitamos direto no repo-alvo do usuário.
+   */
+  getIsolatedWorktree(
+    key: string,
+  ): { worktreePath: string; targetRepo: string; branch: string } | null {
+    const safeKey = this.sanitizeKey(key);
+    const isolated = this.isolatedWorktreeByKey.get(safeKey);
+    return isolated ? { ...isolated } : null;
+  }
+
+  /**
+   * US-OBS3 (ADR-0037) — Commit das mudanças do worktree ISOLADO pelo ENGINE
+   * (nunca pelo agent, ver ADR-0008). SÓ age contra o worktree isolado
+   * rastreado para a `key`; se não houver isolamento, retorna `null` e o
+   * chamador reporta `skippedReason='no-isolated-worktree'`.
+   *
+   * Retorna o SHA + branch quando commitou, `{ sha: null }` quando não havia
+   * nada a commitar, ou `null` quando não há worktree isolado. Best-effort:
+   * qualquer falha de git é propagada como erro (o chamador trata).
+   */
+  async commitIsolatedWorktree(
+    key: string,
+    message: string,
+  ): Promise<{ sha: string | null; branch: string } | null> {
+    const safeKey = this.sanitizeKey(key);
+    const isolated = this.isolatedWorktreeByKey.get(safeKey);
+    if (!isolated) return null;
+    const { worktreePath, branch } = isolated;
+
+    // Stage tudo (inclui novos/removidos) no worktree isolado.
+    await this.runGit(['add', '-A'], worktreePath);
+
+    // Nada staged? Não commita (evita commit vazio).
+    const status = await this.runGit(['status', '--porcelain'], worktreePath);
+    if (!status.stdout.trim()) {
+      return { sha: null, branch };
+    }
+
+    await this.runGit(
+      ['-c', 'user.name=kanban-ai', '-c', 'user.email=agent@kanban-ai', 'commit', '-m', message],
+      worktreePath,
+    );
+    const head = await this.runGit(['rev-parse', 'HEAD'], worktreePath);
+    return { sha: head.stdout.trim(), branch };
+  }
+
+  /**
    * Limpeza de fim de story.
    *
    * - Com o worktree isolado LIGADO (US-OBS2): captura o patch não-commitado

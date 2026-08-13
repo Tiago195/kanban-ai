@@ -13,5 +13,7 @@ export const queryKeys = {
    * refazer o fetch contra o índice sem F5. `path` opcional = detalhe de 1 neurônio.
    */
   memory: (path?: string) => (path ? (["memory", path] as const) : (["memory"] as const)),
+  /** US-OBS3 — comentários inline de review de um card. */
+  reviewComments: (cardId: string) => ["reviewComments", cardId] as const,
   models: ["agentModels"] as const,
 };

@@ -7,7 +7,7 @@
  */
 
 import type { AgentSessionState, ExecState } from './enums';
-import type { AffectedFlow, AgentId, Card, Iteration, Owner } from './domain';
+import type { AffectedFlow, AgentId, Card, Iteration, Owner, ReviewComment } from './domain';
 import type { BacklogProposal, BacklogTaskProposal } from './backlog-chat';
 import type { MemoryConflict, MemoryReviewItem } from './dtos';
 
@@ -382,6 +382,17 @@ export interface BoardUpdatedEvent {
   defaultModel: string | null;
 }
 
+/**
+ * US-OBS3 (ADR-0037) — Um comentário de review por linha foi adicionado a um
+ * card. A UI reage invalidando a query de comentários do card. É observabilidade
+ * (não reintroduz DOR/acceptance — ver ADR-0007).
+ */
+export interface ReviewCommentAddedEvent {
+  type: 'review.comment_added';
+  cardId: string;
+  comment: ReviewComment;
+}
+
 /** União discriminada de todos os eventos do servidor. */
 export type ServerEvent =
   | CardMovedEvent
@@ -413,6 +424,7 @@ export type ServerEvent =
   | BacklogTaskProposalEvent
   | BacklogTurnDoneEvent
   | CommentCreatedEvent
+  | ReviewCommentAddedEvent
   | BoardUpdatedEvent
   | CardNeedsHumanEvent
   | MemoryLockedEvent

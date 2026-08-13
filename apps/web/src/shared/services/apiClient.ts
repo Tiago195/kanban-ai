@@ -15,6 +15,8 @@ import type {
   IterationPhase,
   LoopMetrics,
   MoveCardDto,
+  ReviewComment,
+  ReviewCommentInput,
   UpdateCardDto,
   UpdateDodItemDto,
   ValidationStrategy,
@@ -457,6 +459,32 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify({ tasks }),
     });
+  },
+
+  // ── Review inline (US-OBS3) ────────────────────────────────────────────────
+
+  /** Lista os comentários de review de um card (mais recentes por card). */
+  getReviewComments(cardId: string): Promise<ReviewComment[]> {
+    return request<ReviewComment[]>(`/cards/${cardId}/review/comments`);
+  },
+
+  /** Cria um comentário inline de review num card. */
+  addReviewComment(
+    cardId: string,
+    input: Omit<ReviewCommentInput, "cardId">,
+  ): Promise<ReviewComment> {
+    return request<ReviewComment>(`/cards/${cardId}/review/comments`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  /** Marca um comentário de review como resolvido. */
+  resolveReviewComment(cardId: string, commentId: string): Promise<ReviewComment> {
+    return request<ReviewComment>(
+      `/cards/${cardId}/review/comments/${commentId}/resolve`,
+      { method: "PATCH" },
+    );
   },
 };
 

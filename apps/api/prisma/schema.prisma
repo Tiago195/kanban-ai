@@ -188,6 +188,7 @@ model Card {
   labels        CardLabel[]
   assignees     CardAssignee[]
   wakeups       WakeupQueue[]  @relation("WakeupStory")
+  reviewComments ReviewComment[]
 
   @@unique([boardId, key])
   @@index([boardId])
@@ -208,6 +209,31 @@ model TaskDependency {
   @@unique([dependentId, dependsOnId])
   @@index([dependentId])
   @@index([dependsOnId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// US-OBS3 (ADR-0037) — Review inline por linha
+// ─────────────────────────────────────────────────────────────
+
+// Comentário de review por LINHA, vinculado a um card (task/story) e
+// opcionalmente à iteração que o originou. É observabilidade/evidência — NÃO é
+// um novo checklist obrigatório (o único gate de conclusão continua sendo o
+// DOD, ver ADR-0007). Aditivo e retrocompatível.
+model ReviewComment {
+  id          String   @id @default(cuid())
+  cardId      String // task ou story alvo do comentário
+  card        Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  iterationId String? // iteração que originou o comentário (opcional)
+  filePath    String // caminho relativo no repo-alvo
+  line        Int // linha (1-based) no arquivo pós-diff
+  body        String // corpo do comentário (markdown)
+  author      String // 'agent:<runnerId>' | 'human:<id>'
+  resolved    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([cardId])
+  @@index([cardId, filePath])
 }
 
 // ─────────────────────────────────────────────────────────────

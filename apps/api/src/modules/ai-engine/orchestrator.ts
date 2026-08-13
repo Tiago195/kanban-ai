@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nest
 import { StopMode } from '@kanban-ai/shared';
 import type { ExecState, AffectedFlow, LoopMetrics, WakeupReason } from '@kanban-ai/shared';
 import { isVerifiableEvidence, minimumArtifactSatisfied } from '@kanban-ai/shared';
-import type { ResultClass } from '@kanban-ai/shared';
+import type { ResultClass, CommitOutcome, StructuredEvidence } from '@kanban-ai/shared';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -825,6 +825,15 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       if (effectivePassed) {
         await this.setExecState(taskId, 'done');
         await this.log(taskId, 'validação final concluída — task Done');
+        // US-OBS3 (ADR-0037) — auto-commit/PR OPCIONAL, gated. Só age com opt-in
+        // ligado, evidência verificável e worktree ISOLADO (ADR-0035). Default
+        // off = zero commit (comportamento idêntico ao de hoje). Best-effort:
+        // nunca derruba o loop.
+        await this.maybeAutoCommit(storyId, taskId, runResult.evidence).catch((err) =>
+          this.logger.warn(
+            `auto-commit falhou para ${taskId}: ${(err as Error).message}`,
+          ),
+        );
         await this.onTaskDone(taskId);
       } else {
         // Só ocorre com validação real ou gate de evidence; no mock (com o gate
@@ -2399,6 +2408,93 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       taskId,
       iteration: mapIteration(row as PrismaIterationRow),
     });
+  }
+
+  /**
+   * US-OBS3 (ADR-0037) — Gate de auto-commit/PR OPCIONAL após a validação verde
+   * de uma iteração. Puro nas decisões (delega o git ao `WorkspaceService`, que
+   * é o ENGINE — nunca o agent, ver ADR-0008). Retorna o `CommitOutcome` (também
+   * exposto para testes/observabilidade); os `skippedReason` são:
+   *
+   *  - 'disabled'             → `AGENT_AUTO_COMMIT` off (default) → NADA é commitado.
+   *  - 'not-verified'         → evidência não é verificável (`isVerifiableEvidence`
+   *                             false: sem check `passed=true`).
+   *  - 'no-isolated-worktree' → não há worktree isolado (US-OBS2/ADR-0035);
+   *                             jamais commitamos direto no repo-alvo do usuário.
+   *  - 'nothing-to-commit'    → worktree isolado sem mudanças.
+   *  - 'commit-failed'        → git do engine falhou.
+   *
+   * Default (flag off) ⇒ `committed=false, skippedReason='disabled'` — zero
+   * mudança de comportamento.
+   */
+  async maybeAutoCommit(
+    storyId: string,
+    taskId: string,
+    evidence: string | StructuredEvidence | null | undefined,
+  ): Promise<CommitOutcome> {
+    if (!this.config.agent.autoCommit) {
+      return { committed: false, skippedReason: 'disabled' };
+    }
+
+    // Gate de evidência: só commita se a conclusão for VERIFICÁVEL (≥1 check
+    // passed=true). Se algum check falhou, isVerifiableEvidence pode ainda ser
+    // true (há ≥1 passed); então exigimos que NENHUM check tenha passed=false.
+    if (!isVerifiableEvidence(evidence)) {
+      return { committed: false, skippedReason: 'not-verified' };
+    }
+    const anyFailed = evidence.checks.some((c) => c && c.passed === false);
+    if (anyFailed) {
+      return { committed: false, skippedReason: 'not-verified' };
+    }
+
+    // Isolamento obrigatório (ADR-0035): sem worktree isolado, NÃO commitamos.
+    const isolated = this.workspaces.getIsolatedWorktree(storyId);
+    if (!isolated) {
+      return { committed: false, skippedReason: 'no-isolated-worktree' };
+    }
+
+    let commit: { sha: string | null; branch: string } | null;
+    try {
+      commit = await this.workspaces.commitIsolatedWorktree(
+        storyId,
+        `chore(agent): auto-commit task ${taskId} (validação verde)`,
+      );
+    } catch (err) {
+      await this.log(
+        taskId,
+        `auto-commit: git do engine falhou — ${(err as Error).message}`,
+      );
+      return { committed: false, skippedReason: 'commit-failed' };
+    }
+
+    if (!commit) {
+      return { committed: false, skippedReason: 'no-isolated-worktree' };
+    }
+    if (!commit.sha) {
+      return { committed: false, branch: commit.branch, skippedReason: 'nothing-to-commit' };
+    }
+
+    await this.log(
+      taskId,
+      `auto-commit: engine commitou ${commit.sha.slice(0, 8)} no worktree isolado (${commit.branch}).`,
+    );
+
+    const outcome: CommitOutcome = {
+      committed: true,
+      commitSha: commit.sha,
+      branch: commit.branch,
+    };
+
+    // PR opcional: ponto de extensão (v1 não abre PR automaticamente sem
+    // `gh`/token). Registramos a intenção; nunca falha o loop.
+    if (this.config.agent.autoPr) {
+      await this.log(
+        taskId,
+        'auto-pr: AGENT_AUTO_PR ligado — abertura de PR é ponto de extensão (v1 não abre PR sem gh/token).',
+      );
+    }
+
+    return outcome;
   }
 
   /**
