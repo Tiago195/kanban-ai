@@ -119,6 +119,32 @@ export interface AgentModel {
   label: string;
 }
 
+/**
+ * US-OBS4 — vendor/kind de um adapter de agent plugável no loop engine.
+ * `copilot-cli` é o DEFAULT (não-regressão). `mock` é o runner determinístico
+ * usado em dev/testes. `claude`/`codex`/`gemini` são vendors futuros que reusam
+ * o `CliAdapter` (comando/flags/parse próprios). Ver ADR-0036.
+ */
+export type AgentAdapterKind = 'copilot-cli' | 'claude' | 'codex' | 'gemini' | 'mock';
+
+/**
+ * US-OBS4 — descritor de um adapter exposto em `GET /agents/adapters` para a UI
+ * listar/selecionar o adapter ativo.
+ *
+ * INVARIANTE DE SEGREDO: `available` é um booleano derivado da PRESENÇA do
+ * binário/credencial no ambiente — NUNCA expõe a credencial/token em si. Nenhum
+ * campo deste descritor pode carregar valor de segredo.
+ */
+export interface AgentAdapterDescriptor {
+  kind: AgentAdapterKind;
+  /** Nome amigável para exibição na UI. */
+  displayName: string;
+  /** `true` no adapter que é o default efetivo do loop (copilot-cli). */
+  isDefault: boolean;
+  /** Binário/credencial presentes no ambiente (booleano; sem expor o segredo). */
+  available: boolean;
+}
+
 /** Perfil de loop: define fases e estratégia de validação por tipo de trabalho. */
 export interface LoopProfile {
   id: LoopProfileId;

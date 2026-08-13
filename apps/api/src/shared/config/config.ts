@@ -1,3 +1,5 @@
+import type { AgentAdapterKind } from '@kanban-ai/shared';
+
 /**
  * Configuração centralizada da API, lida de variáveis de ambiente.
  * Ver `.env.example` na raiz do monorepo.
@@ -17,6 +19,14 @@ export interface AppConfig {
   apiPort: number;
   wsPath: string;
   databaseUrl: string;
+  /**
+   * US-OBS4 — adapter de agent ativo no loop engine. O `AGENT_RUNNER` é
+   * resolvido a partir deste `kind` via `agent-adapter.registry`. Default
+   * `copilot-cli` (não-regressão: sem env, o loop se comporta como antes).
+   * Lido de `AGENT_ADAPTER`; valores desconhecidos caem no default. Ver
+   * ADR-0036.
+   */
+  agentAdapter: AgentAdapterKind;
   /**
    * Serviço de memória (ADR-0027, Camada 1 — git como fonte da verdade).
    */
@@ -311,11 +321,39 @@ export function resolveMemoryGitDir(value: string | undefined): string {
   return trimmed;
 }
 
+/**
+ * US-OBS4 — kinds de adapter conhecidos. Fonte da verdade para validar
+ * `AGENT_ADAPTER` e para o registry declarar descritores. Espelha o union
+ * `AgentAdapterKind` de `@kanban-ai/shared`.
+ */
+export const AGENT_ADAPTER_KINDS: readonly AgentAdapterKind[] = [
+  'copilot-cli',
+  'claude',
+  'codex',
+  'gemini',
+  'mock',
+];
+
+/** Adapter default do loop (não-regressão). */
+export const DEFAULT_AGENT_ADAPTER: AgentAdapterKind = 'copilot-cli';
+
+/**
+ * Resolve `AGENT_ADAPTER` para um `AgentAdapterKind` conhecido. Ausente, vazio
+ * ou desconhecido → default `copilot-cli` (não-regressão). Case-insensitive.
+ */
+export function resolveAgentAdapter(value: string | undefined): AgentAdapterKind {
+  if (value === undefined) return DEFAULT_AGENT_ADAPTER;
+  const normalized = value.trim().toLowerCase();
+  const match = AGENT_ADAPTER_KINDS.find((k) => k === normalized);
+  return match ?? DEFAULT_AGENT_ADAPTER;
+}
+
 export function loadConfig(): AppConfig {
   return {
     apiPort: num(process.env.API_PORT, 3333),
     wsPath: process.env.WS_PATH ?? '/ws',
     databaseUrl: process.env.DATABASE_URL ?? '',
+    agentAdapter: resolveAgentAdapter(process.env.AGENT_ADAPTER),
     memory: {
       gitDir: resolveMemoryGitDir(process.env.MEMORY_GIT_DIR),
       schedulerEnabled: process.env.MEMORY_SCHEDULER_ENABLED !== 'false',
