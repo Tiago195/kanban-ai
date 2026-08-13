@@ -766,3 +766,23 @@ export interface ProjectRepoInfo {
   cloneState: ProjectCloneState;
   modules: string[]; // de detectModules(localPath)
 }
+
+/**
+ * US-CTX2 (EP-CTX / Hermes N7) — snapshot ESTRUTURADO de handoff que uma task
+ * grava ao fechar (`done`). NÃO é um checklist (invariante 4): é contexto que o
+ * PRÓXIMO trabalho (dependente que auto-inicia via M3) recebe para começar
+ * assertivo. Todos os campos são opcionais (retrocompatível: metadata ausente =
+ * comportamento atual). Ver ADR-0040 e docs/specs/ep-ctx.md §4.1.
+ */
+export interface CompletionMetadata {
+  /** Arquivos alterados pela task (caminhos relativos ao repo-alvo). */
+  changed_files?: string[];
+  /** Como o resultado foi verificado (ex.: "build+lint+test verdes", comandos). */
+  verification?: string;
+  /** Dependências/decisões que o próximo trabalho precisa conhecer. */
+  dependencies?: string[];
+  /** Notas de retry — o que já se tentou e não funcionou. */
+  retry_notes?: string;
+  /** Risco residual conhecido deixado para o próximo. */
+  residual_risk?: string;
+}

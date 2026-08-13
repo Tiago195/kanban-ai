@@ -195,6 +195,20 @@ export interface AppConfig {
      */
     thrashWindow: number;
     /**
+     * US-CTX3 (EP-CTX) — cap de continuações bounded consecutivas para runs
+     * improdutivos-mas-recuperáveis (plan_only/empty_response). Ao atingir o
+     * cap, cede ao fluxo normal (auto-step/anti-thrash). 0 = feature desligada
+     * (comportamento atual: só watchdog/auto-step). Default 2.
+     * AGENT_CONTINUATION_CAP.
+     */
+    continuationCap: number;
+    /**
+     * US-CTX3 (EP-CTX) — atraso (ms) do re-wake alvo da continuação bounded.
+     * Deve ser << autoStepIntervalMs/watchdogIntervalMs para ser "em segundos".
+     * Default 1500. AGENT_CONTINUATION_DELAY_MS.
+     */
+    continuationDelayMs: number;
+    /**
      * Gate de `done` — exige `evidence` ESTRUTURADA e verificável (ao menos um
      * check com `passed=true`) antes de fechar a task. Se `true` e a evidence
      * não for verificável, o `done` é recusado. Default false.
@@ -468,6 +482,8 @@ export function loadConfig(): AppConfig {
         process.env.AGENT_THRASH_DETECTION_ENABLED === 'true',
       thrashSimilarityThreshold: num(process.env.AGENT_THRASH_SIMILARITY, 0.9),
       thrashWindow: num(process.env.AGENT_THRASH_WINDOW, 2),
+      continuationCap: num(process.env.AGENT_CONTINUATION_CAP, 2),
+      continuationDelayMs: num(process.env.AGENT_CONTINUATION_DELAY_MS, 1_500),
       requireStructuredEvidence: process.env.AGENT_REQUIRE_STRUCTURED_EVIDENCE === 'true',
       requireMinArtifact: process.env.AGENT_REQUIRE_MIN_ARTIFACT === 'true',
       runtimePersistEnabled: process.env.AGENT_RUNTIME_PERSIST_ENABLED !== 'false',

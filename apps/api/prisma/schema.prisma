@@ -68,6 +68,7 @@ enum WakeupReason {
   reconcile         // re-enfileirado no boot a partir do board
   blockers_resolved // EP-BLOCK/US-BLOCK3: dependência(s) fecharam → auto-wake
   issue_unblock     // EP-BLOCK/US-BLOCK2: bloqueio de input resolvido pelo owner
+  continuation      // EP-CTX/US-CTX3: continuação bounded de run improdutivo
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -196,6 +197,11 @@ model Card {
   // Anti re-fire do wake de unblock (US-BLOCK2). Setado ao notificar o owner=agent;
   // limpo quando o card sai de blocked (unblock/resume/done).
   blockedOwnerNotifiedAt DateTime?
+
+  // EP-CTX / US-CTX2 (ADR-0040) — snapshot estruturado de handoff gravado ao
+  // fechar a task (`done`). JSON conforme CompletionMetadata em @kanban-ai/shared.
+  // null = task ainda não fechou / metadata não coletado.
+  completionMetadata Json?
 
   // Modelo de AI para desenvolver este card. null = herda do pai
   // (task -> story -> epic -> board.defaultModel).
@@ -434,6 +440,17 @@ model AgentRuntimeState {
   /// Assinatura da última causa de bloqueio (blockKind + hash curto do motivo).
   /// null = nunca bloqueou / resetado. Ver ADR-0039.
   lastBlockReason String?
+
+  // ── Continuação bounded de run improdutivo (EP-CTX / US-CTX3) ─────────────
+  /// Tentativas CONSECUTIVAS de continuação bounded (plan_only/empty_response)
+  /// da story corrente. Zera em qualquer run `advanced`/`completed`. Cross-run,
+  /// durável. Ver ADR-0040.
+  continuationAttempt Int @default(0)
+
+  /// Motivo/dica da última continuação (ex.: "run anterior só planejou — execute
+  /// o próximo passo agora"). Injetado no próximo prompt. null = sem continuação
+  /// pendente.
+  livenessReason String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

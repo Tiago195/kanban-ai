@@ -76,6 +76,40 @@ export const LivenessState = {
 export type LivenessState = (typeof LivenessState)[keyof typeof LivenessState];
 
 /**
+ * US-CTX3 (EP-CTX / Paperclip #1) — classificação de VIVACIDADE de UM run
+ * (iteração) do loop. Diferente de LivenessState (estado da SESSÃO, durável) e
+ * de AgentSessionState (efêmero). Alimenta a decisão de continuação bounded:
+ *
+ *  - completed:      run fechou a task (done + DOD/diff satisfeitos).
+ *  - advanced:       progrediu (diff no worktree OU fechou ≥1 item de DOD).
+ *  - plan_only:      só planejou (nextStep/summary, sem diff nem avanço de DOD).
+ *  - empty_response: run sem summary e sem diff e sem DOD (praticamente vazio).
+ *  - blocked:        terminou bloqueado (blocked-dep / needs_input).
+ *  - failed:         falhou na validação/erro do run.
+ *  - needs_followup: pediu HITL (aguardando resposta humana).
+ *
+ * `plan_only` e `empty_response` disparam CONTINUAÇÃO BOUNDED (re-wake alvo em
+ * segundos, até `continuationCap`). Os demais seguem o fluxo normal do loop.
+ * Ver docs/specs/ep-ctx.md §4.2.
+ */
+export const RunLivenessState = {
+  Completed: 'completed',
+  Advanced: 'advanced',
+  PlanOnly: 'plan_only',
+  EmptyResponse: 'empty_response',
+  Blocked: 'blocked',
+  Failed: 'failed',
+  NeedsFollowup: 'needs_followup',
+} as const;
+export type RunLivenessState = (typeof RunLivenessState)[keyof typeof RunLivenessState];
+
+/** US-CTX3 — estados que merecem continuação bounded (re-wake alvo). */
+export const CONTINUABLE_LIVENESS: readonly RunLivenessState[] = [
+  RunLivenessState.PlanOnly,
+  RunLivenessState.EmptyResponse,
+] as const;
+
+/**
  * US-COLAB3 — estado de um item na wakeup queue durável (Postgres). A fila é só
  * ESTADO persistido: o processamento segue in-process (Orchestrator), SEM Redis
  * (invariante 7 / ADR-0019 / ADR-0032).
@@ -100,6 +134,8 @@ export type WakeupStatus = (typeof WAKEUP_STATUS)[number];
  *  - hitl_answered:     humano respondeu uma pergunta pendente.
  *  - manual_step:       "Rodar 1 iteração" / stepOnce.
  *  - reconcile:         re-enfileirado no boot a partir do board.
+ *  - continuation:      US-CTX3 — run improdutivo (plan_only/empty_response)
+ *                       recuperável; re-wake alvo bounded (continuationCap).
  */
 export const WAKEUP_REASON = [
   'story_in_progress',
@@ -109,6 +145,7 @@ export const WAKEUP_REASON = [
   'reconcile',
   'blockers_resolved', // US-BLOCK3: todos os blockers (dependsOn) fecharam
   'issue_unblock', // US-BLOCK2: owner=agent notificado para destravar
+  'continuation', // US-CTX3: continuação bounded de run improdutivo (EP-CTX)
 ] as const;
 export type WakeupReason = (typeof WAKEUP_REASON)[number];
 
