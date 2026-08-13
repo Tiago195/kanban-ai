@@ -13,3 +13,14 @@ export const createReviewCommentSchema = z.object({
 });
 
 export type CreateReviewCommentDto = z.infer<typeof createReviewCommentSchema>;
+
+/**
+ * US-OBS2-4 — Schema de snooze de uma review action. `untilMs` é um instante
+ * FUTURO em epoch-ms até o qual o sinal fica silenciado. O `actionId` vem do
+ * path.
+ */
+export const snoozeReviewActionSchema = z.object({
+  untilMs: z.number().int().positive(),
+});
+
+export type SnoozeReviewActionDto = z.infer<typeof snoozeReviewActionSchema>;
