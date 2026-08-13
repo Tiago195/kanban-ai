@@ -669,13 +669,20 @@ export interface CommitOutcome {
    *                              nunca commitamos direto no repo-alvo.
    *  - 'commit-failed'         → o git do engine falhou (best-effort).
    *  - 'nothing-to-commit'     → worktree sem mudanças.
+   *  - 'held-for-human'        → US-HARD4: o gate guardado SEGUROU a ação (hold)
+   *                              e escalou para HITL (`needsHuman`) em vez de
+   *                              commitar às cegas.
+   *  - 'denied'                → US-HARD4: o gate guardado NEGOU a ação
+   *                              (fail-closed).
    */
   skippedReason?:
     | 'disabled'
     | 'not-verified'
     | 'no-isolated-worktree'
     | 'commit-failed'
-    | 'nothing-to-commit';
+    | 'nothing-to-commit'
+    | 'held-for-human'
+    | 'denied';
 }
 
 // ─────────────────────────────────────────────────────────────
