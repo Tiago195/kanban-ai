@@ -8,6 +8,7 @@ export type {
   ChatPanelMessage,
   ChatPanelPending,
   ChatPanelRole,
+  ChatPanelSlashCommand,
 } from './components/ChatPanel';
 export { useLoopState, useLoopMetrics, useStepLoop, useAutoPlay, useAgentChat } from './hooks';
 export type { UseAgentChatResult } from './hooks';

@@ -23,7 +23,7 @@ import type { ExecState, StoryPoints } from "@kanban-ai/shared";
 
 import { useCardAssignees } from "@/features/assignees";
 import { ChatPanel, IterationDiffViewer, LoopMetricsPanel, useAgentChat, useAutoPlay, useLoopState, useStepLoop } from "@/features/ai-engine";
-import type { ChatPanelMessage } from "@/features/ai-engine";
+import type { ChatPanelMessage, ChatPanelSlashCommand } from "@/features/ai-engine";
 import { useAgentChatStore } from "@/features/ai-engine/services/agentChatStore";
 import { useBoard, useCards, useCreateCard, useDeleteCard, useModels, useMoveCard, usePrimaryBoardId } from "@/features/board/hooks";
 import { useBoardUiStore } from "@/features/board/services";
@@ -1842,6 +1842,14 @@ function TaskChat({ task }: { task: ApiCardDetails }) {
 
   const hasOptions = Boolean(pending?.options && pending.options.length > 0);
 
+  const slashCommands: ChatPanelSlashCommand[] = [
+    {
+      cmd: "/clear",
+      description: "Limpar histórico local desta sessão",
+      onRun: () => useAgentChatStore.getState().reset(task.id),
+    },
+  ];
+
   return (
     <div className="modal-section">
       <div className="modal-section-title">💬 Conversa com o agente</div>
@@ -1858,6 +1866,7 @@ function TaskChat({ task }: { task: ApiCardDetails }) {
         placeholder={hasOptions ? "Escolha acima ou escreva sua resposta…" : "Responda ao agente…"}
         onSend={answer}
         onQuickReply={answer}
+        slashCommands={slashCommands}
       />
     </div>
   );

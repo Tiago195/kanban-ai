@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
 import { AgentMessageBody } from "@/features/ai-engine/components/AgentMessageBody";
+import {
+  filterSlashCommands,
+  parseSlashCommand,
+} from "@/features/ai-engine/utils/slashCommands";
 
 /** Papel de quem emitiu a mensagem no chat. */
 export type ChatPanelRole = "ai" | "user" | "system";
@@ -29,6 +33,12 @@ export interface ChatPanelMessage {
  */
 export interface ChatPanelPending {
   options?: string[];
+}
+
+export interface ChatPanelSlashCommand {
+  cmd: `/${string}`;
+  description: string;
+  onRun: () => void;
 }
 
 export interface ChatPanelProps {
@@ -65,6 +75,8 @@ export interface ChatPanelProps {
   questionHint?: ReactNode;
   /** Envia o texto digitado. */
   onSend: (text: string) => void;
+  /** Comandos slash habilitados para este caller. */
+  slashCommands?: ChatPanelSlashCommand[];
   /** Clique num chip de resposta rápida (envia direto). */
   onQuickReply?: (text: string) => void;
   /** Renderizador do corpo da mensagem. Default: <AgentMessageBody>. */
@@ -102,6 +114,7 @@ export function ChatPanel({
   emptyState = "Sem mensagens ainda.",
   questionHint,
   onSend,
+  slashCommands = [],
   onQuickReply,
   renderMessageBody,
 }: ChatPanelProps) {
@@ -132,10 +145,20 @@ export function ChatPanel({
         : `há ${Math.floor(elapsedSec / 60)}m${String(elapsedSec % 60).padStart(2, "0")}s`;
 
   const inputEnabled = inputMode === "always" ? !busy : Boolean(pending) && !busy;
+  const slashMatches = filterSlashCommands(draft, slashCommands);
+  const showSlashAutocomplete = inputEnabled && draft.trimStart().startsWith("/") && slashMatches.length > 0;
 
   const submit = () => {
     const text = draft.trim();
     if (!text || !inputEnabled) return;
+
+    const parsedCommand = parseSlashCommand(text, slashCommands);
+    if (parsedCommand) {
+      parsedCommand.onRun();
+      setDraft("");
+      return;
+    }
+
     onSend(text);
     setDraft("");
   };
@@ -213,6 +236,27 @@ export function ChatPanel({
                 ))}
               </div>
             ) : null}
+          </div>
+        ) : null}
+        {showSlashAutocomplete ? (
+          <div className="agent-chat-quick-replies" role="listbox" aria-label="Comandos">
+            {slashMatches.map((command) => (
+              <button
+                key={command.cmd}
+                type="button"
+                className="chat-chip"
+                data-testid="chat-slash-command"
+                onClick={() => {
+                  if (!inputEnabled) return;
+                  command.onRun();
+                  setDraft("");
+                }}
+                disabled={!inputEnabled}
+                title={command.description}
+              >
+                {command.cmd} — {command.description}
+              </button>
+            ))}
           </div>
         ) : null}
         <div className="agent-chat-input-row">
