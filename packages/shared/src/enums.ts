@@ -146,6 +146,7 @@ export const WAKEUP_REASON = [
   'blockers_resolved', // US-BLOCK3: todos os blockers (dependsOn) fecharam
   'issue_unblock', // US-BLOCK2: owner=agent notificado para destravar
   'continuation', // US-CTX3: continuação bounded de run improdutivo (EP-CTX)
+  'monitor_due', // US-SCHED1: deferred monitor reached its scheduledFor time
 ] as const;
 export type WakeupReason = (typeof WAKEUP_REASON)[number];
 
