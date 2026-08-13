@@ -274,14 +274,16 @@ export class ProjectWorkspaceService {
    * agente/config ssh do ambiente do servidor. NÃO manipulamos segredos aqui: a
    * autenticação é responsabilidade do ssh do sistema (agent/known_hosts). O
    * prompt de terminal é DESABILITADO (`GIT_TERMINAL_PROMPT=0`) para nunca
-   * travar aguardando credencial.
+   * travar aguardando credencial. Quando `PROJECTS_SSH_COMMAND` está setado, ele
+   * é injetado como `GIT_SSH_COMMAND` (ex.: fixar `-i <chave>`, porta 443 ou
+   * `-F /dev/null` quando o `~/.ssh/config` montado tem dono ≠ root).
    */
   private async systemGitClone(project: ProjectRow, localPath: string): Promise<void> {
     const args = ['clone'];
     if (project.defaultBranch) args.push('--branch', project.defaultBranch);
     args.push('--', project.repoUrl, localPath);
     await execFileAsync('git', args, {
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: this.systemGitEnv(),
       timeout: this.config.projects.gitTimeoutMs,
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -289,13 +291,27 @@ export class ProjectWorkspaceService {
 
   /** US-PROJ3 (ssh) — fetch + checkout delegado ao `git` do sistema no clone. */
   private async systemGitFetch(localPath: string, branch: string | undefined): Promise<void> {
-    const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+    const env = this.systemGitEnv();
     const opts = { cwd: localPath, env, timeout: this.config.projects.gitTimeoutMs };
     await execFileAsync('git', ['fetch', '--all', '--prune'], opts);
     if (branch) {
       await execFileAsync('git', ['checkout', '--force', branch], opts);
       await execFileAsync('git', ['reset', '--hard', `origin/${branch}`], opts);
     }
+  }
+
+  /**
+   * Ambiente do `git` do sistema para operações SSH: desabilita o prompt de
+   * terminal (nunca trava pedindo credencial) e, quando configurado, injeta
+   * `GIT_SSH_COMMAND` (`PROJECTS_SSH_COMMAND`) — sem segredo, só flags de
+   * transporte ssh.
+   */
+  private systemGitEnv(): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+    if (this.config.projects.sshCommand) {
+      env.GIT_SSH_COMMAND = this.config.projects.sshCommand;
+    }
+    return env;
   }
 
   /**

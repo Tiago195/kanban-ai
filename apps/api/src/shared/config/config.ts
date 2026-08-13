@@ -426,6 +426,16 @@ export interface AppConfig {
      * agente ssh/chave configurado no ambiente do servidor.
      */
     allowSsh: boolean;
+    /**
+     * EP-PROJECT / US-PROJ3 — comando ssh customizado para o `git` do sistema
+     * (`GIT_SSH_COMMAND`) nos clones/fetch via SSH. Lido de `PROJECTS_SSH_COMMAND`.
+     * Default `undefined` (usa o ssh do ambiente sem override). Necessário quando
+     * a chave/known_hosts/porta precisam ser fixados dentro do container (ex.:
+     * firewall corporativo que exige porta 443, ou `~/.ssh/config` montado com
+     * dono ≠ root que o ssh recusa por permissão). Nunca contém segredo — só
+     * flags de transporte (`-i`, `-o`, `-p`).
+     */
+    sshCommand: string | undefined;
   };
   /**
    * US-HARD2 — circuit-breaker de crash-loop no boot com backoff persistido.
@@ -645,6 +655,7 @@ export function loadConfig(): AppConfig {
       dir: resolveProjectsDir(process.env.PROJECTS_DIR),
       gitTimeoutMs: num(process.env.PROJECTS_GIT_TIMEOUT_MS, 300_000),
       allowSsh: process.env.PROJECTS_ALLOW_SSH === 'true',
+      sshCommand: process.env.PROJECTS_SSH_COMMAND?.trim() || undefined,
     },
     boot: {
       circuitBreakerEnabled: process.env.BOOT_CIRCUIT_BREAKER_ENABLED !== 'false',

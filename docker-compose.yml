@@ -61,6 +61,13 @@ services:
       PROJECTS_DIR: ${PROJECTS_DIR:-/data/projects}
       PROJECTS_GIT_TIMEOUT_MS: ${PROJECTS_GIT_TIMEOUT_MS:-300000}
       PROJECTS_ALLOW_SSH: ${PROJECTS_ALLOW_SSH:-false}
+      # GIT_SSH_COMMAND injetado no clone/fetch via SSH. O default cobre o caso
+      # container: usa a chave montada em /root/.ssh/id_ed25519, ignora o
+      # ~/.ssh/config do host (que o ssh recusaria por dono ≠ root — "Bad owner
+      # or permissions") via -F /dev/null, e força porta 443/ssh.github.com
+      # (firewall corporativo costuma bloquear a porta 22). Ajuste/limpe se seu
+      # ambiente usa porta 22 ou outra chave. NUNCA contém segredo (só flags).
+      PROJECTS_SSH_COMMAND: ${PROJECTS_SSH_COMMAND:-ssh -F /dev/null -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts -o IdentityFile=/root/.ssh/id_ed25519 -o IdentitiesOnly=yes -o Hostname=ssh.github.com -p 443}
       # ── Autenticação do Copilot CLI DENTRO do container (risco #1 do ADR-0019) ──
       # Opção B: token passado por env (repasse do host, sem default). O adapter e
       # o CLI honram GH_TOKEN/GITHUB_TOKEN quando presentes.
@@ -81,6 +88,13 @@ services:
       # procura sua config no HOME → montamos em /root/.copilot (HOME do root no
       # container). Comente esta linha se preferir só o token via GH_TOKEN.
       - ${HOST_COPILOT_DIR:-~/.copilot}:/root/.copilot:ro
+      # Chave SSH do host (read-only) para clone de Projects via git@... quando
+      # PROJECTS_ALLOW_SSH=true. O clone ssh delega ao `git`/`ssh` do container,
+      # que procura a identidade em $HOME/.ssh (/root/.ssh do root). Sem isto o
+      # clone de repo privado por ssh falha (timeout/permission denied).
+      # HOST_SSH_DIR default ~/.ssh. Requer known_hosts com github.com (ou o
+      # container usa StrictHostKeyChecking desligado via /root/.ssh/config).
+      - ${HOST_SSH_DIR:-~/.ssh}:/root/.ssh:ro
     entrypoint: ['sh', '/app/docker/api-dev-entrypoint.sh']
 
   # ───────────────────────────────────────────────────────────────────────────
