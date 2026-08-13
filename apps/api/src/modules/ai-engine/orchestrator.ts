@@ -600,15 +600,33 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // US-A5 (EP-A/ADR-0027) — bootstrap on-ramp: na primeira vez que uma story
-    // deste repo-alvo entra em In Progress, semeia a memória em colmeia com
-    // neurônios iniciais por módulo (`modules/<modulo>.md`). É IDEMPOTENTE —
-    // bootstrapFromRepo pula módulos já existentes — e totalmente DEFENSIVO: se
-    // falhar, apenas registra um warning e o loop segue normalmente.
+    // US-A5 (EP-A/ADR-0027) — bootstrap on-ramp + arranque do auto-play.
     //
-    // US-PROJ4: o `repoPath` vem do clone gerenciado quando o Board tem Project
-    // (senão do `aiProject` legado). A colmeia é NAMESPACEADA por `projectId`
-    // (§1.2/decisão #6) para que projetos distintos não colidam.
+    // IMPORTANTE (fix boot-hang): o bootstrap resolve o repo-alvo via
+    // `resolveStoryTargetRepo`, que para Boards com Project dispara
+    // `ensureCloned` — um `git clone` que pode ser LENTO (repo grande) ou até
+    // travar (auth/rede). Se aguardássemos isso aqui, e como `onStoryEnterInProgress`
+    // é AWAITED por `reconcileOnBoot` (que por sua vez é awaited no
+    // `onModuleInit`), o clone BLOQUEARIA o boot inteiro do Nest — o servidor
+    // HTTP nunca começaria a ouvir e `GET /health` recusaria conexão até o clone
+    // terminar. Por isso a cauda lenta (bootstrap de memória + `startAuto`) roda
+    // em BACKGROUND: a sessão/watchdog já foram criados de forma síncrona acima,
+    // então o estado observável (registry, WS) fica consistente imediatamente e o
+    // loop arranca assim que o clone concluir.
+    void this.bootstrapAndStartAuto(storyId);
+  }
+
+  /**
+   * Cauda NÃO-BLOQUEANTE de `onStoryEnterInProgress`: semeia a memória em colmeia
+   * a partir do repo-alvo (idempotente e defensivo) e então arranca o auto-play.
+   * Roda em background porque `resolveStoryTargetRepo` pode fazer um `git clone`
+   * lento; ver a nota em `onStoryEnterInProgress`.
+   *
+   * US-PROJ4: o `repoPath` vem do clone gerenciado quando o Board tem Project
+   * (senão do `aiProject` legado). A colmeia é NAMESPACEADA por `projectId`
+   * (§1.2/decisão #6) para que projetos distintos não colidam.
+   */
+  private async bootstrapAndStartAuto(storyId: string): Promise<void> {
     try {
       const repoPath = await this.resolveStoryTargetRepo(storyId);
       const namespace = await this.resolveMemoryNamespace(storyId);
@@ -631,6 +649,16 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       );
     }
 
+    // Guard de corrida (fix boot-hang): como esta cauda roda em background, a
+    // story pode ter SAÍDO de In Progress (stop/leave) enquanto o clone/bootstrap
+    // estava em andamento. Nesse caso a sessão já foi removida — NÃO reabrir o
+    // auto-play (senão vaza um timer e ressuscita uma sessão fantasma).
+    if (!this.sessions.get(storyId)) {
+      this.logger.debug(
+        `bootstrapAndStartAuto: sessão de story=${storyId} sumiu durante o bootstrap; auto-play não iniciado`,
+      );
+      return;
+    }
     this.startAuto(storyId);
   }
 
