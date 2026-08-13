@@ -120,15 +120,16 @@ Há dois modos de rodar a API, ambos suportados (ver
   docker compose up -d postgres   # só o banco
   npm run dev                     # api + web no host
   ```
-  O profile `docker-app` acrescenta o `web` em container quando desejado:
-  `docker compose --profile docker-app up -d`.
+  Para rodar só o Vite no host (dev do frontend), use `npm run dev:web` em vez
+  do `web` containerizado.
 
 - **Modo PROJECT (containerizado, default).** Quando o Board usa um `Project`
   (clone gerenciado no volume `kanban_projects`), o `cwd` do agent é interno ao
   container e a API pode rodar em container:
   ```bash
-  docker compose up -d            # sobe api + postgres (sem profile)
+  docker compose up -d            # sobe postgres + api + web (um comando)
   curl localhost:3333/health
+  # frontend em http://localhost:5173
   ```
   O volume nomeado `kanban_projects` é montado em `PROJECTS_DIR=/data/projects`; os
   clones ficam em `/data/projects/<projectId>`.

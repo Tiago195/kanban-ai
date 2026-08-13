@@ -19,7 +19,7 @@ services:
   # ───────────────────────────────────────────────────────────────────────────
   # API containerizada em MODO PROJECT (default) — revisão parcial do ADR-0019.
   #
-  # `docker compose up -d` (SEM `--profile docker-app`) sobe **api + postgres**.
+  # `docker compose up -d` sobe **postgres + api + web** (um comando inicia tudo).
   # Isto voltou a ser possível porque, com o EP-PROJECT, o repo-alvo de uma story
   # é um **clone gerenciado** dentro do volume nomeado `kanban_projects`
   # (montado em `PROJECTS_DIR=/data/projects`): o `cwd` do spawn do agent é
@@ -27,9 +27,8 @@ services:
   # ADR-0038 (supersede parcial do ADR-0019).
   #
   # O modo HOST legado continua suportado para `aiProject` (repos fora do volume):
-  # NÃO suba este serviço e rode a API no host com `npm run dev` (ver ADR-0019 e
-  # CONTRIBUTING.md). O profile `docker-app` (acrescenta o `web` em container)
-  # permanece como opção documentada.
+  # suba só `docker compose up -d postgres` e rode a API no host com `npm run dev`
+  # (ver ADR-0019 e CONTRIBUTING.md).
   # ───────────────────────────────────────────────────────────────────────────
   api:
     build:
@@ -85,11 +84,10 @@ services:
     entrypoint: ['sh', '/app/docker/api-dev-entrypoint.sh']
 
   # ───────────────────────────────────────────────────────────────────────────
-  # Frontend em container atrás do profile opt-in `docker-app` (ADR-0019). Sobe
-  # só com `docker compose --profile docker-app up -d`; no fluxo normal rode o
-  # web no host com `npm run dev:web`. Fica separado da API para manter o default
-  # (`docker compose up -d`) enxuto: api + postgres. O `api` default já roda em
-  # container com bind mount, então este profile só ACRESCENTA o `web`.
+  # Frontend em container. Sobe junto no `docker compose up -d` (postgres + api +
+  # web) para um único comando de start. Usa a imagem de dev com hot-reload
+  # (bind mount do código do host). O Vite roda no container e é acessível em
+  # http://localhost:5173 (network_mode host).
   # ───────────────────────────────────────────────────────────────────────────
   web:
     build:
@@ -98,8 +96,6 @@ services:
     container_name: kanban-ai-web
     restart: unless-stopped
     network_mode: host
-    # Opt-in: por padrão rode o web no host (`npm run dev:web`).
-    profiles: ['docker-app']
     depends_on:
       - api
     environment:

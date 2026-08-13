@@ -68,20 +68,18 @@ kanban-ai/
 ## Como rodar / validar
 
 ```bash
-npm install                 # resolve os 3 workspaces
-docker compose up -d        # SÓ o Postgres 16 em 127.0.0.1:5432 (ver ADR-0019)
-npm run db:migrate          # aplica migrations
-npm run db:seed             # popula o banco (seed portado do artifact)
-npm run dev                 # sobe web + api NO HOST (não no Docker)
+npm install                 # resolve os 3 workspaces (usados via bind mount)
+cp .env.example .env
+docker compose up -d        # sobe postgres + api + web (migrations + seed no boot)
 curl localhost:3333/health  # smoke do backend
+# frontend em http://localhost:5173
 npm run build && npm run lint
 ```
 
-> **Por que a API roda no host?** O loop engine dá `spawn` no Copilot CLI com
-> `cwd` = um git worktree dentro do repositório-alvo (`aiProject`), que é um
-> caminho arbitrário do FS do usuário. Dentro do Docker a API só veria `/app`.
-> Ver [ADR-0019](docs/adr/0019-api-runs-on-host-not-docker.md). Os serviços
-> `api`/`web` do compose existem só sob o profile opt-in `docker-app`.
+> **Modo PROJECT (default):** com a entidade `Project` (repo clonado no volume
+> `kanban_projects`, path interno previsível) a API roda **em container** — um
+> comando sobe tudo (ADR-0038). Fallback **host** (legado `aiProject`): `docker
+> compose up -d postgres` + `npm run dev` (ver [ADR-0019](docs/adr/0019-api-runs-on-host-not-docker.md)).
 
 > **Nota de sandbox:** em ambientes onde o Prisma Query Engine (Rust) não consegue
 > abrir TCP de saída, rode as operações de banco dentro da rede do Docker. Ver

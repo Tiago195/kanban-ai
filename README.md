@@ -24,23 +24,25 @@ API rodar **inteira no Docker** ([ADR-0038](docs/adr/0038-project-clone-in-volum
 
 ## Começando
 
-Pré-requisitos: **Docker** e **Node** (para o frontend e o `npm install`).
+Pré-requisitos: **Docker** e **Node** (para o `npm install` inicial).
 
 ```bash
 cp .env.example .env
-npm install                    # instala os 3 workspaces (usado via bind mount pelo container)
+npm install                    # instala os 3 workspaces (usados via bind mount pelos containers)
 
-docker compose up -d           # sobe postgres + api (migrations + seed rodam no boot)
+docker compose up -d           # sobe postgres + api + web (migrations + seed rodam no boot)
+
 curl localhost:3333/health     # smoke da API
-
-npm run dev:web                # frontend no host → http://localhost:5173
+# abra http://localhost:5173   # frontend (Vite, hot-reload)
 ```
 
-A API roda containerizada por padrão; o **frontend fica no host** (`npm run dev:web`)
-para um dev loop rápido. Para subir o web também em container:
-`docker compose --profile docker-app up -d`.
+Um comando (`docker compose up -d`) sobe **tudo**: banco, API e frontend. O código
+do host segue por bind mount, então edições refletem com hot-reload.
 
 Para derrubar: `docker compose down` (use `-v` para apagar o volume do banco).
+
+> **Dev do frontend no host (opcional):** se preferir rodar só o Vite no host,
+> `docker compose up -d postgres api` + `npm run dev:web`.
 
 > **Copilot CLI no container:** o modo real (`AGENT_RUNNER_KIND=copilot`) precisa do
 > CLI autenticado dentro do container. O compose monta `~/.copilot` como read-only
@@ -79,5 +81,5 @@ kanban-ai/
 ├── apps/mcp/          # MCP Server (ADR-0020)
 ├── packages/shared/   # contratos compartilhados
 ├── docs/              # reference/, adr/, loop-engine.md
-└── docker-compose.yml # postgres + api (web via profile docker-app)
+└── docker-compose.yml # postgres + api + web (um comando sobe tudo)
 ```
