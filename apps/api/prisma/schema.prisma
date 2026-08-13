@@ -178,6 +178,9 @@ model Card {
   description String   @default("")
 
   points         Int? // 1,2,3,5,8,13 (só epic/story)
+  priority       Int?
+  idempotencyKey String?
+  startInPlanMode Boolean @default(false)
   blocked        Boolean @default(false)
   everInProgress Boolean @default(false)
 
@@ -266,6 +269,9 @@ model Card {
   reviewComments ReviewComment[]
 
   @@unique([boardId, key])
+  // idempotencyKey: índice UNIQUE PARCIAL (WHERE NOT NULL) definido direto na
+  // migration SQL (Prisma não suporta índice parcial no schema). Ver
+  // migrations/20260813114500_bux_card_fields.
   @@index([boardId])
   @@index([parentId])
   @@index([type])

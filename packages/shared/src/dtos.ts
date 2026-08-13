@@ -28,6 +28,9 @@ export interface CreateCardDto {
   aiNotes?: string;
   /** Loop profile do card (validado contra profiles builtin/custom). */
   loopType?: string;
+  priority?: number;
+  idempotencyKey?: string;
+  startInPlanMode?: boolean;
 }
 
 /** Payload para mover um card entre colunas (PATCH /cards/:id/move). */
@@ -50,6 +53,8 @@ export interface UpdateCardDto {
   aiNotes?: string;
   /** Modelo de AI deste card (null = herdar do pai/board). */
   model?: string | null;
+  priority?: number | null;
+  startInPlanMode?: boolean;
 }
 
 /** Criar item de DOD (POST /cards/:id/dod). */

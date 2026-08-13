@@ -16,6 +16,9 @@ export const createCardSchema = z.object({
     .optional(),
   columnId: z.string().uuid().optional(),
   loopType: z.string().min(1).optional(),
+  priority: z.number().int().optional(),
+  idempotencyKey: z.string().min(1).optional(),
+  startInPlanMode: z.boolean().optional(),
   aiSummary: z.string().optional(),
   aiProject: z.string().optional(),
   aiNotes: z.string().optional(),
@@ -88,6 +91,8 @@ export const updateCardSchema = z
     aiNotes: z.string().optional(),
     model: z.string().nullable().optional(),
     loopType: z.string().min(1).nullable().optional(),
+    priority: z.number().int().nullable().optional(),
+    startInPlanMode: z.boolean().optional(),
   })
   .refine((o) => Object.keys(o).length > 0, { message: 'nenhum campo para atualizar' });
 

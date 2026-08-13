@@ -123,6 +123,8 @@ export interface Assignee {
   name: string;
   /** Modelo/agent preferido para este assignee (ex.: 'opus', 'gpt'). */
   model: string | null;
+  priority?: number | null;
+  startInPlanMode: boolean;
   /** "AGENTS.md" do agent: instruções/prompt de sistema que guiam o loop. */
   instructions: string;
 }

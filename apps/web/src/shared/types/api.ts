@@ -85,6 +85,7 @@ export interface ApiCardSummary {
   aiSummary?: string | null;
   aiProject?: string | null;
   aiNotes?: string | null;
+  startInPlanMode?: boolean;
   model?: string | null;
   resolvedModel?: string | null;
   loopType?: string | null;

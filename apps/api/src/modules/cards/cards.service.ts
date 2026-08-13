@@ -296,6 +296,13 @@ export class CardsService {
       await this.validateLoopType(dto.boardId, dto.loopType);
     }
 
+    if (dto.idempotencyKey) {
+      const existing = await this.prisma.card.findFirst({
+        where: { boardId: dto.boardId, idempotencyKey: dto.idempotencyKey },
+      });
+      if (existing) return existing;
+    }
+
     const card = await this.prisma.$transaction(async (tx) => {
       const board = await tx.board.findUnique({ where: { id: dto.boardId } });
       if (!board) throw new BadRequestException('board inexistente');
@@ -350,6 +357,9 @@ export class CardsService {
           parentId: dto.parentId ?? null,
           position,
           ...(dto.loopType !== undefined ? { loopType: dto.loopType } : {}),
+          ...(dto.priority !== undefined ? { priority: dto.priority } : {}),
+          ...(dto.idempotencyKey !== undefined ? { idempotencyKey: dto.idempotencyKey } : {}),
+          ...(dto.startInPlanMode !== undefined ? { startInPlanMode: dto.startInPlanMode } : {}),
           ...(dto.aiSummary !== undefined ? { aiSummary: dto.aiSummary } : {}),
           ...(dto.aiProject !== undefined ? { aiProject: dto.aiProject } : {}),
           ...(dto.aiNotes !== undefined ? { aiNotes: dto.aiNotes } : {}),
@@ -673,6 +683,8 @@ export class CardsService {
         ...(dto.aiNotes !== undefined ? { aiNotes: dto.aiNotes } : {}),
         ...(dto.model !== undefined ? { model: dto.model } : {}),
         ...(dto.loopType !== undefined ? { loopType: dto.loopType } : {}),
+        ...(dto.priority !== undefined ? { priority: dto.priority } : {}),
+        ...(dto.startInPlanMode !== undefined ? { startInPlanMode: dto.startInPlanMode } : {}),
       },
     });
 
