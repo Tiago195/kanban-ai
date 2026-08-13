@@ -69,6 +69,7 @@ enum WakeupReason {
   blockers_resolved // EP-BLOCK/US-BLOCK3: dependência(s) fecharam → auto-wake
   issue_unblock     // EP-BLOCK/US-BLOCK2: bloqueio de input resolvido pelo owner
   continuation      // EP-CTX/US-CTX3: continuação bounded de run improdutivo
+  monitor_due       // US-SCHED1: deferred monitor reached its scheduledFor time
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -538,9 +539,18 @@ model WakeupQueue {
   claimedAt   DateTime? // quando o processador in-process pegou este item
   processedAt DateTime? // quando concluiu (status=done/failed)
 
+  // US-SCHED1: Deferred wakeup monitors (time-gated). Items with scheduledFor =
+  // null are immediate (existing behavior). Items with future scheduledFor are
+  // "monitors" that must NOT be claimed/fired until now >= scheduledFor.
+  scheduledFor DateTime? // when to fire this monitor (null = immediate)
+  notes        String? // optional monitor description
+  timeoutAt    DateTime? // optional timeout for the monitor
+  maxAttempts  Int? // optional max attempts for the monitor
+
   @@index([status])
   @@index([epicId])
   @@index([storyId])
+  @@index([scheduledFor])
 }
 
 // AgentChatMessage de @kanban-ai/shared. Diferente de Iteration (registro

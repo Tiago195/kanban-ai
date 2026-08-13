@@ -12,6 +12,10 @@ import { PrismaService } from '../../shared/db/prisma.service';
  *
  * SEM Redis/BullMQ (invariante 7 / ADR-0019 / ADR-0032): o estado da fila é uma
  * tabela Postgres; o executor continua sendo o `setInterval`/AgentSessionManager.
+ *
+ * US-SCHED1 — deferred monitors: items com `scheduledFor` são time-gated e só
+ * devem ser claimed/fired quando `now >= scheduledFor`. Items com `scheduledFor
+ * = null` são immediate (comportamento original).
  */
 @Injectable()
 export class WakeupQueueService {
@@ -72,6 +76,69 @@ export class WakeupQueueService {
     });
   }
 
+  /**
+   * US-SCHED1 — enfileira um deferred monitor (time-gated). Como `enqueue`, mas
+   * com `scheduledFor` e metadata opcional. Idempotente/coalescing (máx 1 item
+   * não-terminal por story). Se já existe um ativo, incrementa attempts e
+   * atualiza scheduledFor + metadata.
+   */
+  async enqueueDeferred(input: {
+    storyId: string;
+    scheduledFor: Date;
+    epicId?: string | null;
+    notes?: string;
+    timeoutAt?: Date;
+    maxAttempts?: number;
+  }): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const active = await tx.wakeupQueue.findFirst({
+        where: { storyId: input.storyId, status: { in: ['pending', 'claimed'] } },
+        select: { id: true },
+      });
+      if (active) {
+        await tx.wakeupQueue.update({
+          where: { id: active.id },
+          data: {
+            attempts: { increment: 1 },
+            reason: 'monitor_due',
+            scheduledFor: input.scheduledFor,
+            ...(input.epicId != null ? { epicId: input.epicId } : {}),
+            ...(input.notes != null ? { notes: input.notes } : {}),
+            ...(input.timeoutAt != null ? { timeoutAt: input.timeoutAt } : {}),
+            ...(input.maxAttempts != null ? { maxAttempts: input.maxAttempts } : {}),
+          },
+        });
+        return;
+      }
+      try {
+        await tx.wakeupQueue.create({
+          data: {
+            storyId: input.storyId,
+            reason: 'monitor_due',
+            scheduledFor: input.scheduledFor,
+            epicId: input.epicId ?? null,
+            notes: input.notes ?? null,
+            timeoutAt: input.timeoutAt ?? null,
+            maxAttempts: input.maxAttempts ?? null,
+          },
+        });
+      } catch (err: unknown) {
+        if (isUniqueViolation(err)) {
+          await tx.wakeupQueue.updateMany({
+            where: { storyId: input.storyId, status: { in: ['pending', 'claimed'] } },
+            data: {
+              attempts: { increment: 1 },
+              reason: 'monitor_due',
+              scheduledFor: input.scheduledFor,
+            },
+          });
+          return;
+        }
+        throw err;
+      }
+    });
+  }
+
   /** Marca o wakeup `pending` da story como reivindicado pelo processador. */
   async claim(storyId: string): Promise<void> {
     await this.prisma.wakeupQueue.updateMany({
@@ -124,6 +191,38 @@ export class WakeupQueueService {
       orderBy: { createdAt: 'asc' },
     });
     return rows as { storyId: string; reason: WakeupReason; epicId: string | null }[];
+  }
+
+  /**
+   * US-SCHED1 — lista wakeups cujo scheduledFor já passou (ou é null = immediate).
+   * Time-gated: só retorna items prontos para serem processados agora.
+   */
+  async listDue(now = new Date()): Promise<
+    { storyId: string; reason: WakeupReason; epicId: string | null }[]
+  > {
+    const rows = await this.prisma.wakeupQueue.findMany({
+      where: {
+        status: 'pending',
+        OR: [
+          { scheduledFor: null }, // immediate (existing behavior)
+          { scheduledFor: { lte: now } }, // deferred monitor that is now due
+        ],
+      },
+      select: { storyId: true, reason: true, epicId: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows as { storyId: string; reason: WakeupReason; epicId: string | null }[];
+  }
+
+  /**
+   * US-SCHED1 — remove/limpa o monitor pendente de uma story (one-shot clear).
+   * Auto-clear ao atingir terminal state, ou clear explícito via endpoint.
+   */
+  async clearMonitor(storyId: string): Promise<void> {
+    await this.prisma.wakeupQueue.updateMany({
+      where: { storyId, status: { in: ['pending', 'claimed'] }, reason: 'monitor_due' },
+      data: { status: 'done', processedAt: new Date() },
+    });
   }
 }
 

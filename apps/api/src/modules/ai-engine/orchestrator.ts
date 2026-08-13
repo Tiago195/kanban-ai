@@ -90,6 +90,8 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
   private claimSweepTimer: NodeJS.Timeout | null = null;
   /** US-OBS2-4: tick global do scan de no-comment streak (SEM Redis). */
   private streakScanTimer: NodeJS.Timeout | null = null;
+  /** US-SCHED1: tick global de monitors deferred (time-gated wakeup). */
+  private monitorTickTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -157,6 +159,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     await this.reconcileOnBoot();
     this.startClaimSweep(); // US-ROB4: recuperação periódica de claims vencidos
     this.startNoCommentStreakScan(); // US-OBS2-4: scan periódico de anomalia
+    this.startMonitorTick(); // US-SCHED1: tick de monitors deferred
   }
 
   onModuleDestroy(): void {
@@ -167,6 +170,10 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     if (this.streakScanTimer) {
       clearInterval(this.streakScanTimer);
       this.streakScanTimer = null;
+    }
+    if (this.monitorTickTimer) {
+      clearInterval(this.monitorTickTimer);
+      this.monitorTickTimer = null;
     }
   }
 
@@ -316,6 +323,112 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `no-comment streak sinalizado: story=${storyId} task=${activeTaskId} streak=${result.streak} (>= ${threshold})`,
       );
+    }
+  }
+
+  /**
+   * US-SCHED1 — tick GLOBAL de monitors deferred (time-gated wakeup). Espelha
+   * `startClaimSweep`/`startNoCommentStreakScan`: puro `setInterval` com
+   * `unref()` + `try/catch` por job, cadência = `watchdogIntervalMs`, SEM Redis
+   * (invariante 7). Gated por `wakeupEnabled` (no-op quando fila desligada ou
+   * ausente).
+   */
+  private startMonitorTick(): void {
+    if (this.monitorTickTimer) return;
+    if (!this.wakeupEnabled) return;
+    const handle = setInterval(() => {
+      void this.fireDueMonitors().catch((err) =>
+        this.logger.warn(`monitorTick: ${(err as Error).message}`),
+      );
+    }, this.config.agent.watchdogIntervalMs);
+    handle.unref?.();
+    this.monitorTickTimer = handle;
+  }
+
+  /**
+   * US-SCHED1 — varre a fila de wakeup em busca de monitors cujo `scheduledFor`
+   * já passou (time-gated: `now >= scheduledFor`). Para cada um, dispara o wake
+   * via `onStoryEnterInProgress` (mecanismo canônico) e limpa o monitor (one-
+   * shot). Defensivo: uma falha por monitor nunca derruba o tick das demais.
+   */
+  private async fireDueMonitors(now = new Date()): Promise<void> {
+    if (!this.wakeupQueue) return;
+    let due: Array<{ storyId: string; reason: WakeupReason; epicId: string | null }> = [];
+    try {
+      due = await this.wakeupQueue.listDue(now);
+    } catch (err) {
+      this.logger.warn(`fireDueMonitors: leitura de due falhou: ${(err as Error).message}`);
+      return;
+    }
+    const monitors = due.filter((item) => item.reason === 'monitor_due');
+    for (const mon of monitors) {
+      try {
+        this.logger.log(`monitor_due disparando wake: story=${mon.storyId}`);
+        // Dispara o wake via mecanismo canônico (respeita serialização/concorrência).
+        await this.onStoryEnterInProgress(mon.storyId);
+        // One-shot: limpa o monitor após disparo (o agent pode re-armar se ainda
+        // estiver esperando).
+        await this.wakeupQueue.clearMonitor(mon.storyId);
+      } catch (err) {
+        this.logger.warn(`fireDueMonitors story=${mon.storyId}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  /**
+   * US-SCHED1 — arma um monitor deferred (time-gated wake) para uma story. O
+   * agent PARK (espera um evento externo) e acorda automaticamente no
+   * `scheduledFor`. One-shot: dispara UMA vez e auto-clear; o agent pode re-
+   * armar se ainda estiver esperando. Defensivo: no-op se a fila está ausente.
+   */
+  async setMonitor(
+    storyId: string,
+    opts: {
+      scheduledFor: Date;
+      notes?: string;
+      timeoutAt?: Date;
+      maxAttempts?: number;
+    },
+  ): Promise<void> {
+    if (!this.wakeupQueue) {
+      this.logger.warn(`setMonitor: fila ausente, monitor ignorado (story=${storyId})`);
+      return;
+    }
+    const epicId = await this.resolveStoryEpic(storyId);
+    try {
+      await this.wakeupQueue.enqueueDeferred({
+        storyId,
+        epicId,
+        scheduledFor: opts.scheduledFor,
+        notes: opts.notes,
+        timeoutAt: opts.timeoutAt,
+        maxAttempts: opts.maxAttempts,
+      });
+      this.logger.log(
+        `monitor armado: story=${storyId} scheduledFor=${opts.scheduledFor.toISOString()}`,
+      );
+    } catch (err) {
+      this.logger.warn(`setMonitor story=${storyId}: ${(err as Error).message}`);
+      throw err;
+    }
+  }
+
+  /**
+   * US-SCHED1 — limpa/cancela o monitor pendente de uma story (one-shot clear).
+   * Útil quando o agent decide que não precisa mais esperar. Defensivo: no-op se
+   * a fila está ausente.
+   */
+  async clearMonitor(storyId: string): Promise<void> {
+    if (!this.wakeupQueue) {
+      this.logger.warn(`clearMonitor: fila ausente, clear ignorado (story=${storyId})`);
+      return;
+    }
+    try {
+      await this.wakeupQueue.clearMonitor(storyId);
+      this.logger.log(`monitor cleared: story=${storyId}`);
+    } catch (err) {
+      this.logger.warn(`clearMonitor story=${storyId}: ${(err as Error).message}`);
+      throw err;
     }
   }
 
@@ -2095,6 +2208,15 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
         .catch((err) =>
           this.logger.warn(
             `wakeupQueue.complete falhou (story=${storyId}): ${(err as Error).message}`,
+          ),
+        );
+      // US-SCHED1: auto-clear do monitor (one-shot) ao sair de In Progress
+      // (terminal ou pausa). O agent pode re-armar se ainda estiver esperando.
+      void this.wakeupQueue!
+        .clearMonitor(storyId)
+        .catch((err) =>
+          this.logger.warn(
+            `wakeupQueue.clearMonitor falhou (story=${storyId}): ${(err as Error).message}`,
           ),
         );
     }
