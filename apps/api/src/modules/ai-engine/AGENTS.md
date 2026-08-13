@@ -31,7 +31,7 @@ ai-engine/
   `running|idle|dead`. **Interface plugável** (ponto de extensão para BullMQ+Redis).
 - **`Orchestrator`**: `onStoryEnterInProgress(storyId)`, `stop(storyId, mode)`,
   `reconcileOnBoot()`.
-- **`WakeupQueueService`** (`wakeup-queue.service.ts`, US-COLAB3 / ADR-0032):
+- **`WakeupQueueService`** (`wakeup-queue.service.ts`, US-COLAB3 / ADR-0032 + US-SCHED1):
   fila de wakeups **durável no Postgres** (`WakeupQueue`), **idempotente** e com
   **coalescing** (índice único PARCIAL `WakeupQueue_storyId_active_key` garante no
   máx. 1 item `pending|claimed` por story). `enqueue|claim|complete|fail|recoverOnBoot|listPending`.
@@ -39,6 +39,16 @@ ai-engine/
   fila é persistido, para sobreviver a restart e mesclar wakeups duplicados.
   **Off-by-default** atrás de `AGENT_WAKEUP_QUEUE_ENABLED`; parâmetro OPCIONAL no
   construtor do `Orchestrator` (não quebra os specs que instanciam com fakes).
+  **US-SCHED1 — deferred monitors (time-gated wake):** `enqueueDeferred`, `listDue`,
+  `clearMonitor`. Items com `scheduledFor = null` são immediate (comportamento
+  original); items com `scheduledFor` futuro são "monitors" que só devem ser
+  claims/fired quando `now >= scheduledFor`. Orquestrador tem um tick periódico
+  (`startMonitorTick`, `fireDueMonitors`) que dispara wakes via
+  `onStoryEnterInProgress` ao atingir `scheduledFor` e auto-clear (one-shot). O
+  agent pode re-armar se ainda estiver esperando. Metadata: `notes`,
+  `timeoutAt`, `maxAttempts` preservados no coalescing. Endpoints:
+  `POST /cards/:id/loop/monitor`, `DELETE /cards/:id/loop/monitor`. MCP tools:
+  `loop_set_monitor`, `loop_clear_monitor`.
 - **`ValidationRunner`**: valida os `affectedFlows` quando o DOD fecha. Além das
   checagens estruturais, roda **validação empírica real** (#1) — executa os scripts
   do projeto-alvo (`test`/`build`/`lint`) no worktree isolado (`cwd`) via `npm run`
