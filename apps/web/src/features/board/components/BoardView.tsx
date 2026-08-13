@@ -1463,6 +1463,7 @@ function StoryModal({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [points, setPoints] = useState("");
+  const [planMode, setPlanMode] = useState(false);
   const [aiProject, setAiProject] = useState("");
   const [aiNotes, setAiNotes] = useState("");
   const [flowName, setFlowName] = useState("");
@@ -1474,6 +1475,7 @@ function StoryModal({
     setTitle(story.title);
     setDescription(story.description ?? "");
     setPoints(story.points ? String(story.points) : "");
+    setPlanMode(story.startInPlanMode ?? false);
     setAiProject(story.aiProject ?? "");
     setAiNotes(story.aiNotes ?? "");
   }, [story]);
@@ -1564,6 +1566,28 @@ function StoryModal({
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="field">
+              <label htmlFor="story-plan-mode">Modo planejamento</label>
+              <label className="checkbox-inline">
+                <input
+                  id="story-plan-mode"
+                  type="checkbox"
+                  data-testid="story-plan-mode-toggle"
+                  aria-label="Iniciar em modo planejamento"
+                  checked={planMode}
+                  onChange={(event) => {
+                    const next = event.target.checked;
+                    setPlanMode(next);
+                    updateCard.mutate({
+                      boardId,
+                      cardId: story.id,
+                      dto: { startInPlanMode: next },
+                    });
+                  }}
+                />
+                <span>Iniciar em modo planejamento</span>
+              </label>
             </div>
           </div>
         </div>
