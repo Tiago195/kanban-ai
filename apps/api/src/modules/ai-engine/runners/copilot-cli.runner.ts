@@ -7,6 +7,7 @@ import type {
   AgentRunner,
 } from './agent-runner.interface';
 import { CliAdapter, type CliEvent } from './cli-adapter';
+import { buildToolPolicyFlags } from './tool-policy';
 import {
   compactPrompt,
   isContextOverflowError,
@@ -33,8 +34,10 @@ export class CopilotCliRunner implements AgentRunner {
   readonly id = 'copilot-cli';
   private readonly logger = new Logger(CopilotCliRunner.name);
   private readonly adapter: CliAdapter;
+  private readonly config: AppConfig;
 
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
+    this.config = config;
     this.adapter = new CliAdapter(config);
   }
 
@@ -66,8 +69,16 @@ export class CopilotCliRunner implements AgentRunner {
 
   private spawnAndConsume(input: AgentRunInput): Promise<AgentRunResult> {
     const plan = this.adapter.buildSpawnPlan(input.prompt);
+    // US-HARD5: política granular de tools/paths/urls resolvida no host (onde a
+    // config vive) e injetada como env (JSON) para o bridge substituir o
+    // `--allow-all` cru no spawn final. `input.cwd` (worktree) vira a raiz do
+    // sandbox de paths quando o sandbox está ativo.
+    const policyFlags = buildToolPolicyFlags(
+      this.config.agent.toolPolicy,
+      input.cwd,
+    );
     this.logger.log(
-      `spawn: ${plan.command} ${plan.args.join(' ')} (cwd=${input.cwd}, phase=${input.phase}, modelo=${input.model ?? '(default)'})`,
+      `spawn: ${plan.command} ${plan.args.join(' ')} (cwd=${input.cwd}, phase=${input.phase}, modelo=${input.model ?? '(default)'}, policy=${policyFlags.join(' ')})`,
     );
 
     const child = spawn(plan.command, plan.args, {
@@ -78,14 +89,14 @@ export class CopilotCliRunner implements AgentRunner {
       // cliSessionId injetado como COPILOT_SESSION_ID — o adapter o traduz em
       // `--session-id <id>`, dando memória e resiliência HITL a restart
       // (retoma a sessão persistida em disco). Ver ADR-0022.
-      env:
-        input.model || input.cliSessionId
-          ? {
-              ...process.env,
-              ...(input.model ? { COPILOT_MODEL: input.model } : {}),
-              ...(input.cliSessionId ? { COPILOT_SESSION_ID: input.cliSessionId } : {}),
-            }
-          : process.env,
+      // COPILOT_POLICY_FLAGS (JSON) carrega as flags de permissão granulares
+      // (US-HARD5); o bridge as usa em vez do `--allow-all` hardcoded.
+      env: {
+        ...process.env,
+        ...(input.model ? { COPILOT_MODEL: input.model } : {}),
+        ...(input.cliSessionId ? { COPILOT_SESSION_ID: input.cliSessionId } : {}),
+        COPILOT_POLICY_FLAGS: JSON.stringify(policyFlags),
+      },
     });
 
     return this.consume(child, input, plan.stdinPrompt);

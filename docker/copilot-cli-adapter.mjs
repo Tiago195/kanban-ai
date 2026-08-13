@@ -99,6 +99,25 @@ function readPromptLine() {
   });
 }
 
+/**
+ * US-HARD5: lê COPILOT_POLICY_FLAGS (JSON array de strings) injetado pelo runner
+ * do API. Cada item é uma flag/argumento já pronto para o `copilot` (ex.:
+ * '--allow-all', '--deny-tool=shell', '--add-dir', '/path'). Fallback tolerante:
+ * ausente, vazio ou inválido → ['--allow-all'] (comportamento histórico,
+ * backwards-compatible). Filtra itens não-string/vazios (defensivo).
+ */
+function parsePolicyFlags(raw) {
+  if (!raw || raw.trim().length === 0) return ['--allow-all'];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return ['--allow-all'];
+    const flags = parsed.filter((f) => typeof f === 'string' && f.length > 0);
+    return flags.length > 0 ? flags : ['--allow-all'];
+  } catch {
+    return ['--allow-all'];
+  }
+}
+
 async function main() {
   // promptMode='arg' entrega o prompt como argumento (preferido: suporta
   // prompts multi-linha e evita depender de EOF do stdin). Só caímos no stdin
@@ -122,12 +141,15 @@ async function main() {
 
   emit({ kind: 'thought', text: `Invocando Copilot CLI (${COPILOT_BIN}, modelo ${MODEL || 'default'})...` });
 
-  // --allow-all = --allow-all-tools + --allow-all-paths + --allow-all-urls.
-  // Necessário no modo não-interativo: sem --allow-all-paths o CLI verifica o
-  // path e NEGA escrita fora do diretório permitido (o worktree do repo-alvo
-  // fica fora), resultando em "Permission denied and could not request
-  // permission from user". Ver ADR-0016/0019.
-  const args = ['-p', prompt, '--allow-all', '--no-color'];
+  // US-HARD5: política de permissões granular. O API (host) resolve a policy
+  // (config.agent.toolPolicy) e a injeta como COPILOT_POLICY_FLAGS (JSON array
+  // de flags nativas do CLI). Aqui apenas as CONSUMIMOS. Fallback: sem a env
+  // (ou JSON inválido), mantemos o `--allow-all` histórico — necessário no modo
+  // não-interativo: sem --allow-all-paths o CLI verifica o path e NEGA escrita
+  // fora do diretório permitido (o worktree fica fora), resultando em
+  // "Permission denied ...". Ver ADR-0016/0019 e apps/api runners/tool-policy.ts.
+  const policyFlags = parsePolicyFlags(process.env.COPILOT_POLICY_FLAGS);
+  const args = ['-p', prompt, ...policyFlags, '--no-color'];
   if (MODEL) args.push('--model', MODEL);
 
   // Session-id: quando o chamador passa COPILOT_SESSION_ID, usamos `--session-id`
