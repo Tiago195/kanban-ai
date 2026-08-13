@@ -42,7 +42,23 @@
   --warn: #f5b542;
 }
 
-/* shadcn HSL contract — mapeado para a paleta Atlassian acima */
+/* Alto contraste — preto/branco puros (21:1), bordas fortes, foco visível.
+   Cumpre WCAG AAA para texto normal. */
+.high-contrast {
+  --bg: #000;
+  --surface: #000;
+  --surface-2: #0a0a0a;
+  --text: #fff;
+  --text-muted: #e6e6e6;
+  --border: #fff;
+  --accent: #ffff00;
+  --accent-contrast: #000;
+  --shadow: 0 0 0 1px #fff;
+  --shadow-lg: 0 0 0 2px #fff;
+  --danger: #ff5c5c;
+  --ok: #4dffb0;
+  --warn: #ffd60a;
+}
 @layer base {
   :root {
     --background: 220 20% 97%;
@@ -87,6 +103,28 @@
     --border: 213 12% 21%;
     --input: 213 12% 21%;
     --ring: 217 98% 71%;
+  }
+
+  .high-contrast {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 0%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 0%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 60 100% 50%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 0 0% 8%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 8%;
+    --muted-foreground: 0 0% 90%;
+    --accent: 60 100% 50%;
+    --accent-foreground: 0 0% 0%;
+    --destructive: 0 100% 68%;
+    --destructive-foreground: 0 0% 0%;
+    --border: 0 0% 100%;
+    --input: 0 0% 100%;
+    --ring: 60 100% 50%;
   }
 }
 
