@@ -7,7 +7,15 @@
  */
 
 import type { AgentSessionState, ExecState } from './enums';
-import type { AffectedFlow, AgentId, Card, Iteration, Owner, ReviewComment } from './domain';
+import type {
+  AffectedFlow,
+  AgentId,
+  Card,
+  Iteration,
+  Owner,
+  ProjectCloneState,
+  ReviewComment,
+} from './domain';
 import type { BacklogProposal, BacklogTaskProposal } from './backlog-chat';
 import type { MemoryConflict, MemoryReviewItem } from './dtos';
 
@@ -355,6 +363,20 @@ export interface PingEvent {
 }
 
 /**
+ * EP-PROJECT / US-PROJ2 — O estado do clone gerenciado de um `Project` mudou
+ * (`pending → cloning → ready|failed`). A web usa isto para exibir o status do
+ * clone (badge) sem F5. `error` só está presente quando `state='failed'` e
+ * carrega uma mensagem LEGÍVEL (nunca um stacktrace cru). Ver
+ * `ProjectWorkspaceService`.
+ */
+export interface ProjectCloneStateEvent {
+  type: 'project.clone_state';
+  projectId: string;
+  state: ProjectCloneState;
+  error?: string;
+}
+
+/**
  * O loop engine desistiu de uma task após esgotar as tentativas de validação
  * (ver `AGENT_MAX_VALIDATION_FAILURES`). Em vez de derivar mais uma task-bug,
  * marca a task com `needsHuman` e para o auto-play da story (graceful). A UI
@@ -375,11 +397,18 @@ export interface CommentCreatedEvent {
   parentId: string | null;
 }
 
-/** O modelo default do quadro mudou (afeta a cascata de herança). */
+/**
+ * Metadados de raiz de cascata do quadro mudaram (modelo default e/ou o
+ * `Project` associado). `defaultModel` acompanha a cascata de modelo; `projectId`
+ * (EP-PROJECT / US-PROJ6) acompanha a raiz de repo-alvo. Ambos são opcionais no
+ * payload: um broadcast pode carregar só o que mudou (retrocompat com quem só
+ * consumia `defaultModel`).
+ */
 export interface BoardUpdatedEvent {
   type: 'board.updated';
   boardId: string;
-  defaultModel: string | null;
+  defaultModel?: string | null;
+  projectId?: string | null;
 }
 
 /**
@@ -432,6 +461,7 @@ export type ServerEvent =
   | MemoryUpdatedEvent
   | MemoryConflictEvent
   | MemoryReviewEvent
+  | ProjectCloneStateEvent
   | PingEvent;
 
 /** Nomes de eventos, úteis para type-guards e roteamento. */

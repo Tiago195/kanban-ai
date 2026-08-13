@@ -50,6 +50,8 @@ export interface ApiBoard {
   assignees: Assignee[];
   loopProfiles: ApiLoopProfile[];
   defaultModel?: string | null;
+  /** EP-PROJECT / US-PROJ6 — Project (repo git gerenciado) associado ao quadro. */
+  projectId?: string | null;
 }
 
 /** Um modelo de AI disponível para o login atual do Copilot CLI. */

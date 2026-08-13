@@ -64,10 +64,18 @@ class FakeMemoryIndex {
         return { count };
       },
       findMany: async (args?: {
-        where?: { OR?: Array<Record<string, { contains: string }>> };
+        where?: {
+          OR?: Array<Record<string, { contains: string }>>;
+          path?: { startsWith?: string };
+        };
         take?: number;
       }) => {
         let list = [...store.values()];
+        // US-PROJ4 — filtro de namespace (prefixo de path) aplicado antes do termo.
+        const startsWith = args?.where?.path?.startsWith;
+        if (startsWith) {
+          list = list.filter((r) => r.path.startsWith(startsWith));
+        }
         const or = args?.where?.OR;
         if (or) {
           const term = Object.values(or[0])[0].contains.toLowerCase();
@@ -239,4 +247,46 @@ test('MemoryWriteConflictError: exportado e nomeado para tratamento na Camada 2'
   const err = new MemoryWriteConflictError('p.md');
   assert.equal(err.name, 'MemoryWriteConflictError');
   assert.equal(err.path, 'p.md');
+});
+
+// US-PROJ4 (§1.2 / decisão #6) — query com pathPrefix restringe a busca ao
+// namespace do Project; sem pathPrefix, busca global (legado).
+test('query: pathPrefix restringe ao namespace do Project (isola colmeias)', async () => {
+  const h = await makeHarness();
+  try {
+    await h.index.commitAndReindex({
+      path: 'projects/proj-A/modules/auth.md',
+      content: '# Autenticacao\n\nUsa JWT.',
+      sessionId: 's',
+      message: 'm',
+    });
+    await h.index.commitAndReindex({
+      path: 'projects/proj-B/modules/auth.md',
+      content: '# Autenticacao\n\nUsa JWT tambem.',
+      sessionId: 's',
+      message: 'm',
+    });
+    await h.index.commitAndReindex({
+      path: 'modules/auth.md',
+      content: '# Autenticacao\n\nJWT legado global.',
+      sessionId: 's',
+      message: 'm',
+    });
+
+    // Sem prefixo: busca global encontra os 3.
+    const all = await h.index.query('JWT');
+    assert.equal(all.length, 3, 'sem pathPrefix, busca é global (legado)');
+
+    // Com prefixo do Project A: só o neurônio de A.
+    const onlyA = await h.index.query('JWT', 20, 'projects/proj-A');
+    assert.equal(onlyA.length, 1);
+    assert.equal(onlyA[0].path, 'projects/proj-A/modules/auth.md');
+
+    // Prefixo tolera barra final e não vaza para B nem para o global.
+    const onlyB = await h.index.query('JWT', 20, 'projects/proj-B/');
+    assert.equal(onlyB.length, 1);
+    assert.equal(onlyB[0].path, 'projects/proj-B/modules/auth.md');
+  } finally {
+    cleanup(h.gitDir);
+  }
 });

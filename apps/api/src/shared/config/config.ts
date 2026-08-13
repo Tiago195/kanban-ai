@@ -1,4 +1,5 @@
 import type { AgentAdapterKind } from '@kanban-ai/shared';
+import * as path from 'node:path';
 
 /**
  * Configuração centralizada da API, lida de variáveis de ambiente.
@@ -293,6 +294,32 @@ export interface AppConfig {
      */
     staleMinutes: number;
   };
+  /**
+   * EP-PROJECT / US-PROJ2 — clone gerenciado dos repositórios de `Project`.
+   */
+  projects: {
+    /**
+     * Raiz gerenciada dos clones (`<PROJECTS_DIR>/<projectId>`). Resolvida para
+     * caminho ABSOLUTO no boot. Lido de `PROJECTS_DIR`. Default
+     * `./.kanban-ai-projects` (relativo ao cwd da API). O `ProjectWorkspaceService`
+     * cria o diretório se ausente e recusa qualquer clone que aterrisse DENTRO do
+     * próprio repo do kanban-ai (guard-rail `isInsideSelfRepo`).
+     */
+    dir: string;
+    /**
+     * Timeout (ms) das operações de git (`clone`/`fetch`) via isomorphic-git.
+     * Lido de `PROJECTS_GIT_TIMEOUT_MS`. Default `300000` (5 min).
+     */
+    gitTimeoutMs: number;
+    /**
+     * EP-PROJECT / US-PROJ3 — habilita clone via SSH (delegado ao `git` do
+     * sistema por `child_process`, pois isomorphic-git não fala ssh). Lido de
+     * `PROJECTS_ALLOW_SSH`. Default **false** (desabilitado): com a flag off,
+     * um Project `authKind='ssh'` falha com mensagem legível. Ligar exige um
+     * agente ssh/chave configurado no ambiente do servidor.
+     */
+    allowSsh: boolean;
+  };
 }
 
 function num(value: string | undefined, fallback: number): number {
@@ -351,7 +378,6 @@ export const AGENT_ADAPTER_KINDS: readonly AgentAdapterKind[] = [
 
 /** Adapter default do loop (não-regressão). */
 export const DEFAULT_AGENT_ADAPTER: AgentAdapterKind = 'copilot-cli';
-
 /**
  * Resolve `AGENT_ADAPTER` para um `AgentAdapterKind` conhecido. Ausente, vazio
  * ou desconhecido → default `copilot-cli` (não-regressão). Case-insensitive.
@@ -361,6 +387,30 @@ export function resolveAgentAdapter(value: string | undefined): AgentAdapterKind
   const normalized = value.trim().toLowerCase();
   const match = AGENT_ADAPTER_KINDS.find((k) => k === normalized);
   return match ?? DEFAULT_AGENT_ADAPTER;
+}
+
+/**
+ * Default da raiz gerenciada dos clones de Project (EP-PROJECT / US-PROJ2).
+ * Relativo ao cwd da API; resolvido para ABSOLUTO por `resolveProjectsDir`.
+ */
+export const DEFAULT_PROJECTS_DIR = './.kanban-ai-projects';
+
+/**
+ * Resolve `PROJECTS_DIR` para um caminho ABSOLUTO, falhando cedo se configurado
+ * de forma inválida (presente mas vazio). Ausente → default documentado. O
+ * resultado é sempre absoluto (`path.resolve`) porque o clone gerenciado precisa
+ * de um path estável independente do cwd de cada operação.
+ */
+export function resolveProjectsDir(value: string | undefined): string {
+  if (value === undefined) return path.resolve(DEFAULT_PROJECTS_DIR);
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new Error(
+      'PROJECTS_DIR está definido mas vazio: configure a raiz gerenciada dos ' +
+        `clones de Project ou remova a variável para usar o default "${DEFAULT_PROJECTS_DIR}".`,
+    );
+  }
+  return path.resolve(trimmed);
 }
 
 export function loadConfig(): AppConfig {
@@ -425,6 +475,11 @@ export function loadConfig(): AppConfig {
     },
     dashboard: {
       staleMinutes: num(process.env.DASHBOARD_STALE_MINUTES, 30),
+    },
+    projects: {
+      dir: resolveProjectsDir(process.env.PROJECTS_DIR),
+      gitTimeoutMs: num(process.env.PROJECTS_GIT_TIMEOUT_MS, 300_000),
+      allowSsh: process.env.PROJECTS_ALLOW_SSH === 'true',
     },
   };
 }

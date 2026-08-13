@@ -74,4 +74,24 @@ export class BoardsService {
     this.realtime.broadcast({ type: 'board.updated', boardId: id, defaultModel });
     return this.findOne(id);
   }
+
+  /**
+   * EP-PROJECT / US-PROJ6 — associa (ou desassocia, com null) o `Project` do
+   * quadro (raiz da cascata de repo-alvo). Valida a FK quando não-nula (recusa
+   * projectId inexistente) e emite `board.updated` para a UI refletir sem F5.
+   */
+  async setProjectId(id: string, projectId: string | null) {
+    const board = await this.prisma.board.findUnique({ where: { id }, select: { id: true } });
+    if (!board) throw new NotFoundException('board inexistente');
+    if (projectId) {
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { id: true },
+      });
+      if (!project) throw new NotFoundException('project inexistente');
+    }
+    await this.prisma.board.update({ where: { id }, data: { projectId } });
+    this.realtime.broadcast({ type: 'board.updated', boardId: id, projectId });
+    return this.findOne(id);
+  }
 }

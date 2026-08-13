@@ -1,4 +1,5 @@
 import { Logger, Module } from '@nestjs/common';
+import { ProjectsModule } from '../projects/projects.module';
 import { Orchestrator } from './orchestrator';
 import { AiEngineController } from './ai-engine.controller';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
@@ -23,6 +24,7 @@ import { WakeupQueueService } from './wakeup-queue.service';
  * O AgentSessionManager é in-process; ponto de extensão para BullMQ+Redis.
  */
 @Module({
+  imports: [ProjectsModule],
   controllers: [AiEngineController],
   providers: [
     Orchestrator,

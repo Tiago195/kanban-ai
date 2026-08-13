@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
 import { BoardsService } from './boards.service';
 import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
-import { setBoardModelSchema, type SetBoardModelDto } from './boards.schema';
+import { setBoardModelSchema, setBoardProjectSchema, type SetBoardModelDto, type SetBoardProjectDto } from './boards.schema';
 
 @Controller('boards')
 export class BoardsController {
@@ -23,5 +23,14 @@ export class BoardsController {
     @Body(new ZodValidationPipe(setBoardModelSchema)) dto: SetBoardModelDto,
   ) {
     return this.boards.setDefaultModel(id, dto.defaultModel);
+  }
+
+  /** EP-PROJECT / US-PROJ6 — associa (null desassocia) o Project do quadro. */
+  @Patch(':id/project')
+  setProjectId(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(setBoardProjectSchema)) dto: SetBoardProjectDto,
+  ) {
+    return this.boards.setProjectId(id, dto.projectId);
   }
 }

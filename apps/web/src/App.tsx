@@ -20,6 +20,7 @@ import {
 } from "@/features/board";
 import { useRealtime } from "@/features/realtime";
 import { BacklogChatView } from "@/features/backlog-chat";
+import { ProjectExplorer, ProjectsManager } from "@/features/projects";
 import { Toast } from "@/shared/components/Toast";
 import { getHealth } from "@/shared/services/apiClient";
 import { showToast } from "@/shared/services/toastStore";
@@ -179,6 +180,24 @@ export default function App() {
           <button
             className="kb-btn kb-btn-ghost"
             type="button"
+            title="Registrar um repositório git como Projeto e associá-lo ao quadro"
+            data-testid="open-projects"
+            onClick={() => navigate("/projects")}
+          >
+            🗄️ Projetos
+          </button>
+          <button
+            className="kb-btn kb-btn-ghost"
+            type="button"
+            title="Ver o repositório clonado e o que a AI já aprendeu"
+            data-testid="open-project-explorer"
+            onClick={() => navigate("/explorer")}
+          >
+            🗂️ Explorador
+          </button>
+          <button
+            className="kb-btn kb-btn-ghost"
+            type="button"
             title="Gerenciar perfis de loop das AIs"
             onClick={() => navigate("/loops")}
           >
@@ -260,6 +279,18 @@ export default function App() {
         <Route
           path="/loops"
           element={<LoopsModal boardId={boardId} onClose={() => navigate("/")} />}
+        />
+        <Route path="/explorer" element={<ProjectExplorer onClose={() => navigate("/")} />} />
+        <Route
+          path="/projects"
+          element={
+            <ProjectsManager
+              boardId={boardId}
+              boardProjectId={board?.projectId ?? null}
+              onClose={() => navigate("/")}
+              onOpenExplorer={() => navigate("/explorer")}
+            />
+          }
         />
         <Route path="/backlog-chat" element={<BacklogChatRoute boardId={boardId} />} />
         <Route path="/backlog-chat/:sessionId" element={<BacklogChatRoute boardId={boardId} />} />

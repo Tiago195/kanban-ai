@@ -61,6 +61,49 @@ enum WakeupReason {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Project (repo git clonado & gerenciado) — EP-PROJECT / US-PROJ1
+// ─────────────────────────────────────────────────────────────
+
+// Tipo de autenticação do repositório git do Project. Ver US-PROJ3.
+enum ProjectAuthKind {
+  none  // repo público (https)
+  https // https + token (PAT)
+  ssh   // ssh key
+}
+
+// Estado do clone gerenciado do Project. Ver US-PROJ2.
+enum ProjectCloneState {
+  pending // criado, ainda não clonado
+  cloning // clone em andamento
+  ready   // clone disponível em localPath
+  failed  // clone/sync falhou (ver lastError)
+}
+
+// Entidade de primeira classe que representa "o repositório em que a frota
+// trabalha", desacoplada de path físico. Ortogonal à hierarquia Epic→Story→Task
+// (associada ao Board, raiz da cascata de repo-alvo). Ver docs/specs/ep-project.md.
+model Project {
+  id            String            @id @default(uuid())
+  name          String
+  repoUrl       String // https://... ou git@...:...
+  defaultBranch String? // null = branch default do remoto (HEAD)
+  authKind      ProjectAuthKind   @default(none)
+  // Referência OPACA à credencial (nunca o segredo em si). Ver US-PROJ3.
+  credentialRef String?
+  // Path gerenciado do clone (PROJECTS_DIR/<id>). Preenchido pelo clone.
+  localPath     String?
+  cloneState    ProjectCloneState @default(pending)
+  lastError     String?
+  lastSyncedAt  DateTime?
+  // Multi-tenant cooperativo (mesmo rótulo opaco de Card.tenantId, ADR-0009).
+  tenantId      String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  boards Board[]
+}
+
+// ─────────────────────────────────────────────────────────────
 // Board & colunas
 // ─────────────────────────────────────────────────────────────
 
@@ -69,6 +112,10 @@ model Board {
   title        String
   seq          Int      @default(0) // contador para chaves EP-/US-/TK-
   defaultModel String? // modelo default do quadro (raiz da cascata de heranca)
+  // EP-PROJECT / US-PROJ1 — repo-alvo do quadro (raiz da cascata, análoga a
+  // defaultModel). Nullable: Board sem projectId cai no fallback Card.aiProject.
+  projectId    String?
+  project      Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

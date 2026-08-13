@@ -206,3 +206,62 @@ test('pruneEphemeralBranches poda ramos mem/ai/* orfaos e preserva os ativos e o
     cleanup(path.dirname(h.gitDir));
   }
 });
+
+// ---------------------------------------------------------------------------
+// US-PROJ4 (§1.2 / decisão #6) — sweepStale namespaceado por projectId.
+// A reconciliação de UM Project NÃO toca neurônios de OUTRO Project nem os
+// globais legados (isolamento total da colmeia).
+// ---------------------------------------------------------------------------
+
+// Harness com dirs sob o cwd (NUNCA /tmp) para respeitar o sandbox.
+async function makeHarnessCwd() {
+  const base = fs.mkdtempSync(path.join(process.cwd(), '.proj4-gc-'));
+  const gitDir = path.join(base, 'git');
+  const config = { memory: { gitDir } } as unknown as AppConfig;
+  const git = new MemoryGitService(config);
+  await git.provision();
+  const fake = new FakeGcIndex();
+  const index = new MemoryIndexService(fake as unknown as PrismaService, git);
+  const gc = new MemoryGcService(fake as unknown as PrismaService, git);
+  return { base, gitDir, git, index, gc, fake };
+}
+
+test('US-PROJ4: sweepStale de um Project não toca a colmeia de outro Project', async () => {
+  const h = await makeHarnessCwd();
+  // Repo do Project A só tem "cards"; "memory" (namespaceado em A) sumiu.
+  const repoA = fs.mkdtempSync(path.join(process.cwd(), '.proj4-gc-repoA-'));
+  fs.mkdirSync(path.join(repoA, 'apps/api/src/modules/cards'), { recursive: true });
+  try {
+    // Neurônios de A (namespaceados) e de B (outro Project) coexistem no índice.
+    h.fake.seed('projects/proj-A/modules/cards.md');
+    h.fake.seed('projects/proj-A/modules/memory.md'); // deve arquivar (sumiu em A)
+    h.fake.seed('projects/proj-B/modules/memory.md'); // OUTRO Project: intocado
+    h.fake.seed('modules/legacy.md'); // colmeia global legada: intocada
+
+    const r = await h.gc.sweepStale({ repoPath: repoA, namespace: 'projects/proj-A' });
+
+    assert.deepEqual(
+      r.archived,
+      ['projects/proj-A/modules/memory.md'],
+      'só arquiva o neurônio ausente DESTE Project',
+    );
+    assert.equal(
+      h.fake.rows.get('projects/proj-B/modules/memory.md')?.stale,
+      false,
+      'neurônio de OUTRO Project não é tocado',
+    );
+    assert.equal(
+      h.fake.rows.get('modules/legacy.md')?.stale,
+      false,
+      'colmeia global legada não é tocada',
+    );
+    assert.equal(
+      h.fake.rows.get('projects/proj-A/modules/cards.md')?.stale,
+      false,
+      'neurônio vivo de A permanece ativo',
+    );
+  } finally {
+    cleanup(h.base);
+    cleanup(repoA);
+  }
+});

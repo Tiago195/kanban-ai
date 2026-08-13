@@ -16,21 +16,28 @@ services:
       timeout: 5s
       retries: 10
 
+  # ───────────────────────────────────────────────────────────────────────────
+  # API containerizada em MODO PROJECT (default) — revisão parcial do ADR-0019.
+  #
+  # `docker compose up -d` (SEM `--profile docker-app`) sobe **api + postgres**.
+  # Isto voltou a ser possível porque, com o EP-PROJECT, o repo-alvo de uma story
+  # é um **clone gerenciado** dentro do volume nomeado `kanban_projects`
+  # (montado em `PROJECTS_DIR=/data/projects`): o `cwd` do spawn do agent é
+  # **interno e previsível**, não mais um `aiProject` arbitrário do host. Ver
+  # ADR-0038 (supersede parcial do ADR-0019).
+  #
+  # O modo HOST legado continua suportado para `aiProject` (repos fora do volume):
+  # NÃO suba este serviço e rode a API no host com `npm run dev` (ver ADR-0019 e
+  # CONTRIBUTING.md). O profile `docker-app` (acrescenta o `web` em container)
+  # permanece como opção documentada.
+  # ───────────────────────────────────────────────────────────────────────────
   api:
     build:
       context: .
-      dockerfile: Dockerfile.dev
+      dockerfile: apps/api/Dockerfile
     container_name: kanban-ai-api
     restart: unless-stopped
     network_mode: host
-    # ARQUITETURA (ver ADR-0019): por padrão a API NÃO roda no Docker. Ela roda
-    # no HOST (`npm run dev:api`) para que o loop engine/agent enxergue o
-    # filesystem inteiro do host e trabalhe em qualquer repositório-alvo
-    # (aiProject) sem remontar volumes. Este serviço fica atrás do profile
-    # `docker-app` e só sobe se explicitamente pedido:
-    #   docker compose --profile docker-app up -d api
-    # (nesse modo o agent só enxerga /app — use apenas para dev do próprio Nest).
-    profiles: ['docker-app']
     depends_on:
       postgres:
         condition: service_healthy
@@ -44,22 +51,46 @@ services:
       AGENT_CLI_COMMAND: ${AGENT_CLI_COMMAND:-copilot}
       AGENT_CLI_ARGS: ${AGENT_CLI_ARGS:-}
       AGENT_CLI_PROMPT_MODE: ${AGENT_CLI_PROMPT_MODE:-stdin}
+      # Copilot CLI instalado na imagem (apps/api/Dockerfile) → no PATH do container.
       COPILOT_BIN: ${COPILOT_BIN:-copilot}
       AGENT_MAX_CONCURRENT_SESSIONS: ${AGENT_MAX_CONCURRENT_SESSIONS:-3}
       AGENT_WATCHDOG_INTERVAL_MS: ${AGENT_WATCHDOG_INTERVAL_MS:-120000}
       AGENT_WORKSPACES_DIR: ${AGENT_WORKSPACES_DIR:-./.agent-workspaces}
+      # MODO PROJECT: os clones gerenciados vivem no volume nomeado kanban_projects,
+      # montado abaixo. Path INTERNO ao container (não mais aiProject do host) →
+      # o cwd do spawn do agent é previsível (ADR-0038).
+      PROJECTS_DIR: ${PROJECTS_DIR:-/data/projects}
+      PROJECTS_GIT_TIMEOUT_MS: ${PROJECTS_GIT_TIMEOUT_MS:-300000}
+      PROJECTS_ALLOW_SSH: ${PROJECTS_ALLOW_SSH:-false}
+      # ── Autenticação do Copilot CLI DENTRO do container (risco #1 do ADR-0019) ──
+      # Opção B: token passado por env (repasse do host, sem default). O adapter e
+      # o CLI honram GH_TOKEN/GITHUB_TOKEN quando presentes.
+      GH_TOKEN: ${GH_TOKEN:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       # Watch confiável em bind mount (inotify não propaga bem no Docker).
       CHOKIDAR_USEPOLLING: 'true'
-      # tsc (nest --watch) usa o watcher do TypeScript, não o chokidar — força polling.
       TSC_WATCHFILE: 'DynamicPriorityPolling'
       TSC_WATCHDIRECTORY: 'DynamicPriorityPolling'
-    # Bind mount do repositório inteiro (código + node_modules do host) para
-    # hot-reload. As node_modules do host são glibc/Debian, compatíveis com
-    # a imagem node:22 (ver Dockerfile.dev). Não instalamos deps no container.
     volumes:
+      # Código + node_modules do host (bind mount) para hot-reload e para evitar
+      # `npm ci` no container (proxy TLS corporativo — ver apps/api/Dockerfile).
       - .:/app
+      # Clones gerenciados dos Projects — volume nomeado, path INTERNO previsível.
+      - kanban_projects:/data/projects
+      # Opção A (recomendada) de auth do Copilot CLI: monta a config/credenciais
+      # do CLI do host como read-only. HOST_COPILOT_DIR default ~/.copilot; o CLI
+      # procura sua config no HOME → montamos em /root/.copilot (HOME do root no
+      # container). Comente esta linha se preferir só o token via GH_TOKEN.
+      - ${HOST_COPILOT_DIR:-~/.copilot}:/root/.copilot:ro
     entrypoint: ['sh', '/app/docker/api-dev-entrypoint.sh']
 
+  # ───────────────────────────────────────────────────────────────────────────
+  # Frontend em container atrás do profile opt-in `docker-app` (ADR-0019). Sobe
+  # só com `docker compose --profile docker-app up -d`; no fluxo normal rode o
+  # web no host com `npm run dev:web`. Fica separado da API para manter o default
+  # (`docker compose up -d`) enxuto: api + postgres. O `api` default já roda em
+  # container com bind mount, então este profile só ACRESCENTA o `web`.
+  # ───────────────────────────────────────────────────────────────────────────
   web:
     build:
       context: .
@@ -67,7 +98,7 @@ services:
     container_name: kanban-ai-web
     restart: unless-stopped
     network_mode: host
-    # Também opt-in (ver `api`): por padrão rode o web no host (`npm run dev:web`).
+    # Opt-in: por padrão rode o web no host (`npm run dev:web`).
     profiles: ['docker-app']
     depends_on:
       - api
@@ -85,3 +116,6 @@ services:
 
 volumes:
   kanban_pgdata:
+  # Raiz gerenciada dos clones de Project (<PROJECTS_DIR>/<projectId>). Path
+  # INTERNO ao container → habilita a API containerizada em modo Project (ADR-0038).
+  kanban_projects:

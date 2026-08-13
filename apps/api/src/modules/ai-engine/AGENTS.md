@@ -118,7 +118,34 @@ quando a primeira sai de In Progress (`resumeDeferredForStory`). Stories de
   apontarem para o **MESMO repo físico**, eles se sobrescreveriam. Ligue este
   flag para reforçar a serialização também por repo-alvo físico
   (`resolveStoryProject`) nesse cenário. Por default fica desligado (a
-  serialização é puramente por epic).
+  serialização é puramente por epic). **US-PROJ4 (decisão #8):** quando o Board
+  da story tem `projectId`, a chave de serialização é `project:<projectId>`
+  (ESTÁVEL, não muda com o path físico do clone) — duas stories de épicos
+  distintos no MESMO Project serializam sob esse flag. Sem Project, a chave é o
+  path físico do `aiProject` (legado). Continua **in-process** (invariante 7).
+
+### Re-plug do repo-alvo via Project (US-PROJ4 — EP-PROJECT)
+
+O repo-alvo é propriedade do **Board** (raiz da cascata, como `defaultModel`),
+não do Card. A resolução (fallback-preserving) vive no `orchestrator.ts`:
+
+- `resolveStoryProjectId(storyId)` → `Card.boardId` → `Board.projectId` (ou
+  `null`).
+- `resolveStoryTargetRepo(storyId)` — **caminho novo**: se o Board tem
+  `projectId` e o `ProjectWorkspaceService` está injetado (exportado por
+  `ProjectsModule`, importado pelo `AiEngineModule`), GARANTE o clone gerenciado
+  (`ensureCloned(projectId)` — o **ENGINE** faz git, invariante 8) e usa o
+  `localPath` retornado. **Ordenação crítica:** `ensureCloned` roda ANTES de
+  `resolveWorkdir` (senão o worktree falharia por path inexistente). **Fallback
+  legado:** sem `projectId` (ou sem o serviço), cai em `resolveLegacyAiProject`
+  (story→epic `aiProject`), comportamento idêntico ao de hoje. A assinatura de
+  `WorkspaceService.resolveWorkdir(key, targetRepoPath)` **NÃO muda** — só a
+  origem do path.
+- Memória namespaceada por `projectId` — `resolveMemoryNamespace(storyId)`
+  devolve `projects/<projectId>` (ou `undefined` no legado). Flui para
+  `bootstrapFromRepo({namespace})`, `memoryIndex.query(term, limit, namespace)`
+  (READ em `buildContext`) e `withNamespace(learning.path, namespace)` (WRITE de
+  learnings). Colmeias de projetos distintos NÃO colidem.
 
 ## O que NÃO mexer
 
@@ -259,9 +286,10 @@ neurônios vivem em `modules/<modulo>.md`.
   (git commit → reindexa Postgres → WS, na ordem invariante do ADR-0027). Um
   warning por learning em caso de falha; o loop segue.
 - **BOOTSTRAP (US-A5)** — `onStoryEnterInProgress`, antes de `startAuto`, chama
-  `MemoryBootstrapService.bootstrapFromRepo({repoPath, sessionId})` para semear
-  neurônios iniciais por módulo do repo-alvo. É **idempotente** (pula módulos já
-  existentes) e defensivo.
+  `MemoryBootstrapService.bootstrapFromRepo({repoPath, sessionId, namespace?})`
+  para semear neurônios iniciais por módulo do repo-alvo. É **idempotente** (pula
+  módulos já existentes) e defensivo. **US-PROJ4:** `repoPath` = clone gerenciado
+  quando o Board tem Project; `namespace` = `projects/<projectId>` isola a colmeia.
 
 O contrato `learnings` é parseado em `runners/cli-adapter.ts` (`parseLearnings`)
 e tipado em `runners/agent-runner.interface.ts` (`AgentRunResult.learnings`).

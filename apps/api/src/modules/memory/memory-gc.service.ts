@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { MemoryGitService } from './memory-git.service';
-import { detectModules } from './memory-bootstrap.service';
+import { detectModules, withNamespace } from './memory-bootstrap.service';
 
 /** Limite default de commits que sumarizam o histórico "longo" (US-216). */
 const DEFAULT_HISTORY_KEEP = 10;
@@ -46,10 +46,15 @@ export class MemoryGcService {
    * neurônio de módulo cujo diretório sumiu do repo é marcado `stale` e
    * ARQUIVADO (`archivedAt`); um neurônio arquivado cujo módulo reapareceu é
    * reativado. NÃO apaga nada do git (histórico preservado). Idempotente.
+   *
+   * US-PROJ4 (§1.2 / decisão #6) — `namespace` OPCIONAL: quando informado (ex.:
+   * `projects/<projectId>`), os neurônios vivos são prefixados e a reconciliação
+   * só considera os neurônios DAQUELE namespace — colmeias de projetos distintos
+   * não interferem entre si. SEM `namespace`, reconcilia a colmeia GLOBAL legada.
    */
-  async sweepStale(input: { repoPath: string }): Promise<GcStaleResult> {
+  async sweepStale(input: { repoPath: string; namespace?: string }): Promise<GcStaleResult> {
     const liveModuleNeurons = new Set(
-      detectModules(input.repoPath).map((m) => m.neuronPath),
+      detectModules(input.repoPath).map((m) => withNamespace(m.neuronPath, input.namespace)),
     );
     const headCommit = await this.git.resolveHead().catch(() => null);
     const rows = await this.prisma.memoryIndex.findMany({
@@ -59,9 +64,11 @@ export class MemoryGcService {
     const archived: string[] = [];
     const revived: string[] = [];
     for (const row of rows) {
-      // Só reconciliamos neurônios de módulo (modules/<x>.md); outros paths
-      // (endpoints, docs ad-hoc) ficam a cargo de jobs futuros.
-      if (!isModuleNeuron(row.path)) continue;
+      // Só reconciliamos neurônios de módulo (modules/<x>.md, opcionalmente sob o
+      // namespace do Project); outros paths (endpoints, docs ad-hoc) ficam a
+      // cargo de jobs futuros. Com `namespace`, ignoramos neurônios de OUTROS
+      // namespaces (não são deste Project).
+      if (!isModuleNeuron(row.path, input.namespace)) continue;
       const present = liveModuleNeurons.has(row.path);
       if (!present && !row.stale) {
         await this.prisma.memoryIndex.update({
@@ -151,7 +158,16 @@ export class MemoryGcService {
 }
 
 /** `true` se o path é um neurônio de módulo `modules/<x>.md`. */
-function isModuleNeuron(path: string): boolean {
+function isModuleNeuron(path: string, namespace?: string): boolean {
+  if (namespace) {
+    const prefix = namespace.replace(/\/+$/, '');
+    // Só neurônios de módulo DESTE namespace: <namespace>/modules/<x>.md
+    return new RegExp(
+      `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/modules/[^/]+\\.md$`,
+    ).test(path);
+  }
+  // Legado GLOBAL: modules/<x>.md exatamente (nunca casa paths namespaceados,
+  // que têm um segmento extra antes de `modules/`).
   return /^modules\/[^/]+\.md$/.test(path);
 }
 

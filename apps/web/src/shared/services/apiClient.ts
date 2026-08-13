@@ -15,6 +15,11 @@ import type {
   IterationPhase,
   LoopMetrics,
   MoveCardDto,
+  Project,
+  CreateProjectInput,
+  ProjectRepoInfo,
+  MemoryNeuronSummary,
+  MemoryNeuronDetail,
   ReviewComment,
   ReviewCommentInput,
   UpdateCardDto,
@@ -103,6 +108,17 @@ export const apiClient = {
     return request<ApiBoard>(`/boards/${id}/model`, {
       method: "PATCH",
       body: JSON.stringify({ defaultModel }),
+    });
+  },
+
+  /**
+   * EP-PROJECT / US-PROJ6 — associa (ou desassocia, com null) o Project (repo
+   * git gerenciado) ao quadro, persistindo `Board.projectId`.
+   */
+  setBoardProject(id: string, projectId: string | null): Promise<ApiBoard> {
+    return request<ApiBoard>(`/boards/${id}/project`, {
+      method: "PATCH",
+      body: JSON.stringify({ projectId }),
     });
   },
 
@@ -485,6 +501,52 @@ export const apiClient = {
       `/cards/${cardId}/review/comments/${commentId}/resolve`,
       { method: "PATCH" },
     );
+  },
+
+  // ── Project Explorer (EP-PROJECT / US-PROJ7, SÓ leitura) ────────────────────
+
+  /** Lista os Projects (repos git gerenciados). */
+  getProjects(): Promise<Project[]> {
+    return request<Project[]>(`/projects`);
+  },
+
+  /**
+   * EP-PROJECT / US-PROJ6 — cria um Project por URL git (https ou ssh). O clone
+   * roda de forma ASSÍNCRONA no backend; o estado (`cloneState`) é observável via
+   * `GET /projects` e pelo evento WS `project.clone_state`.
+   */
+  createProject(input: CreateProjectInput): Promise<Project> {
+    return request<Project>(`/projects`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  /** EP-PROJECT / US-PROJ6 — remove um Project (e, no backend, o clone gerenciado). */
+  deleteProject(projectId: string): Promise<{ id: string }> {
+    return request<{ id: string }>(`/projects/${projectId}`, { method: "DELETE" });
+  },
+
+  /** Metadados do repositório clonado de um Project (branch, HEAD, sync, módulos). */
+  getProjectRepoInfo(projectId: string): Promise<ProjectRepoInfo> {
+    return request<ProjectRepoInfo>(`/projects/${projectId}/repo-info`);
+  },
+
+  /** Índice da memória (colmeia) do Project → lista de neurônios (summary). */
+  getProjectMemory(projectId: string): Promise<MemoryNeuronSummary[]> {
+    return request<MemoryNeuronSummary[]>(`/projects/${projectId}/memory`);
+  },
+
+  /** Detalhe de um neurônio (markdown completo + headCommit). */
+  getProjectNeuron(projectId: string, path: string): Promise<MemoryNeuronDetail> {
+    return request<MemoryNeuronDetail>(
+      `/projects/${projectId}/memory/read?path=${encodeURIComponent(path)}`,
+    );
+  },
+
+  /** Dispara um `git fetch/pull` do clone gerenciado (US-PROJ2) e devolve o Project. */
+  syncProject(projectId: string): Promise<Project> {
+    return request<Project>(`/projects/${projectId}/sync`, { method: "POST" });
   },
 };
 

@@ -108,6 +108,45 @@ docker run --rm --network kanban-ai_default \
 
 Em ambientes normais, `npm run db:migrate` e `npm run db:seed` funcionam direto.
 
+## Docker: modo HOST (legado) vs modo PROJECT (containerizado)
+
+Há dois modos de rodar a API, ambos suportados (ver
+[ADR-0019](docs/adr/0019-api-runs-on-host-not-docker.md) e
+[ADR-0038](docs/adr/0038-project-clone-in-volume-enables-containerized-api.md)):
+
+- **Modo HOST (legado / `aiProject`).** Necessário quando o repo-alvo é um path
+  arbitrário do host (`Card.aiProject`). Suba só o Postgres e rode a API no host:
+  ```bash
+  docker compose up -d postgres   # só o banco
+  npm run dev                     # api + web no host
+  ```
+  O profile `docker-app` acrescenta o `web` em container quando desejado:
+  `docker compose --profile docker-app up -d`.
+
+- **Modo PROJECT (containerizado, default).** Quando o Board usa um `Project`
+  (clone gerenciado no volume `kanban_projects`), o `cwd` do agent é interno ao
+  container e a API pode rodar em container:
+  ```bash
+  docker compose up -d            # sobe api + postgres (sem profile)
+  curl localhost:3333/health
+  ```
+  O volume nomeado `kanban_projects` é montado em `PROJECTS_DIR=/data/projects`; os
+  clones ficam em `/data/projects/<projectId>`.
+
+  **Autenticação do Copilot CLI no container** (obrigatória para o loop real —
+  `AGENT_RUNNER_KIND=copilot-cli`). Escolha uma:
+  - (A) monte a config do CLI do host — o compose já monta
+    `${HOST_COPILOT_DIR:-~/.copilot}` em `/root/.copilot:ro`; ou
+  - (B) defina `GH_TOKEN`/`GITHUB_TOKEN` no `.env` (repassados ao serviço `api`).
+
+  Com `AGENT_RUNNER_KIND=mock` (default) o loop roda sem CLI/auth — útil para
+  validar o clone no volume e o `cwd` interno.
+
+  > **Proxy TLS corporativo:** o `apps/api/Dockerfile` faz
+  > `npm install -g @github/copilot`, que pode falhar com
+  > `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`. Injete a CA corporativa antes do build,
+  > ou use o modo host.
+
 ## Onde pedir contexto
 
 - Núcleo (loop engine): [docs/loop-engine.md](docs/loop-engine.md) e

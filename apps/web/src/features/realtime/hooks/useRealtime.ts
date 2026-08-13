@@ -154,6 +154,17 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
           return;
         }
 
+        // ── Project Explorer (US-PROJ7): estado do clone é por-Project, NÃO por
+        // board — reflete o `cloneState`/repo-info sem F5 (aba "Repositório").
+        if (event.type === "project.clone_state") {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.projectRepoInfo(event.projectId),
+          });
+          // US-PROJ6: a lista de Projects (badge de clone) também reflete sem F5.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+          return;
+        }
+
         if (!boardId) return;
 
         if (event.type === "card.moved") {

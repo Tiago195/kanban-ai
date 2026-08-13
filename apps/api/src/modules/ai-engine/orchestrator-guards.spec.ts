@@ -135,6 +135,7 @@ function makePrisma(overrides: {
   iterationCount?: () => Promise<number>;
   cardFindUnique?: (args: { where: { id: string }; select?: unknown }) => Promise<unknown>;
   cardFindMany?: (args?: { where?: { type?: string } }) => Promise<unknown[]>;
+  boardFindUnique?: (args: { where: { id: string }; select?: unknown }) => Promise<unknown>;
 } = {}): FakePrisma {
   const updates: FakePrisma['updates'] = [];
   const activities: FakePrisma['activities'] = [];
@@ -170,7 +171,10 @@ function makePrisma(overrides: {
     column: { findFirst: async () => null, findMany: async () => [] },
     label: { findFirst: async () => null },
     board: {
-      findUnique: async () => ({ id: 'b1', seq: 1 }),
+      findUnique: makemaybe(
+        overrides.boardFindUnique,
+        async () => ({ id: 'b1', seq: 1 }),
+      ),
       update: async () => undefined,
     },
     taskDependency: { create: async () => undefined },
@@ -187,6 +191,7 @@ function makeOrchestrator(opts: {
   prisma?: FakePrisma;
   sessions?: AgentSessionManager;
   realtime?: { svc: RealtimeService; events: RecordedBroadcast[] };
+  projectWorkspace?: { ensureCloned: (id: string) => Promise<string> };
 } = {}) {
   const config = opts.config ?? makeConfig();
   const prisma = opts.prisma ?? makePrisma();
@@ -203,6 +208,8 @@ function makeOrchestrator(opts: {
     makeMemoryIndex(),
     makeMemoryGit(),
     makeMemoryBootstrap(),
+    undefined,
+    opts.projectWorkspace as unknown as ConstructorParameters<typeof Orchestrator>[11],
   );
   return { orch, config, prisma, sessions, realtime };
 }
@@ -1322,4 +1329,167 @@ test('runIteration: requireMinArtifact ON + code-change COM diff -> fecha normal
   assert.equal(onTaskDoneCalled, true, 'code-change com diff satisfaz o artefato mínimo -> fecha');
   assert.equal(execStates.includes('done'), true, 'exec state deve virar done');
   assert.equal(appended[0].outcome, 'ok', 'iteração fechada com outcome=ok');
+});
+
+// ── US-PROJ4 — re-plug do repo-alvo via Project (fallback-preserving) ─────────
+//
+// Cobre os DOIS caminhos de resolução do repo-alvo e a serialização por
+// projectId, sem quebrar o legado `aiProject`.
+
+/**
+ * (a) Board COM projectId → `resolveStoryTargetRepo` GARANTE o clone gerenciado
+ * (`ensureCloned`) e usa o `localPath` retornado como repo-alvo (cwd do agent).
+ */
+test('US-PROJ4: Board com projectId resolve o repo-alvo via ensureCloned (clone gerenciado)', async () => {
+  const calls: string[] = [];
+  const prisma = makePrisma({
+    cardFindUnique: async () => {
+      // resolveStoryProjectId seleciona { boardId }.
+      return { boardId: 'board-with-project', aiProject: '', parentId: 'epic-1' };
+    },
+    boardFindUnique: async () => ({ projectId: 'proj-42' }),
+  });
+  const projectWorkspace = {
+    ensureCloned: async (id: string) => {
+      calls.push(id);
+      return '/managed/clones/proj-42';
+    },
+  };
+  const { orch } = makeOrchestrator({ prisma, projectWorkspace });
+
+  const target = await priv(orch).resolveStoryTargetRepo('s1');
+
+  assert.equal(calls.length, 1, 'ensureCloned deve ser chamado exatamente uma vez');
+  assert.equal(calls[0], 'proj-42', 'ensureCloned recebe o projectId do Board');
+  assert.equal(
+    target,
+    '/managed/clones/proj-42',
+    'o repo-alvo resolvido é o localPath do clone gerenciado',
+  );
+});
+
+/**
+ * (b) Board SEM projectId → comportamento IDÊNTICO ao legado `aiProject`
+ * (regressão): NÃO chama ensureCloned; usa story→epic aiProject.
+ */
+test('US-PROJ4: Board sem projectId cai no fallback legado aiProject (regressão)', async () => {
+  let ensureClonedCalled = false;
+  const prisma = makePrisma({
+    cardFindUnique: async () => {
+      // resolveStoryProjectId pede { boardId }; resolveLegacyAiProject pede
+      // { aiProject, parentId }. Devolvemos tudo — o legado usa aiProject.
+      return { boardId: 'board-no-project', aiProject: '/repo/legacy', parentId: 'epic-1' };
+    },
+    // Board existe mas SEM projectId → null → fallback.
+    boardFindUnique: async () => ({ projectId: null }),
+  });
+  const projectWorkspace = {
+    ensureCloned: async () => {
+      ensureClonedCalled = true;
+      return '/should/not/be/used';
+    },
+  };
+  const { orch } = makeOrchestrator({ prisma, projectWorkspace });
+
+  const target = await priv(orch).resolveStoryTargetRepo('s1');
+
+  assert.equal(ensureClonedCalled, false, 'sem projectId, ensureCloned NUNCA é chamado');
+  assert.equal(target, '/repo/legacy', 'usa o aiProject legado da story');
+});
+
+/**
+ * (c) Duas stories de ÉPICOS DIFERENTES no MESMO Project serializam por
+ * projectId (a chave de serialização é `project:<id>`, estável — não depende do
+ * path físico do clone).
+ */
+test('US-PROJ4: stories de épicos distintos no MESMO Project serializam por projectId', async () => {
+  const prisma = makePrisma({
+    cardFindUnique: async (args) => {
+      const map: Record<string, { boardId: string; parentId: string }> = {
+        s1: { boardId: 'board-a', parentId: 'epic-1' },
+        s2: { boardId: 'board-b', parentId: 'epic-2' },
+      };
+      return map[args.where.id as string] ?? { boardId: null, aiProject: '', parentId: null };
+    },
+    // Boards distintos, MESMO Project.
+    boardFindUnique: async () => ({ projectId: 'proj-shared' }),
+  });
+  const { orch, sessions } = makeOrchestrator({
+    config: makeConfig({ serializeByRepo: true }),
+    prisma,
+  });
+  sessions.start('s1');
+
+  // A chave de serialização deve ser a mesma para ambos (project:proj-shared).
+  const k1 = await priv(orch).resolveStoryProject('s1');
+  const k2 = await priv(orch).resolveStoryProject('s2');
+  assert.equal(k1, 'project:proj-shared', 'chave de serialização é project:<id>');
+  assert.equal(k1, k2, 'mesmo Project → mesma chave, mesmo em épicos distintos');
+
+  const conflict = await priv(orch).findConflictingActiveStory('s2');
+  assert.equal(
+    conflict,
+    's1',
+    'com serializeByRepo=true, mesmo Project serializa mesmo em épicos distintos',
+  );
+});
+
+/**
+ * (c') Sem serializeByRepo, épicos distintos no mesmo Project NÃO conflitam
+ * (a serialização por Project só reforça quando o flag está ligado — igual ao
+ * legado por repo físico).
+ */
+test('US-PROJ4: sem serializeByRepo, mesmo Project não serializa épicos distintos (default)', async () => {
+  const prisma = makePrisma({
+    cardFindUnique: async (args) => {
+      const map: Record<string, { boardId: string; parentId: string }> = {
+        s1: { boardId: 'board-a', parentId: 'epic-1' },
+        s2: { boardId: 'board-b', parentId: 'epic-2' },
+      };
+      return map[args.where.id as string] ?? { boardId: null, aiProject: '', parentId: null };
+    },
+    boardFindUnique: async () => ({ projectId: 'proj-shared' }),
+  });
+  const { orch, sessions } = makeOrchestrator({ prisma });
+  sessions.start('s1');
+  const conflict = await priv(orch).findConflictingActiveStory('s2');
+  assert.equal(conflict, null, 'épicos diferentes não conflitam por default (serializeByRepo=false)');
+});
+
+/**
+ * (d) O namespace da memória é derivado do projectId — projetos distintos NÃO
+ * colidem (a colmeia de cada Project vive sob `projects/<id>/…`).
+ */
+test('US-PROJ4: namespace da memória é projects/<projectId> e isola projetos distintos', async () => {
+  const prismaA = makePrisma({
+    cardFindUnique: async () => ({ boardId: 'board-a', parentId: 'epic-1' }),
+    boardFindUnique: async () => ({ projectId: 'proj-A' }),
+  });
+  const prismaB = makePrisma({
+    cardFindUnique: async () => ({ boardId: 'board-b', parentId: 'epic-2' }),
+    boardFindUnique: async () => ({ projectId: 'proj-B' }),
+  });
+  const { orch: orchA } = makeOrchestrator({ prisma: prismaA });
+  const { orch: orchB } = makeOrchestrator({ prisma: prismaB });
+
+  const nsA = await priv(orchA).resolveMemoryNamespace('sA');
+  const nsB = await priv(orchB).resolveMemoryNamespace('sB');
+
+  assert.equal(nsA, 'projects/proj-A', 'namespace segue projects/<projectId>');
+  assert.equal(nsB, 'projects/proj-B');
+  assert.notEqual(nsA, nsB, 'projetos distintos → namespaces distintos (sem colisão)');
+});
+
+/**
+ * (d') Sem Project, o namespace é `undefined` → colmeia GLOBAL legada
+ * (`modules/<x>.md`), comportamento idêntico ao de hoje.
+ */
+test('US-PROJ4: sem Project, namespace da memória é undefined (colmeia global legada)', async () => {
+  const prisma = makePrisma({
+    cardFindUnique: async () => ({ boardId: 'board-x', parentId: 'epic-1' }),
+    boardFindUnique: async () => ({ projectId: null }),
+  });
+  const { orch } = makeOrchestrator({ prisma });
+  const ns = await priv(orch).resolveMemoryNamespace('s1');
+  assert.equal(ns, undefined, 'sem Project → namespace undefined (global)');
 });

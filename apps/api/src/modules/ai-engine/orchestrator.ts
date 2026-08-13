@@ -13,6 +13,7 @@ import { APP_CONFIG, type AppConfig } from '../../shared/config/config';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
 import { WorkspaceService, TargetProjectError } from './workspaces/workspace.service';
+import { ProjectWorkspaceService } from '../projects/project-workspace.service';
 import { AGENT_RUNNER, type AgentRunner } from './runners/agent-runner.interface';
 import { ValidationRunner } from './validators/validation.runner';
 import { resolveLoopProfile, type LoopProfileDef } from './loop-profiles/loop-profiles';
@@ -20,7 +21,7 @@ import { mapIteration, type PrismaIterationRow } from '../cards/iteration.mapper
 import { deriveEpicStatus, type ColumnLike } from '../cards/cards.epic-status';
 import { MemoryIndexService } from '../memory/memory-index.service';
 import { MemoryGitService } from '../memory/memory-git.service';
-import { MemoryBootstrapService } from '../memory/memory-bootstrap.service';
+import { MemoryBootstrapService, withNamespace } from '../memory/memory-bootstrap.service';
 import { WakeupQueueService } from './wakeup-queue.service';
 import {
   allTasksDone,
@@ -87,6 +88,11 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // quando `config.agent.wakeupQueueEnabled` está ON, sempre com try/catch
     // defensivo: uma falha na fila NUNCA pode derrubar o loop.
     private readonly wakeupQueue?: WakeupQueueService,
+    // US-PROJ4 — resolução do repo-alvo via Project (clone gerenciado). Opcional
+    // e por último para não quebrar as specs que instanciam o Orchestrator
+    // posicionalmente sem Project. Quando ausente (ou o Board não tem
+    // `projectId`), a resolução cai no fallback legado `aiProject`.
+    private readonly projectWorkspace?: ProjectWorkspaceService,
   ) {}
 
   /** US-COLAB3 — a fila só age quando o flag está ON e o serviço foi injetado. */
@@ -326,12 +332,18 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // neurônios iniciais por módulo (`modules/<modulo>.md`). É IDEMPOTENTE —
     // bootstrapFromRepo pula módulos já existentes — e totalmente DEFENSIVO: se
     // falhar, apenas registra um warning e o loop segue normalmente.
+    //
+    // US-PROJ4: o `repoPath` vem do clone gerenciado quando o Board tem Project
+    // (senão do `aiProject` legado). A colmeia é NAMESPACEADA por `projectId`
+    // (§1.2/decisão #6) para que projetos distintos não colidam.
     try {
-      const repoPath = await this.resolveStoryProject(storyId);
+      const repoPath = await this.resolveStoryTargetRepo(storyId);
+      const namespace = await this.resolveMemoryNamespace(storyId);
       if (repoPath) {
         const created = await this.memoryBootstrap.bootstrapFromRepo({
           repoPath,
           sessionId: storyId,
+          namespace,
         });
         if (created.length) {
           await this.log(
@@ -412,11 +424,68 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Resolve o caminho absoluto do repo-alvo (aiProject) de uma story, herdando
-   * do épico pai quando a story não tem aiProject próprio (mesma regra do
-   * buildContext). Retorna null se não houver aiProject.
+   * US-PROJ4 — resolve o `projectId` do Board da story. O repo-alvo é
+   * propriedade do QUADRO (raiz da cascata, como `defaultModel`), então a origem
+   * é o Board da story (`Card.boardId` → `Board.projectId`), não o Card. Retorna
+   * `null` quando o Board não tem Project associado (fallback legado `aiProject`).
    */
-  private async resolveStoryProject(storyId: string): Promise<string | null> {
+  private async resolveStoryProjectId(storyId: string): Promise<string | null> {
+    const story = await this.prisma.card.findUnique({
+      where: { id: storyId },
+      select: { boardId: true },
+    });
+    if (!story?.boardId) return null;
+    const board = await this.prisma.board.findUnique({
+      where: { id: story.boardId },
+      select: { projectId: true },
+    });
+    return board?.projectId ?? null;
+  }
+
+  /**
+   * US-PROJ4 — resolve o caminho absoluto do repo-alvo de uma story para o
+   * `cwd` do agent e o `repoPath` da memória.
+   *
+   * NOVO caminho (Project): se o Board da story tem `projectId` e o
+   * `ProjectWorkspaceService` está disponível, GARANTE o clone gerenciado
+   * (`ensureCloned` — clona se ainda não existe) e usa o `localPath` retornado.
+   * **Ordenação crítica:** `ensureCloned` roda ANTES de `resolveWorkdir`, senão o
+   * worktree falharia por path inexistente.
+   *
+   * FALLBACK legado (`aiProject`): sem `projectId` (ou sem o serviço injetado),
+   * mantém a resolução por path da story→epic, idêntica ao comportamento de hoje.
+   *
+   * Retorna `null` quando nada resolve (nem Project nem `aiProject`).
+   */
+  private async resolveStoryTargetRepo(storyId: string): Promise<string | null> {
+    const projectId = await this.resolveStoryProjectId(storyId);
+    if (projectId && this.projectWorkspace) {
+      // Clone gerenciado: ENGINE faz git (invariante 8 — o agent nunca faz git).
+      // ensureCloned coalesce chamadas concorrentes por projectId (invariante 7).
+      const localPath = await this.projectWorkspace.ensureCloned(projectId);
+      return this.workspaces.resolveTargetRepo(localPath);
+    }
+    return this.resolveLegacyAiProject(storyId);
+  }
+
+  /**
+   * US-PROJ4 / §1.2 (decisão #6) — namespace da colmeia de memória por
+   * `projectId`. Retorna `projects/<projectId>` quando o Board tem Project (a
+   * colmeia daquele projeto vive sob esse subdir no bare repo da memória),
+   * ou `undefined` no legado (comportamento GLOBAL de hoje: `modules/<x>.md`).
+   * Garante que colmeias de projetos distintos NÃO colidam.
+   */
+  private async resolveMemoryNamespace(storyId: string): Promise<string | undefined> {
+    const projectId = await this.resolveStoryProjectId(storyId);
+    return projectId ? `projects/${projectId}` : undefined;
+  }
+
+  /**
+   * Resolve o caminho absoluto do repo-alvo (aiProject) LEGADO de uma story,
+   * herdando do épico pai quando a story não tem aiProject próprio (mesma regra
+   * do buildContext). Retorna null se não houver aiProject.
+   */
+  private async resolveLegacyAiProject(storyId: string): Promise<string | null> {
     const story = await this.prisma.card.findUnique({
       where: { id: storyId },
       select: { aiProject: true, parentId: true },
@@ -430,6 +499,19 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       raw = epic?.aiProject ?? '';
     }
     return this.workspaces.resolveTargetRepo(raw);
+  }
+
+  /**
+   * US-PROJ4 — chave de SERIALIZAÇÃO do repo-alvo (guard `serializeByRepo`).
+   * Quando o Board tem `projectId`, a chave é o `projectId` (estável, não muda
+   * com o path físico do clone). Sem `projectId`, cai na chave legada = path
+   * físico do `aiProject`. Não dispara `ensureCloned` (é só comparação de
+   * conflito, in-process, sem Redis — invariante 7).
+   */
+  private async resolveStoryProject(storyId: string): Promise<string | null> {
+    const projectId = await this.resolveStoryProjectId(storyId);
+    if (projectId) return `project:${projectId}`;
+    return this.resolveLegacyAiProject(storyId);
   }
 
   // ── Loop core ───────────────────────────────────────────────────────────────
@@ -506,17 +588,23 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       files: context.files,
     };
 
-    // Diretório de trabalho do agent = o PRÓPRIO repo-alvo (aiProject). O agent
-    // coda direto na branch já aberta, sem worktree isolado nem branch/commit —
-    // deixando as mudanças no working tree do projeto. A colisão entre stories
-    // concorrentes é resolvida por SERIALIZAÇÃO em onStoryEnterInProgress (uma
-    // story In Progress por EPIC; opcionalmente também por repo-alvo físico via
-    // AGENT_SERIALIZE_BY_REPO). Se o projeto-alvo não estiver definido/for
-    // inválido, RECUSAMOS rodar — o agent
+    // Diretório de trabalho do agent = o PRÓPRIO repo-alvo. O agent coda direto
+    // na branch já aberta, sem worktree isolado nem branch/commit — deixando as
+    // mudanças no working tree do projeto. A colisão entre stories concorrentes
+    // é resolvida por SERIALIZAÇÃO em onStoryEnterInProgress (uma story In
+    // Progress por EPIC; opcionalmente também por repo-alvo físico via
+    // AGENT_SERIALIZE_BY_REPO).
+    //
+    // US-PROJ4 — a ORIGEM do repo-alvo é resolvida por `resolveStoryTargetRepo`:
+    // quando o Board tem `projectId`, o path é o `localPath` do clone gerenciado
+    // (garantido por `ensureCloned` ANTES de `resolveWorkdir` — senão o worktree
+    // falharia por path inexistente); senão, é o `aiProject` legado. Se o
+    // projeto-alvo não estiver definido/for inválido, RECUSAMOS rodar — o agent
     // nunca pode trabalhar no repo do kanban-ai. A task fica em blocked-dep.
     let cwd = '';
     try {
-      cwd = await this.workspaces.resolveWorkdir(storyId, context.project);
+      const targetRepo = await this.resolveStoryTargetRepo(storyId);
+      cwd = await this.workspaces.resolveWorkdir(storyId, targetRepo);
     } catch (err) {
       const msg = (err as Error).message;
       if (err instanceof TargetProjectError) {
@@ -1054,15 +1142,22 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // na memória em colmeia. Usa `commitAndReindex` (Camada 2), que respeita a
     // ordem de escrita invariante git → índice. Totalmente DEFENSIVO: a memória
     // NUNCA pode derrubar o loop; cada falha vira warning e segue.
+    //
+    // US-PROJ4 (§1.2 / decisão #6) — quando a story pertence a um Board com
+    // Project, o `learning.path` reportado pela AI (ex.: `modules/x.md`) é
+    // prefixado com o namespace do Project antes de gravar, mantendo a colmeia
+    // isolada. Sem Project, grava no path global legado.
     if (runResult.learnings?.length) {
+      const namespace = await this.resolveMemoryNamespace(storyId);
       for (const learning of runResult.learnings) {
         try {
-          const prev = await this.memoryGit.readNeuron(learning.path);
+          const neuronPath = withNamespace(learning.path, namespace);
+          const prev = await this.memoryGit.readNeuron(neuronPath);
           const stamp = new Date().toISOString();
           const entry = `\n- (${stamp}, task ${taskId}) ${learning.summary.trim()}`;
-          const base = prev ?? `# ${learning.path}\n\ntags: memory\n\nAprendizados:`;
+          const base = prev ?? `# ${neuronPath}\n\ntags: memory\n\nAprendizados:`;
           await this.memoryIndex.commitAndReindex({
-            path: learning.path,
+            path: neuronPath,
             content: base + entry,
             sessionId: taskId,
             message: `learn(${taskId}): ${learning.summary.slice(0, 60)}`,
@@ -2997,13 +3092,20 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // US-A1 (EP-A/ADR-0027) — recupera neurônios relevantes da colmeia para
     // injetar no prompt. Totalmente defensivo: qualquer falha da memória cai
     // para lista vazia e NUNCA interrompe o loop.
+    //
+    // US-PROJ4 (§1.2 / decisão #6) — quando a story pertence a um Board com
+    // Project, a busca é RESTRITA ao namespace daquele Project (não vaza memória
+    // de outros projetos nem da colmeia global legada). Sem Project, busca global.
     let memoryNeurons: { path: string; title: string; content: string }[] = [];
     try {
       const term = [taskTitle, ...flows.map((f) => f.name)]
         .filter(Boolean)
         .join(' ')
         .trim();
-      const hits = await this.memoryIndex.query(term || undefined, 5).catch(() => []);
+      const namespace = task?.parentId
+        ? await this.resolveMemoryNamespace(task.parentId)
+        : undefined;
+      const hits = await this.memoryIndex.query(term || undefined, 5, namespace).catch(() => []);
       const neurons: { path: string; title: string; content: string }[] = [];
       for (const hit of hits.slice(0, 5)) {
         const raw = await this.memoryGit.readNeuron(hit.path).catch(() => null);

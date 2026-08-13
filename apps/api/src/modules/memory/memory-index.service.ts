@@ -121,12 +121,20 @@ export class MemoryIndexService {
    * US-162 — Consulta/retrieval de neurônios pelo índice. Busca case-insensitive
    * em title/summary/searchText/path e retorna os hits mais relevantes. Sem
    * termo, lista os neurônios (ordenados por atualização recente).
+   *
+   * US-PROJ4 (§1.2 / decisão #6) — `pathPrefix` OPCIONAL: quando informado (ex.:
+   * `projects/<projectId>`), a busca é RESTRITA aos neurônios daquele namespace
+   * (colmeia do Project), sem misturar com a colmeia global ou de outros
+   * projetos. Sem `pathPrefix`, o comportamento é o legado (busca global).
    */
-  async query(term?: string, limit = 20): Promise<MemoryIndexHit[]> {
+  async query(term?: string, limit = 20, pathPrefix?: string): Promise<MemoryIndexHit[]> {
     const q = (term ?? '').trim();
+    const scope = (pathPrefix ?? '').replace(/\/+$/, '');
+    const prefixFilter = scope ? { path: { startsWith: `${scope}/` } } : {};
     const rows = q
       ? await this.prisma.memoryIndex.findMany({
           where: {
+            ...prefixFilter,
             OR: [
               { title: { contains: q, mode: 'insensitive' } },
               { summary: { contains: q, mode: 'insensitive' } },
@@ -138,6 +146,7 @@ export class MemoryIndexService {
           take: limit,
         })
       : await this.prisma.memoryIndex.findMany({
+          where: prefixFilter,
           orderBy: { updatedAt: 'desc' },
           take: limit,
         });

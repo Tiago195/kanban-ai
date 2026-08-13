@@ -69,8 +69,10 @@ memory/
   - `reindexOne(path)` (US-160) — reprojeta UM neurônio (idempotente); remove a
     projeção e retorna `null` se o neurônio não existir mais no git.
   - `rebuildAll()` (US-161) — reconstrói o índice inteiro a partir do git.
-  - `query(term?, limit?)` (US-162) — retrieval case-insensitive por
-    title/summary/searchText/path.
+  - `query(term?, limit?, pathPrefix?)` (US-162) — retrieval case-insensitive por
+    title/summary/searchText/path. **US-PROJ4:** `pathPrefix` OPCIONAL restringe a
+    busca ao **namespace** do Project (`projects/<projectId>`), isolando a colmeia;
+    sem `pathPrefix`, busca **global** (legado).
 
 ### Contrato (EP-78 — locks advisory + presença)
 
@@ -252,14 +254,20 @@ Abre o control plane a agents **externos** com segurança (ver
 - `MemoryBootstrapService` (**@Global**) semeia a colmeia para que as AIs não
   comecem do zero. A detecção/mapeamento/semente são **funções puras** exportadas
   (`detectModules`, `moduleForFile`, `seedFor`) — testáveis sem I/O de git.
-  - `bootstrapFromRepo({repoPath, sessionId?})` (US-213) — varre o repo-alvo
-    (`aiProject`), detecta módulos (containers `modules/`/`features/`/… sob
+  - `bootstrapFromRepo({repoPath, sessionId?, namespace?})` (US-213) — varre o
+    repo-alvo, detecta módulos (containers `modules/`/`features/`/… sob
     `apps/`/`src/`/`packages/`, ou cada `apps/<app>`/`packages/<pkg>` quando não há
-    container) e cria **1 neurônio `modules/<modulo>.md` por módulo** via
+    container) e cria **1 neurônio por módulo** via
     `MemoryIndexService.commitAndReindex` (ordem de escrita git → índice). É
     **idempotente**: neurônios já existentes (checados por `git.readNeuron`) são
     **preservados** — nunca sobrescreve o que as AIs já mantêm. Retorna os paths
-    efetivamente criados.
+    efetivamente criados. **US-PROJ4 (§1.2 / decisão #6):** `namespace` OPCIONAL
+    (ex.: `projects/<projectId>`) prefixa os neurônios — o helper puro exportado
+    `withNamespace(neuronPath, namespace?)` produz
+    `projects/<id>/modules/<modulo>.md`, isolando a colmeia por Project no bare
+    repo. SEM `namespace`, o comportamento é o legado global (`modules/<x>.md`).
+    O `repoPath` vem do **clone gerenciado** (`ProjectWorkspaceService.ensureCloned`)
+    quando o Board tem Project; senão do `aiProject` legado.
   - `ensureNeuronForFile({filePath, sessionId?})` (US-214) — complemento **lazy**:
     mapeia um arquivo tocado ao seu módulo (`moduleForFile`) e cria o neurônio-
     semente se ausente. Cobre o que a varredura inicial não previu.
@@ -272,11 +280,15 @@ Abre o control plane a agents **externos** com segurança (ver
 - `MemoryGcService` (**@Global**) reúne 3 jobs de baixa prioridade que mantêm a
   colmeia relevante e o repo enxuto **sem perder a fonte da verdade** (git
   preserva o histórico; GC nunca `git rm` conteúdo estável nem apaga commits):
-  - `sweepStale({repoPath})` (US-215) — reconcilia o índice contra o repo-alvo:
-    neurônio de módulo (`modules/<x>.md`) cujo diretório sumiu vira `stale` +
+  - `sweepStale({repoPath, namespace?})` (US-215) — reconcilia o índice contra o
+    repo-alvo: neurônio de módulo cujo diretório sumiu vira `stale` +
     `archivedAt`; se o módulo reaparece, é reativado. Grava `lastSeenCommit`.
     Idempotente. Campos novos no `MemoryIndex`: `stale`, `archivedAt`,
-    `lastSeenCommit` (migration `20260812165119_memory_gc`).
+    `lastSeenCommit` (migration `20260812165119_memory_gc`). **US-PROJ4:**
+    `namespace` OPCIONAL restringe a reconciliação aos neurônios DAQUELE Project
+    (`isModuleNeuron` aceita `projects/<id>/modules/<x>.md`), sem tocar colmeias
+    de outros projetos nem a global; sem `namespace`, reconcilia só a global
+    legada (`modules/<x>.md`).
   - `summarizeHistory(path, keep?)` (US-216) — condensa o histórico longo do
     neurônio num bloco **determinístico** (mantém os `keep`=10 commits recentes),
     sem apagar commits.

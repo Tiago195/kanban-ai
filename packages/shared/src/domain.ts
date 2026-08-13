@@ -647,3 +647,94 @@ export interface CommitOutcome {
     | 'commit-failed'
     | 'nothing-to-commit';
 }
+
+// ─────────────────────────────────────────────────────────────
+// EP-PROJECT / US-PROJ1 — Project (repo git clonado & gerenciado)
+// ─────────────────────────────────────────────────────────────
+
+/** Tipo de autenticação do repositório git do Project. Ver US-PROJ3. */
+export type ProjectAuthKind = 'none' | 'https' | 'ssh';
+
+/** Estado do clone gerenciado do Project. Ver US-PROJ2. */
+export type ProjectCloneState = 'pending' | 'cloning' | 'ready' | 'failed';
+
+/**
+ * DTO público de leitura de um Project. Ortogonal à hierarquia Epic→Story→Task
+ * (associado ao Board, raiz da cascata de repo-alvo).
+ *
+ * NUNCA expõe o conteúdo de `credentialRef` nem o `localPath` absoluto do clone
+ * (evita vazar layout do FS do servidor / segredos).
+ */
+export interface Project {
+  id: string;
+  name: string;
+  repoUrl: string;
+  defaultBranch: string | null;
+  authKind: ProjectAuthKind;
+  cloneState: ProjectCloneState;
+  lastError: string | null;
+  lastSyncedAt: string | null; // ISO
+  tenantId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Payload de criação de um Project. */
+export interface CreateProjectInput {
+  name: string;
+  repoUrl: string;
+  defaultBranch?: string | null;
+  authKind?: ProjectAuthKind;
+  credentialRef?: string | null; // ver US-PROJ3
+  tenantId?: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────
+// EP-PROJECT / US-PROJ7 — Project Explorer + Memory Viewer (SÓ leitura)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Estado do lock advisory de um neurônio — reexportado de `enums.ts`
+ * (`MemoryLockState = 'FREE' | 'EDITING' | 'REVIEW'`) para as projeções do
+ * Project Explorer. NÃO redefinir aqui (evita ambiguidade no `export *`).
+ */
+import type { MemoryLockState } from './enums';
+
+/**
+ * Projeção de LEITURA de um neurônio da colmeia (espelha `MemoryIndex`), SEM os
+ * campos internos de coordenação (`leaseId`/`activeBranch`/`baseCommit`/…). É o
+ * "mapa do que a AI sabe" exibido no Project Explorer. `tags` já vem
+ * desserializado do JSON persistido.
+ */
+export interface MemoryNeuronSummary {
+  path: string; // ex.: 'modules/cards.md'
+  title: string;
+  tags: string[]; // já desserializado do JSON
+  summary: string;
+  lockState: MemoryLockState;
+  holder: string | null;
+  stale: boolean;
+  archivedAt: string | null; // ISO
+  updatedAt: string; // ISO
+}
+
+/** Detalhe de um neurônio: summary + o markdown completo (de GET /memory/read). */
+export interface MemoryNeuronDetail extends MemoryNeuronSummary {
+  content: string | null; // markdown completo
+  headCommit: string; // SHA de origem do conteúdo
+}
+
+/**
+ * Visão do repositório clonado exibida no explorer (aba "Repositório"). Combina
+ * o estado persistido do `Project` (`cloneState`/`lastSyncedAt`) com metadados
+ * lidos do clone via `isomorphic-git` (`defaultBranch`/`headCommit`) e os módulos
+ * detectados (`detectModules(localPath)`). Campos de git são `null` enquanto o
+ * clone ainda não existe.
+ */
+export interface ProjectRepoInfo {
+  defaultBranch: string | null;
+  headCommit: string | null;
+  lastSyncedAt: string | null; // ISO
+  cloneState: ProjectCloneState;
+  modules: string[]; // de detectModules(localPath)
+}

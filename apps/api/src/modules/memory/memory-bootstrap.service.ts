@@ -25,6 +25,20 @@ export interface DetectedModule {
 }
 
 /**
+ * US-PROJ4 (§1.2 / decisão #6) — aplica o `namespace` do Project a um path de
+ * neurônio. `withNamespace('modules/cards.md', 'projects/abc')` →
+ * `'projects/abc/modules/cards.md'`. Sem `namespace`, devolve o path intacto
+ * (colmeia GLOBAL legada). Puro e determinístico. Idempotente para prefixos já
+ * aplicados.
+ */
+export function withNamespace(neuronPath: string, namespace?: string): string {
+  if (!namespace) return neuronPath;
+  const prefix = namespace.replace(/\/+$/, '');
+  if (neuronPath === prefix || neuronPath.startsWith(`${prefix}/`)) return neuronPath;
+  return `${prefix}/${neuronPath}`;
+}
+
+/**
  * **Bootstrap** da colmeia (ADR-0027, **EP-84**).
  *
  * Semeia a memória para que as AIs não comecem do zero:
@@ -52,22 +66,35 @@ export class MemoryBootstrapService {
    * US-213 — varre `repoPath`, detecta módulos e cria 1 neurônio inicial por
    * módulo (idempotente: pula os que já existem no git). Retorna os paths dos
    * neurônios efetivamente CRIADOS nesta execução.
+   *
+   * US-PROJ4 (§1.2 / decisão #6) — `namespace` OPCIONAL: quando informado (ex.:
+   * `projects/<projectId>`), os neurônios são criados sob esse prefixo
+   * (`<namespace>/modules/<modulo>.md`), isolando a colmeia por Project no bare
+   * repo da memória. SEM `namespace`, o comportamento é idêntico ao de hoje
+   * (colmeia GLOBAL em `modules/<modulo>.md`).
    */
-  async bootstrapFromRepo(input: { repoPath: string; sessionId?: string }): Promise<string[]> {
+  async bootstrapFromRepo(input: {
+    repoPath: string;
+    sessionId?: string;
+    namespace?: string;
+  }): Promise<string[]> {
     const modules = detectModules(input.repoPath);
     const sessionId = input.sessionId ?? 'bootstrap';
     const created: string[] = [];
     for (const mod of modules) {
+      const neuronPath = withNamespace(mod.neuronPath, input.namespace);
       const wrote = await this.createIfAbsent({
-        neuronPath: mod.neuronPath,
+        neuronPath,
         module: mod.module,
         dir: mod.dir,
         sessionId,
       });
-      if (wrote) created.push(mod.neuronPath);
+      if (wrote) created.push(neuronPath);
     }
     this.logger.debug(
-      `bootstrap: ${modules.length} modulo(s) detectado(s), ${created.length} neuronio(s) criado(s).`,
+      `bootstrap: ${modules.length} modulo(s) detectado(s), ${created.length} neuronio(s) criado(s)` +
+        (input.namespace ? ` [namespace=${input.namespace}]` : '') +
+        '.',
     );
     return created;
   }
