@@ -3530,6 +3530,13 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
      * Fonte: AgentRuntimeState.livenessReason.
      */
     continuationReason: string | null;
+    /**
+     * US-BUX3 (EP-BUX) — plan mode: quando true, a iteração deve APENAS
+     * investigar e produzir um plano, sem editar código. Reflete o
+     * `startInPlanMode` da STORY em execução (o loop dispara por story).
+     * Defensivo: default false quando a story não é encontrada.
+     */
+    startInPlanMode: boolean;
   }> {
     const task = await this.prisma.card.findUnique({
       where: { id: taskId },
@@ -3538,7 +3545,15 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     const story = task?.parentId
       ? await this.prisma.card.findUnique({
           where: { id: task.parentId },
-          select: { aiProject: true, aiNotes: true, affectedFlows: true, parentId: true, title: true, description: true },
+          select: {
+            aiProject: true,
+            aiNotes: true,
+            affectedFlows: true,
+            parentId: true,
+            title: true,
+            description: true,
+            startInPlanMode: true,
+          },
         })
       : null;
     // #10a: propagação epic→story. Se a story não tem aiProject/aiNotes
@@ -3766,6 +3781,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       priorAttempt,
       parentHandoffs,
       continuationReason,
+      startInPlanMode: story?.startInPlanMode ?? false,
     };
   }
 
@@ -3790,6 +3806,29 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
         'Outras iterações virão depois e lerão o que você registrar. Foque em avançar ' +
         'a task, não em terminar tudo de uma vez. NÃO se perca: siga o profile e o handoff abaixo.',
     );
+
+    // US-BUX3 (EP-BUX) — PLAN MODE: quando a story em execução está marcada com
+    // `startInPlanMode`, esta iteração é de PLANEJAMENTO apenas. O bloco é
+    // injetado de forma PROEMINENTE (logo após o cabeçalho, antes de qualquer
+    // instrução de execução) para maximizar a chance de a AI respeitá-lo.
+    if (context.startInPlanMode) {
+      lines.push('');
+      lines.push('## 🛑 MODO PLANEJAMENTO (plan mode) — NÃO ALTERE CÓDIGO NESTA ITERAÇÃO');
+      lines.push(
+        '- Sua ÚNICA tarefa nesta iteração é INVESTIGAR o repositório e produzir um ' +
+          'PLANO de implementação detalhado. **NÃO edite arquivos, NÃO crie/apague ' +
+          'arquivos, NÃO rode migrations e NÃO commite nada.**',
+      );
+      lines.push(
+        '- O plano deve conter: arquivos a tocar, abordagem/estratégia, riscos e uma ' +
+          'lista ordenada de passos de implementação.',
+      );
+      lines.push(
+        '- Registre o plano completo no `summary` e o próximo passo concreto no ' +
+          '`nextStep` do seu resultado. Comandos de LEITURA (listar/ler arquivos, ' +
+          'buscar código) são permitidos; qualquer comando que altere o filesystem NÃO é.',
+      );
+    }
 
     // Instruções do agent responsável ("AGENTS.md" do agent). Quando definidas,
     // especializam o comportamento desta iteração (persona, foco, regras).
