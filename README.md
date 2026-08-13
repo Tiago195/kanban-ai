@@ -4,83 +4,60 @@
 *assignees* não são humanos: são **agents de AI** que executam trabalho de
 desenvolvimento de software em **loop**.
 
-> Este repositório contém a **fundação**: documentação de arquitetura, guias para
-> desenvolvimento com AI, convenções e **scaffolding executável** (estrutura de
-> pastas, configs, schema Prisma, interfaces stubadas, health-check, WebSocket,
-> migration + seed). O **produto real** será construído depois — em grande parte
-> pelas próprias AIs — em cima desta base.
+> **Fundação:** este repo traz arquitetura, guard-rails para AIs e **scaffolding
+> executável** (schema Prisma, health-check, WebSocket, migration + seed, loop
+> engine com adapter plugável). O **produto** será construído em cima desta base —
+> em grande parte pelas próprias AIs.
 
-A especificação funcional de referência é o protótipo em
-[`docs/reference/kanban.html`](docs/reference/kanban.html).
-
-## Domínio em uma frase
+## Como funciona
 
 Hierarquia **Epic → Story → Task**. O board mostra **stories**; **epics** são
 derivados das stories filhas; **tasks** vivem num mini-kanban dentro da story.
 Quando uma **story entra em "In Progress"**, o **loop engine** acorda um agent que
-trabalha em **iterações encadeadas**, marca o **DOD**, e ao final **valida** os
+trabalha em **iterações encadeadas**, marca o **DOD** e ao final **valida** os
 fluxos afetados — criando **tasks derivadas** quando encontra problemas.
 
-## Stack
-
-- **Monorepo**: npm workspaces
-- **Frontend** (`apps/web`): React + Vite + TypeScript + Tailwind + shadcn/ui
-  (feature-based)
-- **Backend** (`apps/api`): NestJS + Fastify + Prisma + Postgres
-- **Contratos** (`packages/shared`): enums, DTOs e eventos WebSocket tipados
-- **Realtime**: WebSocket (sem F5)
-- **Loop engine**: orquestração in-process com watchdog e adapter plugável
+Um agent trabalha sobre um **Project**: um repositório git que o engine **clona e
+gerencia** num diretório previsível (o agent nunca roda git — [ADR-0008](docs/adr/0008-git-worktree-per-execution.md)).
+Você cadastra o Project pela **URL git** (não por um path do host), o que deixa a
+API rodar **inteira no Docker** ([ADR-0038](docs/adr/0038-project-clone-in-volume-enables-containerized-api.md)).
 
 ## Começando
 
-Há dois modos de rodar o projeto. **Escolha um.**
-
-### Modo A — tudo no Docker (recomendado, hot-reload incluso)
-
-Sobe Postgres + API + Web em containers. API e Web têm **hot-reload** (edições no
-host refletem no container). Migrations e seed rodam automaticamente no boot da API
-(seed só é aplicado se o banco estiver vazio — nunca sobrescreve dados existentes).
+Pré-requisitos: **Docker** e **Node** (para o frontend e o `npm install`).
 
 ```bash
 cp .env.example .env
-docker compose up --build      # postgres + api + web
-curl localhost:3333/health     # API
-# abra http://localhost:5173    # Web (Vite)
+npm install                    # instala os 3 workspaces (usado via bind mount pelo container)
+
+docker compose up -d           # sobe postgres + api (migrations + seed rodam no boot)
+curl localhost:3333/health     # smoke da API
+
+npm run dev:web                # frontend no host → http://localhost:5173
 ```
 
-Para derrubar: `docker compose down` (adicione `-v` para apagar também o volume do banco).
+A API roda containerizada por padrão; o **frontend fica no host** (`npm run dev:web`)
+para um dev loop rápido. Para subir o web também em container:
+`docker compose --profile docker-app up -d`.
 
-> **Nota (ambiente com proxy TLS corporativo):** as imagens de dev **não** rodam
-> `npm ci` — elas reutilizam as `node_modules` do host via bind mount (evita o erro
-> `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` do proxy). Portanto, rode `npm install` no host
-> **uma vez** antes do primeiro `docker compose up`. Detalhes em `Dockerfile.dev`.
+Para derrubar: `docker compose down` (use `-v` para apagar o volume do banco).
 
-### Modo B — só o banco no Docker, apps no host
+> **Copilot CLI no container:** o modo real (`AGENT_RUNNER_KIND=copilot`) precisa do
+> CLI autenticado dentro do container. O compose monta `~/.copilot` como read-only
+> por padrão (ou passe `GH_TOKEN`). O default `mock` funciona sem isso.
 
-```bash
-nvm use && npm install
-cp .env.example .env
-docker compose up -d postgres
+Validação e ambientes restritos (proxy TLS, egress bloqueado) em
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
-# aguarde o Postgres ficar "healthy" antes de migrar (senão dá P1001):
-docker compose ps            # confira STATUS = healthy
-# ou: until docker inspect --format '{{.State.Health.Status}}' kanban-ai-postgres | grep -q healthy; do sleep 1; done
+## Stack
 
-npm run db:migrate && npm run db:seed
-npm run dev
-curl localhost:3333/health   # API_PORT padrão = 3333
-```
-
-> **Não misture os modos ao mesmo tempo:** ambos publicam nas portas 3333/5173/5432.
-> Rodar `npm run dev` no host enquanto o `docker compose up` (Modo A) está de pé causa
-> conflito de porta (`EADDRINUSE`). Derrube um antes de subir o outro.
-
-> Se `npm run db:migrate` retornar `P1001: Can't reach database server`, o Postgres
-> ainda não terminou de subir. Espere o `docker compose ps` mostrar `healthy` e
-> rode de novo — o migrate é idempotente. Em ambientes com egress TCP restrito,
-> veja o workaround em [CONTRIBUTING.md](CONTRIBUTING.md#banco-de-dados-em-ambientes-restritos).
-
-Detalhes em [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Monorepo** npm workspaces
+- **Frontend** (`apps/web`): React + Vite + TypeScript + Tailwind + shadcn/ui
+- **Backend** (`apps/api`): NestJS + Fastify + Prisma + Postgres
+- **MCP** (`apps/mcp`): segundo plano de controle ([ADR-0020](docs/adr/0020-mcp-server-second-control-plane.md))
+- **Contratos** (`packages/shared`): enums, DTOs e eventos WebSocket tipados
+- **Realtime**: WebSocket (sem F5)
+- **Loop engine**: orquestração in-process com watchdog e adapter plugável
 
 ## Documentação
 
@@ -88,9 +65,10 @@ Detalhes em [CONTRIBUTING.md](CONTRIBUTING.md).
 |---|---|
 | [AGENTS.md](AGENTS.md) | Como AIs devem trabalhar no repo (guard-rails, invariantes) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Visão macro, módulos, boundaries, contrato WS |
-| [docs/loop-engine.md](docs/loop-engine.md) | O núcleo: ciclo de iteração, DOD, validação, watchdog |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, convenções, scripts |
+| [docs/loop-engine.md](docs/loop-engine.md) | O núcleo: iteração, DOD, validação, watchdog |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, convenções, scripts, ambientes restritos |
 | [docs/adr/](docs/adr/) | Decisões de arquitetura e porquês |
+| [docs/reference/kanban.html](docs/reference/kanban.html) | Spec funcional de referência |
 
 ## Estrutura
 
@@ -98,10 +76,8 @@ Detalhes em [CONTRIBUTING.md](CONTRIBUTING.md).
 kanban-ai/
 ├── apps/web/          # frontend
 ├── apps/api/          # backend + loop engine + Prisma
-├── apps/mcp/          # MCP Server (segundo plano de controle — ADR-0020)
+├── apps/mcp/          # MCP Server (ADR-0020)
 ├── packages/shared/   # contratos compartilhados
 ├── docs/              # reference/, adr/, loop-engine.md
-├── Dockerfile.dev     # imagem de dev (hot-reload) para api + web
-├── docker/            # entrypoints de dev dos containers api/web
-└── docker-compose.yml # postgres + api + web (dev)
+└── docker-compose.yml # postgres + api (web via profile docker-app)
 ```
