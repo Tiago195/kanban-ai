@@ -7,6 +7,10 @@ import type {
   AgentRunner,
 } from './agent-runner.interface';
 import { CliAdapter, type CliEvent } from './cli-adapter';
+import {
+  compactPrompt,
+  isContextOverflowError,
+} from './context-compaction';
 import { APP_CONFIG, type AppConfig } from '../../../shared/config/config';
 
 /**
@@ -35,6 +39,32 @@ export class CopilotCliRunner implements AgentRunner {
   }
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
+    try {
+      return await this.spawnAndConsume(input);
+    } catch (err) {
+      // US-BUX5: recuperação de estouro de contexto. Se o processo falhou com
+      // uma mensagem reconhecível de limite de contexto/tokens, faz UM único
+      // retry (bounded) re-executando com o prompt compactado. Abort (stop
+      // hard) NUNCA deve ser recuperado — propaga direto. Qualquer outra falha
+      // (ou uma segunda falha após o retry) propaga o comportamento atual.
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === 'aborted' || !isContextOverflowError(message)) {
+        throw err;
+      }
+      this.logger.warn(
+        `estouro de contexto detectado (${message}); retry único com prompt compactado`,
+      );
+      const compacted: AgentRunInput = {
+        ...input,
+        prompt: compactPrompt(input.prompt),
+      };
+      // Segunda (e última) tentativa: se falhar de novo, propaga normalmente —
+      // sem novo retry, para não criar loop infinito.
+      return this.spawnAndConsume(compacted);
+    }
+  }
+
+  private spawnAndConsume(input: AgentRunInput): Promise<AgentRunResult> {
     const plan = this.adapter.buildSpawnPlan(input.prompt);
     this.logger.log(
       `spawn: ${plan.command} ${plan.args.join(' ')} (cwd=${input.cwd}, phase=${input.phase}, modelo=${input.model ?? '(default)'})`,
@@ -83,6 +113,11 @@ export class CopilotCliRunner implements AgentRunner {
       // Serializa o processamento das linhas para preservar ordem quando há
       // await (HITL bloqueia até a resposta chegar).
       let queue: Promise<void> = Promise.resolve();
+      // US-BUX5: acumula a cauda do stderr para enriquecer a mensagem de erro
+      // quando o processo sai com código != 0. O sinal de estouro de contexto
+      // costuma vir no stderr (não no stdout JSONL); expô-lo no `Error.message`
+      // permite ao `run` detectar via `isContextOverflowError` e fazer o retry.
+      let stderrTail = '';
 
       const cleanup = () => {
         if (idleTimer) clearTimeout(idleTimer);
@@ -168,7 +203,10 @@ export class CopilotCliRunner implements AgentRunner {
       });
 
       child.stderr.on('data', (buf: Buffer) => {
-        this.logger.debug(`[cli stderr] ${buf.toString().trimEnd()}`);
+        const text = buf.toString();
+        this.logger.debug(`[cli stderr] ${text.trimEnd()}`);
+        // Mantém apenas a cauda (~4KB) para não crescer sem limite.
+        stderrTail = (stderrTail + text).slice(-4096);
       });
 
       child.on('error', (err) => {
@@ -207,7 +245,13 @@ export class CopilotCliRunner implements AgentRunner {
                 });
                 return;
               }
-              reject(new Error(`cli exited with code ${code}`));
+              reject(
+                new Error(
+                  `cli exited with code ${code}${
+                    stderrTail.trim() ? `: ${stderrTail.trim()}` : ''
+                  }`,
+                ),
+              );
             });
           })
           .catch(() => undefined);
