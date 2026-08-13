@@ -8,37 +8,6 @@
 
 <!-- RODADA 2 de melhorias (re-análise de gap, 2026-08-12): após shipar M1-M12, os 4 sub-agents de research releram as fontes a fundo e reportaram 27 findings net-new (16 low-effort, 11 medium). Consolidados em 6 novos épicos abaixo (EP-BLOCK, EP-CTX, EP-SCHED, EP-OBS2, EP-BUX, EP-HARD). Mapa/rastreabilidade: docs/improvements-from-reference-tools.md §7-8 (rodada 2). Cada finding validado contra os 8 invariantes + lista de veto. 2 itens DEFER (Routines cron/webhook = módulo grande; Egress lockdown = conflita ADR-0019). NENHUM implementado ainda — só planejado. Ordem recomendada: EP-BLOCK → EP-CTX (maior ROI no loop) → EP-BUX → EP-HARD → EP-OBS2 → EP-SCHED. -->
 
-- [ ] **🟡 EP-BUX — Board fields & UX de operador** *(Hermes N3/N5 + Cline #1/#2/#3/#4/#5/#6/#7)*
-  - **Por quê:** conjunto de refinamentos de board e UX de review majoritariamente low-effort que fecham lacunas do dia-a-dia: sem `priority`, sem idempotency-key (automação duplica task), sem plan-mode, sem diff-por-iteração, sem recovery de estouro de contexto, sem slash-commands/atalhos/temas/notificações no review. 9 stories independentes — podem ir em ondas.
-  - **DOD do épico:** priority + idempotency no `Card`; plan/act mode por card; checkpoint+rewind por turn; compaction de contexto; slash-commands, script shortcuts, multi-theme e browser-notifications no front. Build+lint+test verdes; contratos nos dois lados quando aplicável.
-  - [ ] **US-BUX1 — Card priority field** *(Hermes N5)* — low
-    - `priority Int?` em `Card` (badge/filtro/sort); tiebreak opcional no wakeup queue (M7). Hoje só há `position` (drag manual). Atualizar web (badge) + shared.
-    - **DOD:** priority persiste, exibe badge e ordena; specs.
-  - [ ] **US-BUX2 — Idempotency key na criação de task** *(Hermes N3)* — low
-    - `idempotencyKey String?` em `Card` + unique parcial `(boardId, idempotencyKey) WHERE NOT NULL`; `CardsService.create` retorna o existente em colisão. Evita duplicata de cron/@mention/automação.
-    - **DOD:** 2º create com mesma key é no-op retornando o existente; specs.
-  - [ ] **US-BUX3 — Plan/Act mode por card (`startInPlanMode`)** *(Cline #2)* — low-med
-    - `startInPlanMode Boolean` em `Card`; engine embrulha prompt em "só planeje, não modifique, peça aprovação" quando true; toggle live plan↔act no composer HITL via mutation + WS. Casa com HITL/DOD; plan-mode só vale quando story entra In Progress (invariante 6).
-    - **DOD:** story com flag entra em plan-only sem mutar arquivos; toggle troca modo mid-session; specs.
-  - [ ] **US-BUX4 — Per-turn git checkpoint + diff-since-last-turn + rewind** *(Cline #1)* — med
-    - Engine commita worktree em ref oculto `refs/kanban/checkpoints/<taskId>/turn/<N>` a cada iteração DOD (GIT_INDEX_FILE temp, não polui HEAD); UI de review ganha modo "diff desde o último turn" + rewind. Engine faz git (ADR-0008 preservado).
-    - **DOD:** checkpoint por iteração; diff incremental por turn; rewind funcional; specs do módulo git.
-  - [ ] **US-BUX5 — Context-overflow compaction** *(Cline #3)* — low
-    - Detectar erro de limite de contexto (mapa de regex), trim da metade recente + nota de compactação prependida, retry. Loop longo (muitas iterações DOD) fica resiliente; hoje falha no erro. No error-handler do runner.
-    - **DOD:** sessão que estoura contexto se recupera automaticamente e prossegue; specs da função de compaction.
-  - [ ] **US-BUX6 — Slash-commands/workflows no composer HITL** *(Cline #4)* — med
-    - Autocomplete de `/command` no chat HITL; `/clear` reseta contexto; `/workflow <name>` expande de `.cline/workflows/`; `GET /cards/:id/slash-commands`. Acelera o operador durante HITL.
-    - **DOD:** `/clear` e `/workflow` funcionam; endpoint lista comandos por workspace; specs.
-  - [ ] **US-BUX7 — Script shortcut launcher (rodar npm test/dev do review)** *(Cline #5)* — low
-    - `shortcuts: ProjectShortcut[]` em config; barra de atalhos no review UI dispara comando no terminal (Ctrl-C se ocupado). Reviewer re-roda validação sem sair do browser.
-    - **DOD:** atalho definido roda no terminal; specs de config.
-  - [ ] **US-BUX8 — Multi-theme UI (light/dark/high-contrast)** *(Cline #6)* — med
-    - `data-theme` + override de tokens (Tailwind v4); ≥3 temas (light/dark/high-contrast); pref em localStorage + sync cross-tab. A11y + salas de review 24/7. Hoje só dark.
-    - **DOD:** troca de tema aplica ao vivo e persiste; contraste AA; sem regressão visual.
-  - [ ] **US-BUX9 — Browser notifications com dedup cross-tab** *(Cline #7)* — low
-    - Web Notifications on `awaiting_review` (tag por-task), com presença de aba via localStorage heartbeat evitando disparo se outra aba já foca o board; badge `(N)` no título. Pref do usuário.
-    - **DOD:** notificação dispara em aba não-focada, deduplicada cross-tab; badge conta pendências; specs de presença.
-
 - [ ] **🟡 EP-HARD — Endurecimento de segurança & robustez do runner** *(NanoClaw #1/#2/#4/#5/#6)*
   - **Por quê:** o watchdog atual é timer fixo (não sabe a duração declarada da operação), não há freio para crash-loop no boot, nem validação de path antes de tool FS, nem catálogo de ações privilegiadas fail-closed. Endurecimento aditivo sem mudar o modelo de processo. Egress lockdown fica em DEFER (conflita ADR-0019 / depende Docker).
   - **DOD do épico:** watchdog adaptativo por heartbeat+timeout declarado; circuit-breaker de boot; mount allowlist no MCP; guarded action catalog (hold=HITL); tool disallow-list. Build+lint+test verdes.
@@ -95,9 +64,23 @@
 
 # in progress
 
-
 # done
 <!-- apenas ultimas 2 tarefas, para n poluir o arquivo -->
+
+- [x] **🟡 EP-BUX — Board fields & UX de operador** *(Hermes N3/N5 + Cline #1/#2/#3/#4/#6/#7)* — **CONCLUÍDO 2026-08-13 (escopo revisado 9→7 stories; build+lint+test verdes; 416/416 specs API rodando serial — +26 net-new BUX: `card-fields.spec.ts`, `card-idempotency.spec.ts`, `context-compaction.spec.ts`; migration aditiva `bux_card_fields` (índice UNIQUE PARCIAL `(boardId, idempotencyKey) WHERE NOT NULL` na SQL — schema sem `@@unique` para evitar drift); `prisma validate` ok + `migrate status` in sync; web tsc+lint+build verdes)**
+  - **Por quê:** conjunto de refinamentos de board e UX de review majoritariamente low-effort. **Revalidado contra o que já existe:** light/dark **já funciona** (`useDarkMode` em `App.tsx` + tokens `:root`/`.dark` em `index.css`); há `plan_only` como *classificação pós-run* (EP-CTX) mas não como modo controlado; `iterationDiff` por iteração já é capturado; o `WorkspaceService` ainda é **stub**. Escopo aparado: 9 → 7 stories ativas (2 em DEFER).
+  - **DOD do épico:** ✅ priority + idempotency no `Card`; ✅ plan/act mode por card; ✅ compaction de contexto no runner; ✅ `/clear` no composer HITL; ✅ high-contrast + cross-tab no tema; ✅ browser-notifications com dedup. Build+lint+test verdes; contratos nos dois lados quando aplicável. Ainda **não commitado** (aguardando commits atômicos por story).
+  - [x] **US-BUX1 — Card priority field** *(Hermes N5)* — `priority Int?` em `Card` (create+update no `CardsService`) + shared (`CreateCardDto`/`UpdateCardDto`/`CardSummary`); persistido e editável. Coberto por `card-fields.spec.ts`.
+  - [x] **US-BUX2 — Idempotency key na criação de task** *(Hermes N3)* — `idempotencyKey String?` + índice UNIQUE PARCIAL `(boardId, idempotencyKey) WHERE NOT NULL` (SQL da migration; schema sem `@@unique` p/ não gerar drift); `CardsService.create` faz no-op-return do card existente em colisão. Coberto por `card-idempotency.spec.ts`.
+  - [x] **US-BUX3 — Plan/Act mode por card (`startInPlanMode`)** *(Cline #2)* — `startInPlanMode Boolean @default(false)` em `Card` (create+update); `buildContext` expõe `startInPlanMode` da STORY em execução; `buildPrompt` injeta bloco "🛑 MODO PLANEJAMENTO — NÃO ALTERE CÓDIGO" quando true (inalterado quando false); toggle "Iniciar em modo planejamento" no `StoryModal` (web) via `useUpdateCard`. Coberto por `card-fields.spec.ts`.
+  - [x] **US-BUX5 — Context-overflow compaction** *(Cline #3)* — `context-compaction.ts` (funções puras): `isContextOverflowError` (6 regex conservadores) + `compactPrompt` (determinístico, mantém metade recente + nota); `copilot-cli.runner.ts` faz **1 retry único** com prompt compactado ao detectar overflow (abort nunca recupera; stderr incluído no erro p/ detecção). 22 specs em `context-compaction.spec.ts`.
+  - [x] **US-BUX6 — `/clear` no composer HITL** *(Cline #4)* — slash/autocomplete **genérico** no `ChatPanel` via prop `slashCommands?: Array<{cmd, description, onRun}>`; util puro `slashCommands.ts` (`getSlashQuery`/`parseSlashCommand`/`filterSlashCommands`); `/clear` só disponível onde o caller registra (BoardView/HITL → reset local do store). **DROPADO** `/workflow` + endpoint (conceito de outra ferramenta).
+  - [x] **US-BUX8 — High-contrast theme + cross-tab sync** *(Cline #6)* — hook `useTheme.ts` reescrito (3-way `light|dark|high-contrast`, localStorage `kanban-ai-theme`, `storage`-event p/ sync cross-tab, ciclo); `index.css` ganhou token set `.high-contrast` (preto/branco 21:1, bordas fortes — custom vars + shadcn HSL); `App.tsx` troca o toggle binário por `<select>` 3-way com aria-label; placeholder morto removido.
+  - [x] **US-BUX9 — Browser notifications com dedup cross-tab** *(Cline #7)* — `useReviewNotifications.ts` + util puro `reviewNotifications.ts` (`shouldNotify` + classificação de evento); Web Notifications em `card.needs_human`/`review.comment_added`, dedup por-task (`tag=taskId`) + heartbeat de foco cross-tab (`localStorage`) + badge `(N)` no `document.title`; pref persistida, botão 🔔/🔕 no header; permission só ao ativar.
+  - ~~US-BUX4 — Per-turn git checkpoint + rewind~~ *(Cline #1)* — **DEFER:** depende de `WorkspaceService` real (ainda **stub** que só loga); rewind é feature grande. `iterationDiff` por iteração já é capturado hoje. Reavaliar quando o worktree real existir.
+  - ~~US-BUX7 — Script shortcut launcher~~ *(Cline #5)* — **DEFER/DROP:** roda comando de terminal a partir do browser → amplia superfície de exec arbitrário; baixo ROI vs. risco. Não implementar no v1.
+
+
 
 - [x] **🔴 EP-CTX — Enriquecimento de contexto no re-dispatch** *(Hermes N2/N7 + Paperclip #1)* — **CONCLUÍDO 2026-08-13 (build+lint+test verdes; 390/390 specs API — +18 net-new CTX em `ctx-enrichment.spec.ts`; 2 migrations aditivas `ctx_completion_metadata_and_continuation` + `ctx_wakeup_continuation_enum`, schema válido sem drift; `/health` → status:ok)**
   - 📄 **Spec implementável:** `docs/specs/ep-ctx.md`. **ADR:** `docs/adr/0040-context-enrichment-on-redispatch.md`. **Ordem executada (direto/sequencial — as 3 stories tocam `buildContext`/`buildPrompt`/`runIteration` no mesmo `orchestrator.ts` e correriam entre si).** Ainda **não commitado** (aguardando commits atômicos por story).
@@ -106,12 +89,4 @@
   - [x] **US-CTX2 — Completion metadata estruturado + parent-handoff injection** *(Hermes N7)* — `CompletionMetadata` (shared) + `Card.completionMetadata Json?` (migration aditiva); `writeCompletionMetadata` grava snapshot no `done`; `buildContext.parentHandoffs` lê irmãs `done` e `buildPrompt` injeta "🔗 Handoff estruturado". Coberto por specs.
   - [x] **US-CTX3 — Run liveness classification + bounded continuations** *(Paperclip #1)* — `RunLivenessState`+`CONTINUABLE_LIVENESS` (shared); `classifyRunLiveness` (puro) mapeia cada run; `applyContinuationPolicy` incrementa `AgentRuntimeState.continuationAttempt`/`livenessReason`, re-enfileira `WakeupReason='continuation'` (bounded por cap; cede ao anti-thrash ao atingir); `resetContinuation` zera ao avançar. Coberto por specs por estado.
 
-
-- [x] **🔴 EP-BLOCK — Inteligência de bloqueio & dependência** *(Hermes N1/N6 + Paperclip #5/#8)* — **CONCLUÍDO 2026-08-13 (build+lint+test verdes; 372/372 specs API — +27 net-new BLOCK; migration `add_runtime_block_recurrence` aditiva + schema válido sem drift; smoke empírico: API sobe com "Schema OK: todas as colunas esperadas", `/health` → status:ok)**
-  - 📄 **Spec implementável:** `docs/specs/ep-block.md`. **ADR:** `docs/adr/0039-typed-block-taxonomy-and-auto-unblock.md`. **Ordem executada (fleet, waves):** US-BLOCK1 → (US-BLOCK2 ∥ US-BLOCK3 ∥ US-BLOCK4). Ainda **não commitado** (aguardando commits atômicos por story).
-  - **DOD do épico:** ✅ bloqueio carrega tipo (`BlockKind` `dependency|needs_input|capability|transient`, coluna nullable retrocompatível); ✅ dependency-block re-enfileira sozinho quando a dependência fecha (`blockers_resolved`); ✅ needs_input/capability sobem a humano; ✅ recorrência da mesma causa N vezes (cross-run, `AgentRuntimeState`) escala em vez de ciclar. `build && lint && test` verdes; contratos type-safe nos dois lados; aditivo (`Card.blocked`/`needsHuman` intactos).
-  - [x] **US-BLOCK1 — Typed block reasons (`BlockKind`) + unblock routing** *(Hermes N1)* — enum `BlockKind` em `packages/shared` + `Card.blockKind` nullable + migrations `add_card_block_kind`/`add_wakeup_reason_block_values`; `escalateToHuman(kind='capability')`; `setExecState('blocked-dep')` grava `dependency` e limpa ao sair. 5 specs (`block-taxonomy.spec.ts`).
-  - [x] **US-BLOCK2 — Routable blocked: unblock descriptor + auto-notify owner** *(Paperclip #5)* — `BlockedOwner`/`BlockedDescriptor` (shared) + `Card.blockedDescriptor`/`blockedOwnerNotifiedAt`; `routeBlockedCard`: owner=agent → 1 wake `issue_unblock` idempotente (coalescing + anti re-fire `blockedOwnerNotifiedAt`); board/prose-only → `needsHuman`. 8 specs (`block-owner-notify.spec.ts`).
-  - [x] **US-BLOCK3 — Blocker-dependency auto-wake (`blockers_resolved`)** *(Paperclip #8)* — `onTaskDone`/`onCardResolved` → `wakeBlockersResolvedDependents`: fecha o último blocker → 1 wake `blockers_resolved` (dedup por `blockerSetHash` no `stateJson`, sem migration); `cancelled` NUNCA satisfaz; respeita invariante 6 (só story In Progress). Hook em `cards.service.move()`. 8 specs (`blockers-resolved-wake.spec.ts`).
-  - [x] **US-BLOCK4 — Block-recurrence loop-breaker (cross-run)** *(Hermes N6)* — `AgentRuntimeState.consecutiveBlockCount`+`lastBlockReason` (durável, migration `add_runtime_block_recurrence`); `recordBlockRecurrence` (mesma causa incrementa; diferente reseta p/ 1; N-ésima escala) + `resetBlockRecurrence` no `promoteStory`; config `maxConsecutiveBlocks` (env `AGENT_MAX_CONSECUTIVE_BLOCKS`, default 2, `0` desliga). 6 specs (`block-recurrence.spec.ts`).
 
