@@ -16,6 +16,35 @@ import * as path from 'node:path';
  * versionado vive só na raiz. Ferramentas/agents não devem listá-lo como
  * arquivo tocado no fluxo `config-boot`.
  */
+export interface ToolPolicy {
+  /**
+   * Backwards-compat: com `true` E sem nenhum deny/available/excluded/url/dir
+   * configurado, o builder emite o `--allow-all` cru (comportamento atual).
+   * Qualquer restrição configurada faz o builder trocar para flags granulares.
+   * Env: AGENT_TOOL_ALLOW_ALL (`false` desliga).
+   */
+  allowAll: boolean;
+  /** Ferramentas negadas → `--deny-tool=<csv>`. Env: AGENT_TOOL_DENY. */
+  denyTools: string[];
+  /**
+   * Allowlist de ferramentas → `--available-tools=<csv>`. Quando não-vazia,
+   * SÓ estas ficam disponíveis. Env: AGENT_TOOL_AVAILABLE.
+   */
+  availableTools: string[];
+  /** Ferramentas excluídas do catálogo → `--excluded-tools=<csv>`. Env: AGENT_TOOL_EXCLUDED. */
+  excludedTools: string[];
+  /**
+   * Diretórios extra do sandbox de paths → um `--add-dir <dir>` por item.
+   * O worktree cwd é incluído automaticamente pelo builder quando o path
+   * sandbox está ativo. Env: AGENT_PATH_ADD_DIRS.
+   */
+  addDirs: string[];
+  /** URLs negadas → `--deny-url=<csv>`. Env: AGENT_URL_DENY. */
+  denyUrls: string[];
+  /** `--disallow-temp-dir`: nega escrita no tmp. Env: AGENT_DISALLOW_TEMP_DIR (`true` liga). */
+  disallowTempDir: boolean;
+}
+
 export interface AppConfig {
   apiPort: number;
   wsPath: string;
@@ -304,6 +333,40 @@ export interface AppConfig {
      * o commit é feito mas nenhum PR é aberto (sem erro).
      */
     autoPr: boolean;
+    /**
+     * US-HARD4 — exige aprovação humana ANTES de um auto-commit já verificado
+     * (opt-in on + evidência verificável). Quando `true`, a ação privilegiada de
+     * commit é SEGURADA (hold) pelo catálogo de ações guardadas e escalada via
+     * HITL existente (`needsHuman` + `card.needs_human`); um `answerQuestion`
+     * humano retoma a iteração e re-avalia os checks vivos. Default `false` =
+     * comportamento idêntico ao de hoje. Env: AGENT_AUTO_COMMIT_REQUIRE_APPROVAL.
+     */
+    autoCommitRequireApproval: boolean;
+    /**
+     * US-HARD5 — política granular de ferramentas/paths/urls da Copilot CLI.
+     * Substitui o `--allow-all` cego por flags NATIVAS do CLI
+     * (`--deny-tool`, `--available-tools`, `--excluded-tools`, `--add-dir`,
+     * `--deny-url`, `--disallow-temp-dir`, e o breakdown
+     * `--allow-all-tools/paths/urls`). ADITIVO/opt-in: com nada configurado, o
+     * `allowAll` default preserva o comportamento atual (`--allow-all`).
+     */
+    toolPolicy: ToolPolicy;
+    /**
+     * US-HARD1 — timeout DECLARADO por tool (ms). ALARGA a janela do watchdog
+     * adaptativo (`decideStuck`): `effectiveCeiling = max(stuckHeartbeatCeilingMs,
+     * toolDeclaredTimeoutMs)`, para uma operação longa declarada NÃO ser morta
+     * cedo. `0` = sem timeout declarado (default). Env: AGENT_TOOL_DECLARED_TIMEOUT_MS.
+     */
+    toolDeclaredTimeoutMs: number;
+    /**
+     * US-HARD1 — teto BASE (ms) de silêncio do heartbeat da sessão antes de o
+     * watchdog considerá-la travada (stuck). É o piso da decisão adaptativa:
+     * `effectiveCeiling = max(stuckHeartbeatCeilingMs, toolDeclaredTimeoutMs)` —
+     * uma operação longa DECLARADA (US-HARD5) alarga a janela para NÃO matar a
+     * sessão cedo. Default = `streamIdleTimeoutMs` (120s), mantendo o
+     * comportamento seguro/retrocompatível. Env: AGENT_STUCK_HEARTBEAT_CEILING_MS.
+     */
+    stuckHeartbeatCeilingMs: number;
   };
   /**
    * US-OBS1 — configuração do dashboard de frota (`GET /dashboard`).
@@ -341,6 +404,30 @@ export interface AppConfig {
      * agente ssh/chave configurado no ambiente do servidor.
      */
     allowSsh: boolean;
+  };
+  /**
+   * US-HARD2 — circuit-breaker de crash-loop no boot com backoff persistido.
+   */
+  boot: {
+    /**
+     * Liga o circuit-breaker. Default **true**. Boots saudáveis NÃO são
+     * atrasados (attempt 0 e 1 = 0s no schedule). Lido de
+     * `BOOT_CIRCUIT_BREAKER_ENABLED` (`false` desliga).
+     */
+    circuitBreakerEnabled: boolean;
+    /**
+     * Data dir onde `circuit-breaker.json` é persistido. Relativo ao cwd da API.
+     * Default `./.kanban-ai-data` (gitignored, mesma convenção dos demais
+     * diretórios de runtime `.kanban-ai-*`). Lido de `BOOT_DATA_DIR`.
+     */
+    dataDir: string;
+    /**
+     * Janela de recuperação (ms): se o estado sujo persistido é mais VELHO que
+     * isso, o boot anterior é tratado como um restart legítimo (não crash-loop)
+     * e o contador é resetado. Lido de `BOOT_RECOVERY_WINDOW_MS`. Default
+     * `300000` (5 min).
+     */
+    recoveryWindowMs: number;
   };
 }
 
@@ -497,6 +584,22 @@ export function loadConfig(): AppConfig {
       worktreePreservePatch: process.env.AGENT_WORKTREE_PRESERVE_PATCH !== 'false',
       autoCommit: process.env.AGENT_AUTO_COMMIT === 'true',
       autoPr: process.env.AGENT_AUTO_PR === 'true',
+      autoCommitRequireApproval:
+        process.env.AGENT_AUTO_COMMIT_REQUIRE_APPROVAL === 'true',
+      toolPolicy: {
+        allowAll: process.env.AGENT_TOOL_ALLOW_ALL !== 'false',
+        denyTools: csv(process.env.AGENT_TOOL_DENY, []),
+        availableTools: csv(process.env.AGENT_TOOL_AVAILABLE, []),
+        excludedTools: csv(process.env.AGENT_TOOL_EXCLUDED, []),
+        addDirs: csv(process.env.AGENT_PATH_ADD_DIRS, []),
+        denyUrls: csv(process.env.AGENT_URL_DENY, []),
+        disallowTempDir: process.env.AGENT_DISALLOW_TEMP_DIR === 'true',
+      },
+      toolDeclaredTimeoutMs: num(process.env.AGENT_TOOL_DECLARED_TIMEOUT_MS, 0),
+      stuckHeartbeatCeilingMs: num(
+        process.env.AGENT_STUCK_HEARTBEAT_CEILING_MS,
+        num(process.env.AGENT_STREAM_IDLE_TIMEOUT_MS, 120_000),
+      ),
     },
     dashboard: {
       staleMinutes: num(process.env.DASHBOARD_STALE_MINUTES, 30),
@@ -505,6 +608,11 @@ export function loadConfig(): AppConfig {
       dir: resolveProjectsDir(process.env.PROJECTS_DIR),
       gitTimeoutMs: num(process.env.PROJECTS_GIT_TIMEOUT_MS, 300_000),
       allowSsh: process.env.PROJECTS_ALLOW_SSH === 'true',
+    },
+    boot: {
+      circuitBreakerEnabled: process.env.BOOT_CIRCUIT_BREAKER_ENABLED !== 'false',
+      dataDir: path.resolve(process.env.BOOT_DATA_DIR ?? './.kanban-ai-data'),
+      recoveryWindowMs: num(process.env.BOOT_RECOVERY_WINDOW_MS, 300_000),
     },
   };
 }

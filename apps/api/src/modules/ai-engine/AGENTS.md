@@ -100,6 +100,37 @@ por **quatro** gatilhos independentes — todos convergem para o mesmo destino:
   (dedup — apenas loga e deixa a derivada existente resolver); ao atingir o cap
   agregado, **escala** em vez de multiplicar cadeias paralelas.
 
+### Catálogo de ações guardadas (US-HARD4 — `guarded-actions.ts`)
+
+Portão TIPADO e **fail-closed** (`allow | hold | deny`) para ações
+**privilegiadas** do loop, que **REUSA** o HITL existente (não cria tabela de
+aprovações). Contrato público (`guarded-actions.ts`):
+
+- **`defineGuardedAction<Name, Input>(name, guardFn)`** → produz um
+  `GuardedAction<Name, Input>` **branded/opaco** (marca via `unique symbol`
+  type-only, erased em runtime). É a **única** forma de obter um `GuardedAction`;
+  o registry `GUARDED_ACTIONS` é `as const`, então consumir uma ação não
+  registrada (`GUARDED_ACTIONS.<x>`) é **erro de compilação** — "sem wiring =
+  build error".
+- **`runGuarded(action, input, ctx, perform)`** — chama o guard e:
+  `allow` → roda `perform` (`{ran:true,value}`); `hold` → chama
+  `ctx.escalate(reason)` e **NÃO** roda `perform` (`{ran:false,held:true}`);
+  `deny` → lança `GuardedActionDeniedError`; **guard que lança ⇒ tratado como
+  `deny` (fail-closed)**, `perform` nunca roda.
+- **`GuardedActionContext.escalate(reason, kind?)`** — interface INJETADA (o
+  arquivo NÃO importa o `Orchestrator`). No orquestrador, o adaptador chama
+  `escalateToHuman(...)` → `needsHuman`/`card.needs_human`; um `answerQuestion`
+  humano limpa a flag e re-dispara a iteração (re-avalia os checks VIVOS).
+
+**Ação real wired:** `maybeAutoCommit` roteia o commit privilegiado por
+`runGuarded(GUARDED_ACTIONS.autoCommit, ...)`. Skips benignos (`disabled`/
+`not-verified`/`no-isolated-worktree`) seguem como `allow` para
+`performAutoCommit` (comportamento preservado). Com
+`AGENT_AUTO_COMMIT_REQUIRE_APPROVAL=true`, um commit já verificável é **hold**
+(escala HITL) antes de escrever no git; `held-for-human`/`denied` são novos
+`skippedReason` de `CommitOutcome` (`@kanban-ai/shared`). Default off = zero
+mudança. Specs: `guarded-actions.spec.ts`.
+
 ## Serialização de stories (por EPIC)
 
 O loop engine roda **uma story por epic** de cada vez. Duas stories do **mesmo
@@ -262,6 +293,44 @@ nem os mocks/testes:
   há caminho paralelo de start). É idempotente (não re-acorda story já rodando) e
   cobre o gap de dependentes `idle`/de outra story do epic que o re-validate
   sozinho não promove. Off por default (só o re-validate roda).
+- **Política de tools/paths/urls (US-HARD5)**: `runners/tool-policy.ts`
+  (`buildToolPolicyFlags(policy, worktreeCwd)`) é uma função **pura** que traduz
+  `config.agent.toolPolicy` nas flags NATIVAS da Copilot CLI, substituindo o
+  `--allow-all` cego. Backwards-compat: `allowAll=true` SEM restrições →
+  `['--allow-all']` (idêntico ao de antes). Com restrições, emite granular:
+  `--available-tools`/`--allow-all-tools`, `--deny-tool`, `--excluded-tools`,
+  `--add-dir <dir>` (o `worktreeCwd`/`input.cwd` vira a raiz do sandbox de paths),
+  `--disallow-temp-dir`, `--deny-url`. O `CopilotCliRunner` constrói as flags no
+  host e as injeta no subprocesso como env JSON `COPILOT_POLICY_FLAGS`; o bridge
+  `docker/copilot-cli-adapter.mjs` (`parsePolicyFlags`) as consome no spawn final
+  em vez do `--allow-all` hardcoded (fallback tolerante → `--allow-all`). Env:
+  `AGENT_TOOL_ALLOW_ALL` (default true), `AGENT_TOOL_DENY`, `AGENT_TOOL_AVAILABLE`,
+  `AGENT_TOOL_EXCLUDED`, `AGENT_PATH_ADD_DIRS`, `AGENT_URL_DENY`,
+  `AGENT_DISALLOW_TEMP_DIR`. **Invariante 6:** bloqueie via `AGENT_TOOL_DENY`
+  qualquer tool de auto-agenda que burle a `WakeupQueue` (sem nome canônico
+  conhecido hoje; deny-set default vazio). Off-impact por default. Specs:
+  `runners/tool-policy.spec.ts`.
+- **SLA adaptativo de container travado (US-HARD1)**: refina o watchdog de
+  intervalo FIXO numa DECISÃO adaptativa. `stuck-sla.ts` exporta a função **pura**
+  `decideStuck({ now, lastHeartbeatAt, baseCeilingMs, declaredTimeoutMs,
+  claimExpiresAt }) → { stuck, reason }` (sem I/O, sem `Date.now` interno —
+  `now` entra por parâmetro). Regra: `effectiveCeiling =
+  max(baseCeilingMs, declaredTimeoutMs ?? 0)`; a sessão está travada quando o
+  heartbeat envelheceu além do teto efetivo (`now - lastHeartbeatAt >
+  effectiveCeiling`) OU quando o claim venceu (`claimExpiresAt <= now`) **e** o
+  heartbeat também passou do teto BASE. Uma operação longa DECLARADA
+  (`toolDeclaredTimeoutMs`, US-HARD5) ALARGA a janela → NÃO é morta cedo.
+  **Heartbeat:** tmpfile por story em `tmpdir()` (`kanban-ai-hb-<story>`) cujo
+  MTIME é batido em `startWatchdog` e a cada iteração (`touchHeartbeat`, ao lado
+  do `renewClaim`); lido via `statSync` (`readHeartbeatMs`). Escolhido tmpfile
+  sobre coluna Prisma para evitar schema churn (invariante 7 — SEM Redis; tudo
+  best-effort). **Wiring:** `tickWatchdog` mantém o ramo `dead` e adiciona um ramo
+  adaptativo que coleta heartbeat + `claimExpiresAt` e chama `decideStuck`; se
+  `stuck`, `recoverStuckStory` espelha `recoverStaleClaims` (abort/remove sessão,
+  clearWatchdog, clearHeartbeat, cleanup worktree, `livenessState='stalled'`,
+  solta claim, `resumeDeferredForStory`). Idempotente (salvaguarda #3 preservada).
+  Config: `AGENT_STUCK_HEARTBEAT_CEILING_MS` (default = `streamIdleTimeoutMs`
+  120s — seguro/retrocompat). Specs: `stuck-sla.spec.ts`.
 
 Ao mudar esses contratos, mantenha este arquivo em dia.
 

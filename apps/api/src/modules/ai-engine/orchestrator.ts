@@ -10,9 +10,16 @@ import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rm } from 'node:fs/promises';
+import { closeSync, openSync, statSync, utimesSync } from 'node:fs';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { Prisma } from '@prisma/client';
 import { APP_CONFIG, type AppConfig } from '../../shared/config/config';
+import {
+  GUARDED_ACTIONS,
+  runGuarded,
+  GuardedActionDeniedError,
+  type GuardedActionContext,
+} from './guarded-actions';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
 import { WorkspaceService, TargetProjectError } from './workspaces/workspace.service';
@@ -26,6 +33,7 @@ import { MemoryIndexService } from '../memory/memory-index.service';
 import { MemoryGitService } from '../memory/memory-git.service';
 import { MemoryBootstrapService, withNamespace } from '../memory/memory-bootstrap.service';
 import { WakeupQueueService } from './wakeup-queue.service';
+import { decideStuck } from './stuck-sla';
 import {
   allTasksDone,
   dodAllDone,
@@ -561,6 +569,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     const storyId = context.storyId ?? taskId;
 
     void this.renewClaim(storyId); // US-ROB4: heartbeat do lease por iteração
+    this.touchHeartbeat(storyId); // US-HARD1: batida do heartbeat adaptativo
 
     // Gate de custo (#1) + anti-thrash (#3): ANTES de gastar uma nova iteração
     // (worktree + spawn), verifica se a task já estourou o orçamento de tempo/
@@ -1914,6 +1923,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // desejado). O cleanupWorktree apenas solta o tracking em memória.
     this.sessions.remove(storyId);
     this.clearWatchdog(storyId);
+    this.clearHeartbeat(storyId); // US-HARD1: solta o tmpfile de heartbeat
     void this.releaseClaim(storyId); // US-ROB4: solta o lease ao encerrar
     // US-COLAB3: fecha o wakeup durável (status=done) ANTES de drenar a fila,
     // para que a próxima story do epic não veja este item como ativo. Defensivo
@@ -2252,10 +2262,53 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
 
   private startWatchdog(storyId: string): void {
     if (this.watchdogs.has(storyId)) return; // idempotência (salvaguarda #3)
+    this.touchHeartbeat(storyId); // US-HARD1: batida inicial ao acordar a sessão
     const handle = setInterval(() => {
       void this.tickWatchdog(storyId);
     }, this.config.agent.watchdogIntervalMs);
     this.watchdogs.set(storyId, handle);
+  }
+
+  // ── US-HARD1 · heartbeat por sessão (SEM Redis, invariante 7) ────────────
+  // Um tmpfile por story cujo MTIME é "batido" a cada iteração/acordar. É o
+  // sinal barato de vivacidade lido pelo watchdog adaptativo (decideStuck). Sem
+  // schema churn no Postgres: mtime é o timestamp. Tudo best-effort (uma falha
+  // de FS nunca derruba o loop — só perde a batida, o lease ainda cobre).
+
+  /** Caminho do tmpfile de heartbeat de uma story (estável entre iterações). */
+  private heartbeatPath(storyId: string): string {
+    const safe = storyId.replace(/[^A-Za-z0-9_.-]/g, '_');
+    return join(tmpdir(), `kanban-ai-hb-${safe}`);
+  }
+
+  /** Bate o heartbeat: cria/atualiza o mtime do tmpfile da story. */
+  private touchHeartbeat(storyId: string): void {
+    const path = this.heartbeatPath(storyId);
+    const now = new Date();
+    try {
+      utimesSync(path, now, now);
+    } catch {
+      // Arquivo ainda não existe — cria (e o mtime nasce = agora).
+      try {
+        closeSync(openSync(path, 'w'));
+      } catch {
+        /* defensivo: FS indisponível — só perde a batida */
+      }
+    }
+  }
+
+  /** Lê o mtime (epoch-ms) do heartbeat; `null` se ausente/ilegível. */
+  private readHeartbeatMs(storyId: string): number | null {
+    try {
+      return statSync(this.heartbeatPath(storyId)).mtimeMs;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Remove o tmpfile de heartbeat ao encerrar/limpar uma sessão. */
+  private clearHeartbeat(storyId: string): void {
+    void rm(this.heartbeatPath(storyId), { force: true }).catch(() => undefined);
   }
 
   // ── US-ROB4 · claim/lease por execução ──────────────────────────────────
@@ -2323,6 +2376,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Claim vencido para story=${storyId} — recuperando slot`);
       this.sessions.remove(storyId);
       this.clearWatchdog(storyId);
+      this.clearHeartbeat(storyId);
       void this.workspaces.cleanupWorktree(storyId).catch(() => undefined);
       try {
         await this.prisma.agentRuntimeState.update({
@@ -2346,8 +2400,74 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Watchdog: sessão morta para story=${storyId} — limpando`);
       this.sessions.remove(storyId);
       this.clearWatchdog(storyId);
+      this.clearHeartbeat(storyId);
       void this.workspaces.cleanupWorktree(storyId).catch(() => undefined);
+      return;
     }
+
+    // US-HARD1 — decisão ADAPTATIVA de "travado": além da sessão `dead`, detecta
+    // uma sessão nominalmente "running" cujo heartbeat envelheceu além do teto
+    // efetivo. O teto ALARGA enquanto uma operação longa está DECLARADA
+    // (toolDeclaredTimeoutMs, US-HARD5) — uma op longa legítima NÃO é morta cedo.
+    // A decisão é PURA (decideStuck); aqui só coletamos os sinais (heartbeat +
+    // claimExpiresAt) e agimos idempotentemente (salvaguarda #3).
+    const now = Date.now();
+    const lastHeartbeatAt = this.readHeartbeatMs(storyId);
+    const claimExpiresAt = await this.readClaimExpiresAtMs(storyId);
+    const decision = decideStuck({
+      now,
+      lastHeartbeatAt,
+      baseCeilingMs: this.config.agent.stuckHeartbeatCeilingMs,
+      declaredTimeoutMs: this.config.agent.toolDeclaredTimeoutMs,
+      claimExpiresAt,
+    });
+    if (decision.stuck) {
+      this.logger.warn(
+        `Watchdog: sessão travada (stuck) para story=${storyId} — ${decision.reason}. Recuperando slot.`,
+      );
+      await this.recoverStuckStory(storyId);
+    }
+  }
+
+  /**
+   * US-HARD1 — lê `AgentRuntimeState.claimExpiresAt` (epoch-ms) da story, ou
+   * `null` se ausente/claim desligado. Best-effort (uma falha de DB não pode
+   * derrubar o watchdog — a decisão de stuck ainda considera o heartbeat).
+   */
+  private async readClaimExpiresAtMs(storyId: string): Promise<number | null> {
+    if (!this.config.agent.claimEnabled) return null;
+    try {
+      const row = await this.prisma.agentRuntimeState.findUnique({
+        where: { sessionId: storyId },
+        select: { claimExpiresAt: true },
+      });
+      return row?.claimExpiresAt?.getTime() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * US-HARD1 — recupera UMA story detectada como travada. Espelha o que
+   * `recoverStaleClaims` faz por linha (aborta/remove sessão, limpa watchdog,
+   * heartbeat e worktree, marca `livenessState='stalled'`, solta o claim e
+   * destrava a serialização). Idempotente: seguro reentrar.
+   */
+  private async recoverStuckStory(storyId: string): Promise<void> {
+    this.sessions.abort(storyId); // salvaguarda #4: AbortSignal
+    this.sessions.remove(storyId);
+    this.clearWatchdog(storyId);
+    this.clearHeartbeat(storyId);
+    void this.workspaces.cleanupWorktree(storyId).catch(() => undefined);
+    try {
+      await this.prisma.agentRuntimeState.update({
+        where: { sessionId: storyId },
+        data: { claimLock: null, claimExpiresAt: null, livenessState: 'stalled' },
+      });
+    } catch {
+      /* defensivo: linha pode não existir — recovery segue */
+    }
+    void this.resumeDeferredForStory(storyId).catch(() => undefined);
   }
 
   /** Para o loop de uma story (graceful: termina o passo atual; hard: aborta). */
@@ -2357,6 +2477,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       this.sessions.abort(storyId); // salvaguarda #4: AbortSignal
       this.finishAuto(storyId, 'hard');
       this.clearWatchdog(storyId);
+      this.clearHeartbeat(storyId);
       this.sessions.remove(storyId);
       void this.workspaces.cleanupWorktree(storyId).catch(() => undefined);
     }
@@ -3063,6 +3184,57 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
    * mudança de comportamento.
    */
   async maybeAutoCommit(
+    storyId: string,
+    taskId: string,
+    evidence: string | StructuredEvidence | null | undefined,
+  ): Promise<CommitOutcome> {
+    // US-HARD4 — roteia esta ação privilegiada pelo catálogo guardado
+    // (fail-closed). O guard vê os SINAIS VIVOS (opt-in + evidência verificável
+    // AGORA, não um snapshot) e decide allow|hold|deny. `hold` REUSA o HITL
+    // existente via `escalateToHuman` (needsHuman + card.needs_human); assim,
+    // quando o humano responde (`answerQuestion`), a iteração é re-disparada e
+    // os checks vivos re-avaliados. `deny`/guard-throw ⇒ nada é commitado.
+    const evidenceVerified =
+      isVerifiableEvidence(evidence) && !evidence.checks.some((c) => c && c.passed === false);
+    const ctx: GuardedActionContext = {
+      escalate: (reason, kind) =>
+        this.escalateToHuman(
+          taskId,
+          storyId,
+          reason,
+          `auto-commit: gate guardado SEGUROU a ação (hold) — ${reason}`,
+          kind ?? 'needs_input',
+        ),
+    };
+
+    try {
+      const run = await runGuarded(
+        GUARDED_ACTIONS.autoCommit,
+        {
+          autoCommitEnabled: this.config.agent.autoCommit,
+          evidenceVerified,
+          requireHumanApproval: this.config.agent.autoCommitRequireApproval,
+        },
+        ctx,
+        () => this.performAutoCommit(storyId, taskId, evidence),
+      );
+      if (run.ran) return run.value;
+      // hold: HITL disparado; nenhum commit nesta passagem.
+      return { committed: false, skippedReason: 'held-for-human' };
+    } catch (err) {
+      if (err instanceof GuardedActionDeniedError) {
+        await this.log(taskId, `auto-commit: ação negada pelo gate — ${err.reason}`);
+        return { committed: false, skippedReason: 'denied' };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Executor REAL do auto-commit (roda só quando o gate guardado libera). Puro
+   * nas decisões (delega o git ao `WorkspaceService`, o ENGINE — ADR-0008).
+   */
+  private async performAutoCommit(
     storyId: string,
     taskId: string,
     evidence: string | StructuredEvidence | null | undefined,
