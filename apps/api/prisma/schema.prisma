@@ -267,6 +267,8 @@ model Card {
   assignees     CardAssignee[]
   wakeups       WakeupQueue[]  @relation("WakeupStory")
   reviewComments ReviewComment[]
+  reviewActions ReviewAction[]
+  events        CardEvent[]
 
   @@unique([boardId, key])
   // idempotencyKey: índice UNIQUE PARCIAL (WHERE NOT NULL) definido direto na
@@ -317,6 +319,24 @@ model ReviewComment {
   @@index([cardId, filePath])
 }
 
+// US-OBS2-4 — REVIEW ACTION: sinal de anomalia detectado por um scan periódico
+// e surfaçado ao operador de forma VISÍVEL mas NÃO-INTRUSIVA. NÃO move/cancela a
+// story — é só observabilidade (não reintroduz DOR/acceptance — ADR-0007).
+// `kind` = ReviewActionKind de @kanban-ai/shared (v1: 'no_comment_streak').
+// `snoozedUntil` suporta o silenciamento pelo operador; `ts` alimenta o
+// rate-limit (cooldown). Aditivo e retrocompatível.
+model ReviewAction {
+  id           String    @id @default(cuid())
+  cardId       String // story alvo do sinal
+  card         Card      @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  kind         String // ReviewActionKind de @kanban-ai/shared
+  detail       Json // contexto legível (ex.: { streak, threshold, storyId })
+  ts           DateTime  @default(now())
+  snoozedUntil DateTime? // instante até o qual está snoozed (null = não)
+
+  @@index([cardId, kind, ts])
+}
+
 // ─────────────────────────────────────────────────────────────
 // Checklists / notas do card
 // ─────────────────────────────────────────────────────────────
@@ -352,6 +372,23 @@ model Activity {
   ts     DateTime @default(now())
 
   @@index([cardId])
+}
+
+// US-OBS2-2 — LOG TIPADO E APPEND-ONLY de transições do card. Coexiste com
+// `Activity` (texto livre): aqui cada linha é ESTRUTURADA (`kind` + `payload`
+// JSON) e serve de fonte para replay/tail incremental (`GET /cards/:id/events
+// ?since=<eventId>`) e para a tool MCP `list_card_events`. Os `kind` espelham os
+// eventos WS já emitidos por `cards.service.ts`. É apenas observabilidade — não
+// reintroduz DOR/acceptance (ADR-0007).
+model CardEvent {
+  id      String   @id @default(uuid())
+  cardId  String
+  card    Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  kind    String // CardEventKind de @kanban-ai/shared
+  payload Json
+  ts      DateTime @default(now())
+
+  @@index([cardId, ts])
 }
 
 // Fluxo/área do código afetada por uma story (usado na validação final).
@@ -404,6 +441,10 @@ model Iteration {
   inputTokens  Int? // tokens de entrada (quando o runner reportar)
   outputTokens Int? // tokens de saída (quando o runner reportar)
   outcome      String? // 'ok' | 'derived' | 'failed' | 'awaiting-input'
+  // US-OBS2-5 (fatia mínima ex-OBS2-3) — proveniência de uso: provider que
+  // produziu a telemetria de tokens (ex.: 'copilot', 'mock'). Nullable/aditivo,
+  // sem backfill; base futura para atribuição de custo por provider.
+  provider     String?
 
   @@unique([cardId, index])
   @@index([cardId])

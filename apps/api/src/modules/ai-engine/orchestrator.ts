@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { StopMode } from '@kanban-ai/shared';
 import type { ExecState, AffectedFlow, LoopMetrics, WakeupReason, BlockKind, BlockedDescriptor } from '@kanban-ai/shared';
 import { isVerifiableEvidence, minimumArtifactSatisfied } from '@kanban-ai/shared';
@@ -34,6 +34,12 @@ import { MemoryGitService } from '../memory/memory-git.service';
 import { MemoryBootstrapService, withNamespace } from '../memory/memory-bootstrap.service';
 import { WakeupQueueService } from './wakeup-queue.service';
 import { decideStuck } from './stuck-sla';
+import { detectNoCommentStreak } from './no-comment-streak';
+import { ReviewActionService } from '../review/review-action.service';
+import {
+  resolveDispatchModel,
+  recoveryGuardLines,
+} from './recovery-lane';
 import {
   allTasksDone,
   dodAllDone,
@@ -82,6 +88,8 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
   private readonly inFlight = new Set<string>();
   /** US-ROB4: tick global de recuperação de claims vencidos (SEM Redis). */
   private claimSweepTimer: NodeJS.Timeout | null = null;
+  /** US-OBS2-4: tick global do scan de no-comment streak (SEM Redis). */
+  private streakScanTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -104,6 +112,10 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // posicionalmente sem Project. Quando ausente (ou o Board não tem
     // `projectId`), a resolução cai no fallback legado `aiProject`.
     private readonly projectWorkspace?: ProjectWorkspaceService,
+    // US-OBS2-4 — registro rate-limitado/snooze-aware de review actions
+    // (no-comment streak). Opcional/por último para não quebrar as specs que
+    // instanciam o Orchestrator posicionalmente; o scan é no-op quando ausente.
+    @Optional() private readonly reviewActions?: ReviewActionService,
   ) {}
 
   /** US-COLAB3 — a fila só age quando o flag está ON e o serviço foi injetado. */
@@ -144,12 +156,17 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     }
     await this.reconcileOnBoot();
     this.startClaimSweep(); // US-ROB4: recuperação periódica de claims vencidos
+    this.startNoCommentStreakScan(); // US-OBS2-4: scan periódico de anomalia
   }
 
   onModuleDestroy(): void {
     if (this.claimSweepTimer) {
       clearInterval(this.claimSweepTimer);
       this.claimSweepTimer = null;
+    }
+    if (this.streakScanTimer) {
+      clearInterval(this.streakScanTimer);
+      this.streakScanTimer = null;
     }
   }
 
@@ -168,6 +185,138 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     }, this.config.agent.watchdogIntervalMs);
     handle.unref?.();
     this.claimSweepTimer = handle;
+  }
+
+  /**
+   * US-OBS2-4 — tick GLOBAL do scan de "no-comment streak". Espelha
+   * `startClaimSweep` (puro `setInterval` com `unref()` + `try/catch`, cadência =
+   * `watchdogIntervalMs`, SEM Redis — invariante 7), mas roda SEMPRE (independe
+   * de `claimEnabled`) e SÓ quando a detecção está ligada
+   * (`noCommentStreakThreshold > 0`) e o `ReviewActionService` foi injetado.
+   * NÃO move/cancela stories — apenas sinaliza uma REVIEW ACTION visível.
+   */
+  private startNoCommentStreakScan(): void {
+    if (this.streakScanTimer) return;
+    if (!this.reviewActions) return;
+    if (this.config.agent.noCommentStreakThreshold <= 0) return;
+    const handle = setInterval(() => {
+      void this.scanNoCommentStreaks().catch((err) =>
+        this.logger.warn(`noCommentStreakScan: ${(err as Error).message}`),
+      );
+    }, this.config.agent.watchdogIntervalMs);
+    handle.unref?.();
+    this.streakScanTimer = handle;
+  }
+
+  /**
+   * US-OBS2-4 — varre as stories em "In Progress" e, para cada uma, roda o
+   * detector PURO `detectNoCommentStreak` sobre as iterações das tasks da story.
+   * Se o streak for anômalo, registra uma REVIEW ACTION (rate-limitada e
+   * snooze-aware via `ReviewActionService.record`) e emite `review.action_flagged`.
+   *
+   * NÃO duplica watchdog (stuck-sla) nem anti-thrash — é observabilidade pura.
+   * NÃO move/cancela/transiciona a story. Best-effort: uma falha por story nunca
+   * derruba o scan das demais.
+   */
+  private async scanNoCommentStreaks(nowMs = Date.now()): Promise<void> {
+    if (!this.reviewActions) return;
+    const threshold = this.config.agent.noCommentStreakThreshold;
+    if (threshold <= 0) return;
+
+    let stories: Array<{ id: string }> = [];
+    try {
+      stories = await this.prisma.card.findMany({
+        where: {
+          type: 'story',
+          boardColumn: { is: { title: { equals: 'In Progress', mode: 'insensitive' } } },
+        },
+        select: { id: true },
+      });
+    } catch (err) {
+      this.logger.warn(`scanNoCommentStreaks: leitura de stories falhou: ${(err as Error).message}`);
+      return;
+    }
+
+    for (const story of stories) {
+      try {
+        await this.scanStoryNoCommentStreak(story.id, threshold, nowMs);
+      } catch (err) {
+        this.logger.warn(
+          `scanNoCommentStreaks: story=${story.id} falhou (segue): ${(err as Error).message}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * US-OBS2-4 — roda o detector para UMA story. As iterações vivem por TASK
+   * (`Iteration.cardId` sempre uma task); reunimos as iterações das tasks-filhas
+   * da story em ORDEM CRONOLÓGICA e derivamos o sinal "voltado ao humano" de cada
+   * uma: `summary`/`handoffNextStep` não-vazios OU escalação (`handoffState`
+   * bloqueado/`done` NÃO conta como no-comment porque carrega intenção; a
+   * escalação `blocked` é tratada como sinal ao humano). A story marcada
+   * `needsHuman` em qualquer task recente também reseta o streak dessa task.
+   */
+  private async scanStoryNoCommentStreak(
+    storyId: string,
+    threshold: number,
+    nowMs: number,
+  ): Promise<void> {
+    const tasks = await this.prisma.card.findMany({
+      where: { parentId: storyId, type: 'task' },
+      select: { id: true },
+    });
+    if (tasks.length === 0) return;
+
+    // Consideramos a task mais ATIVA (com iteração mais recente). Um streak de
+    // "escuro" é sobre a task que o agent está de fato iterando.
+    const taskIds = tasks.map((t) => t.id);
+    const rows = await this.prisma.iteration.findMany({
+      where: { cardId: { in: taskIds } },
+      orderBy: { ts: 'asc' },
+      select: {
+        cardId: true,
+        summary: true,
+        handoffNextStep: true,
+        handoffState: true,
+      },
+    });
+    if (rows.length === 0) return;
+
+    // Agrupa por task e escolhe a task com a iteração mais recente.
+    const byTask = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const arr = byTask.get(r.cardId);
+      if (arr) arr.push(r);
+      else byTask.set(r.cardId, [r]);
+    }
+    const activeTaskId = rows[rows.length - 1].cardId;
+    const activeIterations = byTask.get(activeTaskId) ?? [];
+
+    // Deriva os sinais para o detector puro. `handoffState === 'blocked'` é uma
+    // escalação voltada ao humano (reseta o streak).
+    const signals = activeIterations.map((it) => ({
+      summary: it.summary,
+      handoffNextStep: it.handoffNextStep,
+      needsHuman: (it.handoffState ?? '').trim().toLowerCase() === 'blocked',
+    }));
+
+    const result = detectNoCommentStreak(signals, { threshold });
+    if (!result.anomalous) return;
+
+    const flagged = await this.reviewActions!.record(
+      {
+        cardId: storyId,
+        kind: 'no_comment_streak',
+        detail: { streak: result.streak, threshold, storyId, taskId: activeTaskId },
+      },
+      nowMs,
+    );
+    if (flagged) {
+      this.logger.log(
+        `no-comment streak sinalizado: story=${storyId} task=${activeTaskId} streak=${result.streak} (>= ${threshold})`,
+      );
+    }
   }
 
   /**
@@ -532,7 +681,11 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
    * (linhas ~993–1051). Persiste a `Iteration` em transação, atualiza execState
    * e DOD, e emite os eventos WS. Retorna true se rodou algo.
    */
-  async runIteration(taskId: string): Promise<boolean> {
+  async runIteration(
+    taskId: string,
+    opts: { recovery?: boolean } = {},
+  ): Promise<boolean> {
+    const recovery = opts.recovery === true;
     const iterationStartedAt = Date.now();
     const task = await this.loadTask(taskId);
     if (!task || task.execState === 'done') return false;
@@ -588,6 +741,13 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       raw?.parentId ?? null,
       raw?.boardId ?? null,
       agent?.model ?? null,
+    );
+    // US-OBS2-5: lane de recuperação status-only usa o modelo BARATO (quando
+    // configurado); trabalho normal SEMPRE usa o modelo normal resolvido acima.
+    const dispatchModel = resolveDispatchModel(
+      resolvedModel,
+      this.config.agent.cheapModelId,
+      recovery,
     );
 
     // b6: contexto do runner (só os campos do AgentRunContext; os demais são
@@ -679,13 +839,13 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
 
     const runResult = await this.runner.run({
       cwd,
-      model: resolvedModel,
+      model: dispatchModel,
       phase,
       // cliSessionId = taskId (UUID). Dá memória conversacional entre iterações
       // one-shot e torna o HITL resiliente a restart: o turno que retoma após a
       // resposta humana resume a MESMA sessão do Copilot. Ver ADR-0022.
       cliSessionId: taskId,
-      prompt: this.buildPrompt(phase, profile, context, agent?.instructions ?? '', cwd),
+      prompt: this.buildPrompt(phase, profile, context, agent?.instructions ?? '', cwd, recovery),
       context: runnerContext,
       signal,
       // b6: repassa cada chunk de streaming para o WS (buffer reativo no front)
@@ -1235,6 +1395,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       durationMs: Date.now() - iterationStartedAt,
       inputTokens: runResult.inputTokens,
       outputTokens: runResult.outputTokens,
+      provider: runResult.provider,
       outcome: hitlExchange ? 'awaiting-input' : 'ok',
     });
 
@@ -2468,6 +2629,33 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       /* defensivo: linha pode não existir — recovery segue */
     }
     void this.resumeDeferredForStory(storyId).catch(() => undefined);
+    // US-OBS2-5 — lane de recuperação status-only: após normalizar o estado,
+    // dispara UM wake BARATO (modelo `cheapModelId`) só para pedir intervenção
+    // humana / normalizar resíduos, com guard explícito para a AI NÃO produzir
+    // trabalho entregável. Best-effort e não-bloqueante: a recuperação do slot
+    // (acima) NUNCA pode depender deste dispatch.
+    void this.dispatchRecoveryWake(storyId).catch((err) =>
+      this.logger.warn(
+        `dispatchRecoveryWake(story=${storyId}) falhou (recuperação já concluída): ${String(err)}`,
+      ),
+    );
+  }
+
+  /**
+   * US-OBS2-5 — dispara um dispatch de RECUPERAÇÃO status-only para a story:
+   * roda UMA iteração com o modelo BARATO (`recovery:true` → `resolveDispatchModel`)
+   * e o guard de "não produza entregável" injetado no prompt. Escolhe a task
+   * mais relevante da story (a que estava em progresso; senão a próxima pronta).
+   * No-op silencioso se a story não tiver task acionável. Best-effort.
+   */
+  private async dispatchRecoveryWake(storyId: string): Promise<void> {
+    const tasks = await this.loadStoryTasks(storyId);
+    if (tasks.length === 0) return;
+    const target =
+      tasks.find((t) => t.execState !== 'done' && t.execState !== 'idle') ??
+      tasks.find((t) => t.execState !== 'done');
+    if (!target) return;
+    await this.runIteration(target.id, { recovery: true });
   }
 
   /** Para o loop de uma story (graceful: termina o passo atual; hard: aborta). */
@@ -3131,6 +3319,8 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       durationMs?: number;
       inputTokens?: number;
       outputTokens?: number;
+      /** US-OBS2-5: proveniência de uso (provider da telemetria de tokens). */
+      provider?: string;
       outcome?: string;
     },
   ): Promise<void> {
@@ -3154,6 +3344,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
           durationMs: it.durationMs ?? null,
           inputTokens: it.inputTokens ?? null,
           outputTokens: it.outputTokens ?? null,
+          provider: it.provider ?? null,
           outcome: it.outcome ?? null,
         },
       });
@@ -3969,6 +4160,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     context: Awaited<ReturnType<Orchestrator['buildContext']>>,
     agentInstructions = '',
     workdir = '',
+    recovery = false,
   ): string {
     const lines: string[] = [];
 
@@ -3978,6 +4170,14 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
         'Outras iterações virão depois e lerão o que você registrar. Foque em avançar ' +
         'a task, não em terminar tudo de uma vez. NÃO se perca: siga o profile e o handoff abaixo.',
     );
+
+    // US-OBS2-5 — GUARD DE RECUPERAÇÃO status-only. Injetado SOMENTE quando este
+    // é um dispatch de recuperação (recovery=true). NUNCA é adicionado em
+    // continuações de trabalho normal (recovery=false ⇒ scrubbed), para não
+    // vazar a instrução "não produza entregável" no loop produtivo.
+    if (recovery) {
+      lines.push(...recoveryGuardLines());
+    }
 
     // US-BUX3 (EP-BUX) — PLAN MODE: quando a story em execução está marcada com
     // `startInPlanMode`, esta iteração é de PLANEJAMENTO apenas. O bloco é

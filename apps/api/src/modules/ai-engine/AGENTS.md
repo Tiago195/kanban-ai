@@ -331,6 +331,51 @@ nem os mocks/testes:
   solta claim, `resumeDeferredForStory`). Idempotente (salvaguarda #3 preservada).
   Config: `AGENT_STUCK_HEARTBEAT_CEILING_MS` (default = `streamIdleTimeoutMs`
   120s — seguro/retrocompat). Specs: `stuck-sla.spec.ts`.
+- **Lane de recuperação barata + proveniência de uso (US-OBS2-5)**: wakes de
+  RECUPERAÇÃO / status-only (as que só normalizam estado/limpam lock e pedem
+  intervenção humana — NÃO produzem entregável) rodam com um modelo BARATO
+  configurável e um guard explícito no prompt. **Decisão de design:** FLAG
+  INTERNA (não um novo valor de `WakeupReason`), para não rippar o enum
+  compartilhado nem os consumidores web. `runIteration(taskId, { recovery })`
+  aceita a flag; `recoverStuckStory` (após limpar o slot) dispara best-effort
+  `dispatchRecoveryWake(storyId)` → `runIteration(target, { recovery: true })`.
+  Helpers PUROS em `recovery-lane.ts`: `resolveDispatchModel(normal, cheap,
+  recovery)` (trabalho normal SEMPRE usa o modelo normal; recuperação usa
+  `cheapModelId` se não-vazio, senão cai no normal) e `recoveryGuardLines()`
+  (bloco injetado por `buildPrompt(..., recovery)` SÓ no caminho de recuperação —
+  scrubbed do trabalho normal; contém `allowDeliverableWork:false`). Config
+  `AGENT_CHEAP_MODEL_ID` (default `''` = sem override / retrocompat). **Proveniência
+  de uso (fatia mínima ex-OBS2-3):** `AgentRunResult.provider?` (`'copilot'`/`'mock'`)
+  flui até `Iteration.provider` (migration `obs2_iteration_provider`, ADITIVA,
+  nullable). NÃO cria CostEvent/executionSegments (deferido). Specs:
+  `recovery-lane.spec.ts`.
+- **No-comment streak review action (US-OBS2-4)**: um scan periódico sinaliza
+  UMA anomalia — story cujo agent rodou `>= AGENT_NO_COMMENT_STREAK` (default 10)
+  iterações CONSECUTIVAS sem produzir comentário/handoff voltado ao humano — e
+  cria uma **REVIEW ACTION** rate-limitada/snooze-aware VISÍVEL mas
+  NÃO-INTRUSIVA: **NÃO move/cancela/transiciona a story**. NÃO duplica
+  watchdog/stuck-sla (long-active) nem anti-thrash (high-churn) — ambos foram
+  DESCARTADOS por redundância; só o no-comment streak é net-new. **Detector
+  PURO** `no-comment-streak.ts` (`detectNoCommentStreak(iterations, {threshold})`):
+  "comentário voltado ao humano" = `summary` não-vazio OU `handoffNextStep`
+  não-vazio OU `needsHuman` (derivado de `handoffState === 'blocked'`); streak =
+  sufixo consecutivo sem comentário; `anomalous = streak >= threshold`
+  (`threshold <= 0` desliga). **Lógica PURA de rate-limit/snooze**
+  `../review/review-action.logic.ts` (`decideReviewFlag`): snooze tem
+  precedência sobre cooldown; `cooldownMs <= 0` desliga o rate-limit. **I/O** no
+  `ReviewActionService` (`../review/review-action.service.ts`, EXPORTADO pelo
+  `ReviewModule` e importado pelo `AiEngineModule`): `record/listByCard/snooze` +
+  emite `review.action_flagged` (`@kanban-ai/shared`). Modelo Prisma ADITIVO
+  `ReviewAction` (cardId/kind/detail/ts/snoozedUntil, migration
+  `obs2_review_action`). **Wiring** no orquestrador: tick GLOBAL
+  `startNoCommentStreakScan` (cadência = `watchdogIntervalMs`, `unref()` +
+  try/catch, SEM Redis; roda SEMPRE, independe de `claimEnabled`) →
+  `scanNoCommentStreaks` → `scanStoryNoCommentStreak` (agrega iterações da task
+  mais ativa da story). Endpoints: `GET /cards/:id/review/actions`,
+  `PATCH /cards/:id/review/actions/:actionId/snooze`. Config
+  `AGENT_NO_COMMENT_STREAK` / `AGENT_REVIEW_ACTION_COOLDOWN_MS`. Specs:
+  `no-comment-streak.spec.ts`, `../review/review-action.logic.spec.ts`,
+  `../review/review-action.service.spec.ts`.
 
 Ao mudar esses contratos, mantenha este arquivo em dia.
 

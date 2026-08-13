@@ -18,6 +18,7 @@ import type {
 } from './domain';
 import type { BacklogProposal, BacklogTaskProposal } from './backlog-chat';
 import type { MemoryConflict, MemoryReviewItem } from './dtos';
+import type { ReviewActionDTO } from './review-actions';
 
 /** Status derivado de um epic a partir das stories filhas. */
 export type EpicDerivedStatus = 'todo' | 'inprogress' | 'done';
@@ -422,6 +423,18 @@ export interface ReviewCommentAddedEvent {
   comment: ReviewComment;
 }
 
+/**
+ * US-OBS2-4 — Um scan periódico sinalizou uma REVIEW ACTION (anomalia) para um
+ * card. É VISÍVEL mas NÃO-INTRUSIVO: não move nem cancela a story. A UI exibe um
+ * aviso discreto que o operador pode snoozar. Observabilidade — não reintroduz
+ * DOR/acceptance (ADR-0007).
+ */
+export interface ReviewActionFlaggedEvent {
+  type: 'review.action_flagged';
+  cardId: string;
+  action: ReviewActionDTO;
+}
+
 /** União discriminada de todos os eventos do servidor. */
 export type ServerEvent =
   | CardMovedEvent
@@ -454,6 +467,7 @@ export type ServerEvent =
   | BacklogTurnDoneEvent
   | CommentCreatedEvent
   | ReviewCommentAddedEvent
+  | ReviewActionFlaggedEvent
   | BoardUpdatedEvent
   | CardNeedsHumanEvent
   | MemoryLockedEvent

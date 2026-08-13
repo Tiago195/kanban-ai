@@ -91,6 +91,15 @@ export interface AppConfig {
   };
   agent: {
     defaultModel: string;
+    /**
+     * US-OBS2-5 — modelo BARATO usado na lane de RECUPERAÇÃO / status-only
+     * (wakes que só normalizam o estado/limpam o lock e pedem intervenção
+     * humana — NÃO produzem trabalho entregável). Quando definido (não-vazio),
+     * substitui o modelo normal SÓ nesse caminho para cortar custo. Vazio (`''`,
+     * default) = "cai no modelo normal / sem override" — retrocompatível. Wakes
+     * de trabalho normal SEMPRE usam o modelo normal. Env: AGENT_CHEAP_MODEL_ID.
+     */
+    cheapModelId: string;
     maxConcurrentSessions: number;
     watchdogIntervalMs: number;
     autoStepIntervalMs: number;
@@ -367,6 +376,19 @@ export interface AppConfig {
      * comportamento seguro/retrocompatível. Env: AGENT_STUCK_HEARTBEAT_CEILING_MS.
      */
     stuckHeartbeatCeilingMs: number;
+    /**
+     * US-OBS2-4 — nº de iterações CONSECUTIVAS sem comentário/handoff voltado ao
+     * humano a partir do qual o scan periódico sinaliza uma REVIEW ACTION
+     * `no_comment_streak` (visível, não-intrusiva; NÃO move/cancela a story).
+     * `0` desliga a detecção. Default 10. Env: AGENT_NO_COMMENT_STREAK.
+     */
+    noCommentStreakThreshold: number;
+    /**
+     * US-OBS2-4 — janela de cooldown (ms) do rate-limit de review actions: o
+     * MESMO (card, kind) não é re-sinalizado dentro dela. `0` desliga o
+     * rate-limit. Default 1h. Env: AGENT_REVIEW_ACTION_COOLDOWN_MS.
+     */
+    reviewActionCooldownMs: number;
   };
   /**
    * US-OBS1 — configuração do dashboard de frota (`GET /dashboard`).
@@ -428,6 +450,17 @@ export interface AppConfig {
      * `300000` (5 min).
      */
     recoveryWindowMs: number;
+  };
+  /**
+   * US-OBS2-1 — tracing OpenTelemetry **opt-in** (API-only). `enabled` é
+   * derivado exclusivamente da presença de `OTEL_EXPORTER_OTLP_ENDPOINT`
+   * (custo zero quando ausente). `serviceName` default `kanban-ai-api`. Ver
+   * `shared/observability/tracing.ts`.
+   */
+  observability: {
+    otelEnabled: boolean;
+    otelEndpoint: string;
+    otelServiceName: string;
   };
 }
 
@@ -536,6 +569,7 @@ export function loadConfig(): AppConfig {
     },
     agent: {
       defaultModel: process.env.AGENT_DEFAULT_MODEL ?? 'opus',
+      cheapModelId: process.env.AGENT_CHEAP_MODEL_ID ?? '', // US-OBS2-5: lane de recuperação
       maxConcurrentSessions: num(process.env.AGENT_MAX_CONCURRENT_SESSIONS, 3),
       watchdogIntervalMs: num(process.env.AGENT_WATCHDOG_INTERVAL_MS, 120_000),
       autoStepIntervalMs: num(process.env.AGENT_AUTO_STEP_INTERVAL_MS, 1_500),
@@ -600,6 +634,9 @@ export function loadConfig(): AppConfig {
         process.env.AGENT_STUCK_HEARTBEAT_CEILING_MS,
         num(process.env.AGENT_STREAM_IDLE_TIMEOUT_MS, 120_000),
       ),
+      // US-OBS2-4 — no-comment streak review action.
+      noCommentStreakThreshold: num(process.env.AGENT_NO_COMMENT_STREAK, 10),
+      reviewActionCooldownMs: num(process.env.AGENT_REVIEW_ACTION_COOLDOWN_MS, 3_600_000),
     },
     dashboard: {
       staleMinutes: num(process.env.DASHBOARD_STALE_MINUTES, 30),
@@ -613,6 +650,11 @@ export function loadConfig(): AppConfig {
       circuitBreakerEnabled: process.env.BOOT_CIRCUIT_BREAKER_ENABLED !== 'false',
       dataDir: path.resolve(process.env.BOOT_DATA_DIR ?? './.kanban-ai-data'),
       recoveryWindowMs: num(process.env.BOOT_RECOVERY_WINDOW_MS, 300_000),
+    },
+    observability: {
+      otelEnabled: (process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? '').trim().length > 0,
+      otelEndpoint: (process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? '').trim(),
+      otelServiceName: (process.env.OTEL_SERVICE_NAME ?? '').trim() || 'kanban-ai-api',
     },
   };
 }
