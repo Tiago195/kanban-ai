@@ -50,8 +50,12 @@ services:
       AGENT_CLI_COMMAND: ${AGENT_CLI_COMMAND:-copilot}
       AGENT_CLI_ARGS: ${AGENT_CLI_ARGS:-}
       AGENT_CLI_PROMPT_MODE: ${AGENT_CLI_PROMPT_MODE:-stdin}
-      # Copilot CLI instalado na imagem (apps/api/Dockerfile) → no PATH do container.
-      COPILOT_BIN: ${COPILOT_BIN:-copilot}
+      # Copilot CLI: a imagem (apps/api/Dockerfile) tenta instalar @github/copilot,
+      # mas sob proxy TLS corporativo o npm install -g falha (tolerado). Fallback:
+      # montamos o pacote @github/copilot do HOST (via HOST_COPILOT_BIN_DIR) em
+      # /opt/copilot:ro e apontamos COPILOT_BIN para o loader montado. O pacote do
+      # host é self-contained (traz node_modules) e roda com o node do container.
+      COPILOT_BIN: ${COPILOT_BIN:-/opt/copilot/npm-loader.js}
       AGENT_MAX_CONCURRENT_SESSIONS: ${AGENT_MAX_CONCURRENT_SESSIONS:-3}
       AGENT_WATCHDOG_INTERVAL_MS: ${AGENT_WATCHDOG_INTERVAL_MS:-120000}
       AGENT_WORKSPACES_DIR: ${AGENT_WORKSPACES_DIR:-./.agent-workspaces}
@@ -70,7 +74,11 @@ services:
       PROJECTS_SSH_COMMAND: ${PROJECTS_SSH_COMMAND:-ssh -F /dev/null -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts -o IdentityFile=/root/.ssh/id_ed25519 -o IdentitiesOnly=yes -o Hostname=ssh.github.com -p 443}
       # ── Autenticação do Copilot CLI DENTRO do container (risco #1 do ADR-0019) ──
       # Opção B: token passado por env (repasse do host, sem default). O adapter e
-      # o CLI honram GH_TOKEN/GITHUB_TOKEN quando presentes.
+      # o CLI honram COPILOT_GITHUB_TOKEN/GH_TOKEN/GITHUB_TOKEN quando presentes.
+      # No host o copilot costuma autenticar via `gh` CLI (~/.config/gh); como o
+      # container não tem `gh`, repassamos o token por env (ex.: no .env local:
+      # COPILOT_GITHUB_TOKEN=$(gh auth token)).
+      COPILOT_GITHUB_TOKEN: ${COPILOT_GITHUB_TOKEN:-}
       GH_TOKEN: ${GH_TOKEN:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       # Watch confiável em bind mount (inotify não propaga bem no Docker).
@@ -87,7 +95,9 @@ services:
       # do CLI do host como read-only. HOST_COPILOT_DIR default ~/.copilot; o CLI
       # procura sua config no HOME → montamos em /root/.copilot (HOME do root no
       # container). Comente esta linha se preferir só o token via GH_TOKEN.
-      - ${HOST_COPILOT_DIR:-~/.copilot}:/root/.copilot:ro
+      # RW (sem :ro): o Copilot CLI grava session-store.db e o session-state a
+      # cada iteração; com :ro dá "Read-only file system (os error 30)".
+      - ${HOST_COPILOT_DIR:-~/.copilot}:/root/.copilot
       # Chave SSH do host (read-only) para clone de Projects via git@... quando
       # PROJECTS_ALLOW_SSH=true. O clone ssh delega ao `git`/`ssh` do container,
       # que procura a identidade em $HOME/.ssh (/root/.ssh do root). Sem isto o
@@ -95,6 +105,12 @@ services:
       # HOST_SSH_DIR default ~/.ssh. Requer known_hosts com github.com (ou o
       # container usa StrictHostKeyChecking desligado via /root/.ssh/config).
       - ${HOST_SSH_DIR:-~/.ssh}:/root/.ssh:ro
+      # Copilot CLI do HOST (self-contained, traz node_modules) montado :ro em
+      # /opt/copilot como fallback quando o npm install -g da imagem falha (proxy
+      # TLS corporativo). COPILOT_BIN aponta p/ /opt/copilot/npm-loader.js e o
+      # adapter roda com o node do container. HOST_COPILOT_BIN_DIR default aponta
+      # p/ o pacote instalado via nvm; ajuste se seu copilot está noutro caminho.
+      - ${HOST_COPILOT_BIN_DIR:-~/.nvm/versions/node/v22.17.1/lib/node_modules/@github/copilot}:/opt/copilot:ro
     entrypoint: ['sh', '/app/docker/api-dev-entrypoint.sh']
 
   # ───────────────────────────────────────────────────────────────────────────
