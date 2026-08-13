@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -10,7 +11,14 @@ import type { AgentChatMessage } from '@kanban-ai/shared';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
 import { Orchestrator } from './orchestrator';
-import { stopAutoSchema, answerSchema, type StopAutoDto, type AnswerDto } from './ai-engine.schema';
+import {
+  stopAutoSchema,
+  answerSchema,
+  setMonitorSchema,
+  type StopAutoDto,
+  type AnswerDto,
+  type SetMonitorDto,
+} from './ai-engine.schema';
 
 /**
  * Endpoints REST do loop engine (fatia 3). Rotas sob o recurso card, mas em
@@ -84,6 +92,40 @@ export class AiEngineController {
       throw new NotFoundException('nenhuma pergunta pendente para essa story/questionId');
     }
     return { accepted };
+  }
+
+  /**
+   * US-SCHED1: arma um monitor deferred (time-gated wake) para uma story.
+   * O agent PARK (espera um evento externo, ex: "volto em 30min pra checar CI")
+   * e acorda automaticamente no `nextCheckAt`. One-shot: dispara UMA vez e auto-
+   * clear; o agent pode re-armar se ainda estiver esperando.
+   */
+  @Post(':id/loop/monitor')
+  async setMonitor(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(setMonitorSchema)) dto: SetMonitorDto,
+  ): Promise<{ scheduled: boolean }> {
+    await this.ensureStory(id);
+    const scheduledFor = new Date(dto.nextCheckAt);
+    const timeoutAt = dto.timeoutAt ? new Date(dto.timeoutAt) : undefined;
+    await this.orchestrator.setMonitor(id, {
+      scheduledFor,
+      notes: dto.notes,
+      timeoutAt,
+      maxAttempts: dto.maxAttempts,
+    });
+    return { scheduled: true };
+  }
+
+  /**
+   * US-SCHED1: limpa/cancela o monitor pendente de uma story (one-shot clear).
+   * Útil quando o agent decide que não precisa mais esperar pelo evento externo.
+   */
+  @Delete(':id/loop/monitor')
+  async clearMonitor(@Param('id') id: string): Promise<{ cleared: boolean }> {
+    await this.ensureStory(id);
+    await this.orchestrator.clearMonitor(id);
+    return { cleared: true };
   }
 
   /**

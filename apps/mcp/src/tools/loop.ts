@@ -97,4 +97,41 @@ export function registerLoopTools(server: McpServer, client: KanbanClient): void
     { id: z.string().uuid() },
     async ({ id }) => ok(await client.get(`/cards/${id}/chat`)),
   );
+
+  registerTool(
+    server,
+    'loop_set_monitor',
+    'US-SCHED1: arma um monitor deferred (time-gated wake) para uma STORY ' +
+      '(POST /cards/:id/loop/monitor). `id` é o id da STORY. O agent PARK (espera um ' +
+      'evento externo, ex: "volto em 30min pra checar CI") e acorda automaticamente no ' +
+      '`nextCheckAt` (ISO 8601 datetime). One-shot: dispara UMA vez e auto-clear; o agent ' +
+      'pode re-armar se ainda estiver esperando. Útil para esperas longas sem polling.',
+    {
+      id: z.string().uuid(),
+      nextCheckAt: z.string().datetime(),
+      notes: z.string().optional(),
+      timeoutAt: z.string().datetime().optional(),
+      maxAttempts: z.number().int().positive().optional(),
+    },
+    async ({ id, nextCheckAt, notes, timeoutAt, maxAttempts }) =>
+      ok(
+        await client.post(`/cards/${id}/loop/monitor`, {
+          nextCheckAt,
+          ...(notes !== undefined ? { notes } : {}),
+          ...(timeoutAt !== undefined ? { timeoutAt } : {}),
+          ...(maxAttempts !== undefined ? { maxAttempts } : {}),
+        }),
+      ),
+  );
+
+  registerTool(
+    server,
+    'loop_clear_monitor',
+    'US-SCHED1: limpa/cancela o monitor pendente de uma STORY ' +
+      '(DELETE /cards/:id/loop/monitor). `id` é o id da STORY. Útil quando o agent ' +
+      'decide que não precisa mais esperar pelo evento externo (ex: CI completou antes ' +
+      'do esperado).',
+    { id: z.string().uuid() },
+    async ({ id }) => ok(await client.delete(`/cards/${id}/loop/monitor`)),
+  );
 }

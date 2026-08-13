@@ -14,3 +14,13 @@ export const answerSchema = z.object({
 });
 
 export type AnswerDto = z.infer<typeof answerSchema>;
+
+/** US-SCHED1: Schema para armar um monitor deferred (time-gated wake). */
+export const setMonitorSchema = z.object({
+  nextCheckAt: z.string().datetime(), // ISO 8601 datetime string
+  notes: z.string().optional(),
+  timeoutAt: z.string().datetime().optional(),
+  maxAttempts: z.number().int().positive().optional(),
+});
+
+export type SetMonitorDto = z.infer<typeof setMonitorSchema>;
