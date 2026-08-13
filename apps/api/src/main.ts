@@ -29,8 +29,16 @@ import fastifyWebsocket from '@fastify/websocket';
 import { AppModule } from './app.module';
 import { loadConfig } from './shared/config/config';
 import { applyBootBackoff, reset as resetCircuitBreaker } from './shared/boot/circuit-breaker';
+import { initTracing } from './shared/observability/tracing';
 
 async function bootstrap(): Promise<void> {
+  // US-OBS2-1 — tracing OTel opt-in. DEVE rodar ANTES de `NestFactory.create` e
+  // de qualquer módulo instrumentado (HTTP/Fastify/pg) para o auto-instrument
+  // conseguir aplicar os patches. No-op com custo zero quando
+  // `OTEL_EXPORTER_OTLP_ENDPOINT` não está setado; degradação graciosa se os
+  // pacotes OTel estiverem ausentes (loga uma vez e segue). Ver tracing.ts.
+  await initTracing();
+
   const config = loadConfig();
 
   // US-HARD2 — circuit-breaker de crash-loop. ANTES de qualquer conexão a
