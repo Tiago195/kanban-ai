@@ -28,9 +28,23 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 import fastifyWebsocket from '@fastify/websocket';
 import { AppModule } from './app.module';
 import { loadConfig } from './shared/config/config';
+import { applyBootBackoff, reset as resetCircuitBreaker } from './shared/boot/circuit-breaker';
 
 async function bootstrap(): Promise<void> {
   const config = loadConfig();
+
+  // US-HARD2 — circuit-breaker de crash-loop. ANTES de qualquer conexão a
+  // Postgres/LLM (i.e. antes de `NestFactory.create`), aplicamos backoff
+  // persistido: se o boot anterior não registrou shutdown limpo, esperamos um
+  // intervalo crescente para não martelar dependências num crash-loop. Boots
+  // saudáveis (attempt 0/1) NÃO são atrasados. Ver circuit-breaker.ts.
+  await applyBootBackoff({
+    dataDir: config.boot.dataDir,
+    windowMs: config.boot.recoveryWindowMs,
+    enabled: config.boot.circuitBreakerEnabled,
+    log: (m) => Logger.warn(m, 'Bootstrap'),
+  });
+
   const adapter = new FastifyAdapter();
 
   // Registra o plugin de WebSocket ANTES do listen; a rota é declarada no RealtimeGateway.
@@ -44,6 +58,31 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
 
   await app.listen(config.apiPort, '0.0.0.0');
+
+  // `app.listen` OK significa que passamos da zona de perigo do crash-loop
+  // (Nest inicializou todos os providers, DB conectou, porta está ouvindo).
+  // Marcamos o boot como bem-sucedido zerando o contador. O mesmo `reset` é
+  // chamado no shutdown gracioso via handlers de sinal abaixo.
+  if (config.boot.circuitBreakerEnabled) {
+    resetCircuitBreaker(config.boot.dataDir);
+  }
+
+  // Shutdown gracioso: em SIGTERM/SIGINT registramos um shutdown LIMPO (reset)
+  // e deixamos o Nest fechar os recursos via enableShutdownHooks. Isso garante
+  // que um restart intencional não incremente o contador de crash-loop.
+  const gracefulShutdown = (signal: NodeJS.Signals): void => {
+    if (config.boot.circuitBreakerEnabled) {
+      resetCircuitBreaker(config.boot.dataDir);
+    }
+    void app
+      .close()
+      .catch((err) => Logger.error(err instanceof Error ? err.stack : String(err), 'Bootstrap'))
+      .finally(() => process.exit(0));
+    Logger.log(`Shutdown gracioso (${signal}).`, 'Bootstrap');
+  };
+  process.once('SIGTERM', gracefulShutdown);
+  process.once('SIGINT', gracefulShutdown);
+
   Logger.log(`API ouvindo em http://localhost:${config.apiPort}`, 'Bootstrap');
   Logger.log(`WebSocket em ws://localhost:${config.apiPort}${config.wsPath}`, 'Bootstrap');
 }

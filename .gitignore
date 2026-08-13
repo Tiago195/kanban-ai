@@ -27,6 +27,9 @@ npm-debug.log*
 # AI agent workspaces (git worktrees do repo-alvo)
 .agent-workspaces/
 
+# US-HARD2: estado de runtime do boot circuit-breaker (crash-loop backoff).
+.kanban-ai-data/
+
 # Memória (ADR-0027, Camada 1): bare repo do serviço em volume dedicado.
 # É armazenamento de runtime (fonte da verdade da memória), NUNCA versionado
 # no repo-alvo. Cobre o default MEMORY_GIT_DIR (./.kanban-ai-memory/git).
