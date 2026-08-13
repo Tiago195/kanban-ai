@@ -3,6 +3,8 @@ import { StopMode } from '@kanban-ai/shared';
 import type { ExecState, AffectedFlow, LoopMetrics, WakeupReason, BlockKind, BlockedDescriptor } from '@kanban-ai/shared';
 import { isVerifiableEvidence, minimumArtifactSatisfied } from '@kanban-ai/shared';
 import type { ResultClass, CommitOutcome, StructuredEvidence } from '@kanban-ai/shared';
+import { CONTINUABLE_LIVENESS } from '@kanban-ai/shared';
+import type { CompletionMetadata, RunLivenessState } from '@kanban-ai/shared';
 import { randomUUID, createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -15,7 +17,7 @@ import { RealtimeService } from '../../realtime/realtime.service';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
 import { WorkspaceService, TargetProjectError } from './workspaces/workspace.service';
 import { ProjectWorkspaceService } from '../projects/project-workspace.service';
-import { AGENT_RUNNER, type AgentRunner } from './runners/agent-runner.interface';
+import { AGENT_RUNNER, type AgentRunner, type AgentRunResult } from './runners/agent-runner.interface';
 import { ValidationRunner } from './validators/validation.runner';
 import { resolveLoopProfile, type LoopProfileDef } from './loop-profiles/loop-profiles';
 import { mapIteration, type PrismaIterationRow } from '../cards/iteration.mapper';
@@ -914,6 +916,15 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       if (effectivePassed) {
         await this.setExecState(taskId, 'done');
         await this.log(taskId, 'validação final concluída — task Done');
+        // US-CTX2 (EP-CTX/ADR-0040) — grava o HANDOFF ESTRUTURADO da task ao
+        // fechá-la, para as tasks dependentes (irmãs/blockers) herdarem
+        // changed_files/verification etc. sem começar cegas. Best-effort:
+        // NUNCA derruba o loop (a task já está `done`).
+        await this.writeCompletionMetadata(taskId, context, runResult).catch((err) =>
+          this.logger.warn(
+            `writeCompletionMetadata falhou para ${taskId}: ${(err as Error).message}`,
+          ),
+        );
         // US-OBS3 (ADR-0037) — auto-commit/PR OPCIONAL, gated. Só age com opt-in
         // ligado, evidência verificável e worktree ISOLADO (ADR-0035). Default
         // off = zero commit (comportamento idêntico ao de hoje). Best-effort:
@@ -1217,8 +1228,199 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       outputTokens: runResult.outputTokens,
       outcome: hitlExchange ? 'awaiting-input' : 'ok',
     });
+
+    // ── US-CTX3 (EP-CTX/ADR-0040) — continuação bounded direcionada ──────────
+    // Classifica o liveness do run. Se foi improdutivo-mas-recuperável
+    // (plan_only/empty_response) e ainda estamos dentro do cap, registra um
+    // `livenessReason` direcionado + incrementa o contador e enfileira um wake
+    // 'continuation' (re-tick imediato quando fora do auto-play). Em qualquer
+    // run que AVANÇOU (advanced/completed), zera o contador e limpa o motivo.
+    // Best-effort: nunca derruba o loop.
+    await this.applyContinuationPolicy(
+      storyId,
+      this.classifyRunLiveness(runResult, iterationDiff, touched, handoffState),
+      runResult,
+    ).catch((err) =>
+      this.logger.warn(
+        `applyContinuationPolicy falhou (task=${taskId}): ${(err as Error).message}`,
+      ),
+    );
+
     await this.setExecState(taskId, execStateAfterPhase(phase));
     return true;
+  }
+
+  /**
+   * US-CTX3 (EP-CTX/ADR-0040) — aplica a política de continuação bounded a
+   * partir do liveness classificado. Persiste `continuationAttempt`/
+   * `livenessReason` em AgentRuntimeState (durável, cross-run). Feature toggle:
+   * `agent.continuationCap === 0` desliga (só limpa estado residual).
+   */
+  private async applyContinuationPolicy(
+    storyId: string,
+    liveness: RunLivenessState,
+    runResult: AgentRunResult,
+  ): Promise<void> {
+    const cap = this.config.agent.continuationCap;
+
+    // Run que avançou/concluiu → zera o contador e limpa o motivo (fim de
+    // qualquer sequência de continuação). Também para blocked/needs_followup:
+    // esses têm seus próprios fluxos (dep/HITL), não são continuação nossa.
+    if (liveness === 'advanced' || liveness === 'completed' || liveness === 'blocked' || liveness === 'needs_followup' || liveness === 'failed') {
+      await this.resetContinuation(storyId);
+      return;
+    }
+
+    // Feature desligada → não faz nada além de garantir estado limpo.
+    if (cap <= 0) {
+      await this.resetContinuation(storyId);
+      return;
+    }
+
+    // A partir daqui: plan_only | empty_response (recuperáveis, sem progresso).
+    if (!CONTINUABLE_LIVENESS.includes(liveness)) {
+      await this.resetContinuation(storyId);
+      return;
+    }
+
+    const current = await this.prisma.agentRuntimeState.findUnique({
+      where: { storyId },
+      select: { continuationAttempt: true },
+    });
+    const attempt = current?.continuationAttempt ?? 0;
+
+    if (attempt >= cap) {
+      // Estourou o cap → cede ao fluxo normal (auto-step/anti-thrash). Limpa o
+      // motivo para não injetar continuação eternamente, mas NÃO zera o
+      // contador (anti-thrash usa o histórico de iterações; aqui só paramos de
+      // "empurrar").
+      await this.prisma.agentRuntimeState
+        .update({ where: { storyId }, data: { livenessReason: null } })
+        .catch(() => undefined);
+      return;
+    }
+
+    const reason =
+      liveness === 'plan_only'
+        ? `Run anterior apenas PLANEJOU (sem diff/DOD). Execute agora o próximo passo: ${
+            runResult.nextStep?.trim() || 'implemente a mudança planejada'
+          }`
+        : 'Run anterior não produziu resposta acionável. Retome do último passo e produza uma mudança concreta agora.';
+
+    await this.prisma.agentRuntimeState.upsert({
+      where: { storyId },
+      update: { continuationAttempt: attempt + 1, livenessReason: reason },
+      create: {
+        sessionId: `ctx-${storyId}`,
+        storyId,
+        continuationAttempt: attempt + 1,
+        livenessReason: reason,
+      },
+    });
+
+    // Re-tick alvo: só útil quando NÃO há auto-play ativo (o interval já
+    // re-tica sozinho). Enfileira um wake durável 'continuation' (coalesce).
+    if (!this.autoTimers.has(storyId)) {
+      await this.enqueueWakeup(storyId, 'continuation');
+      const delay = this.config.agent.continuationDelayMs;
+      setTimeout(() => {
+        void this.stepStory(storyId).catch((err) =>
+          this.logger.warn(
+            `continuation step falhou (story=${storyId}): ${(err as Error).message}`,
+          ),
+        );
+      }, delay);
+    }
+  }
+
+  /** US-CTX3 — zera contador e limpa motivo de continuação (best-effort). */
+  private async resetContinuation(storyId: string): Promise<void> {
+    await this.prisma.agentRuntimeState
+      .updateMany({
+        where: { storyId, OR: [{ continuationAttempt: { gt: 0 } }, { livenessReason: { not: null } }] },
+        data: { continuationAttempt: 0, livenessReason: null },
+      })
+      .catch(() => undefined);
+  }
+
+  /**
+   * US-CTX2 (EP-CTX/ADR-0040) — grava o snapshot ESTRUTURADO de handoff em
+   * `Card.completionMetadata` ao fechar a task (`done`). É consumido por
+   * `buildContext` das tasks dependentes (parentHandoffs). Best-effort e
+   * idempotente: sempre sobrescreve com o estado final da task.
+   *
+   * NÃO é um checklist (ADR-0007 proíbe DOR/acceptance) — é um retrato factual
+   * do que foi feito, derivado do que já temos (context + runResult/evidence).
+   */
+  private async writeCompletionMetadata(
+    taskId: string,
+    context: Awaited<ReturnType<Orchestrator['buildContext']>>,
+    runResult: AgentRunResult,
+  ): Promise<void> {
+    // changed_files: arquivos dos fluxos afetados + os declarados na evidência
+    // estruturada (se houver), deduplicados e limitados.
+    const fromFlows = context.files ?? [];
+    const evidence = runResult.evidence;
+    const fromEvidence =
+      evidence && typeof evidence === 'object' && Array.isArray(evidence.filesChanged)
+        ? evidence.filesChanged
+        : [];
+    const changedFiles = Array.from(
+      new Set([...fromFlows, ...fromEvidence].filter((f) => typeof f === 'string' && f.trim())),
+    ).slice(0, 60);
+
+    // verification: a evidência verificável (checks) tem prioridade; senão, o
+    // resumo textual da AI. String vazia quando nada foi reportado.
+    let verification = '';
+    if (evidence && typeof evidence === 'object' && Array.isArray(evidence.checks)) {
+      const parts = evidence.checks
+        .filter((c) => c && c.name)
+        .map((c) => `${c.name}: ${c.passed ? 'passed' : 'failed'}`);
+      verification = parts.join('; ');
+    }
+    if (!verification) {
+      verification = (evidenceToString(evidence) || runResult.summary || '').slice(0, 1000);
+    }
+
+    const metadata: CompletionMetadata = {
+      changed_files: changedFiles,
+      verification: verification || undefined,
+      dependencies: undefined,
+      retry_notes: undefined,
+      residual_risk: runResult.nextStep?.trim() ? runResult.nextStep.trim().slice(0, 500) : undefined,
+    };
+
+    await this.prisma.card.update({
+      where: { id: taskId },
+      data: { completionMetadata: metadata as unknown as Prisma.InputJsonValue },
+    });
+  }
+
+  /**
+   * US-CTX3 (EP-CTX/ADR-0040) — classifica o "liveness" de um run em uma das
+   * categorias de {@link RunLivenessState}, para decidir se vale uma
+   * CONTINUAÇÃO direcionada (plan_only/empty_response) ou se cede ao fluxo
+   * normal (auto-step/anti-thrash). Função PURA (sem I/O).
+   */
+  private classifyRunLiveness(
+    runResult: AgentRunResult,
+    iterationDiff: string,
+    touched: string[],
+    handoffState: string,
+  ): RunLivenessState {
+    if (runResult.fatalError) return 'failed';
+    const hasDiff = (iterationDiff ?? '').trim().length > 0;
+    const hasTouched = (touched ?? []).length > 0;
+    const hasSummary = (runResult.summary ?? '').trim().length > 0;
+    const hasNextStep = (runResult.nextStep ?? '').trim().length > 0;
+
+    if (handoffState === 'done' || runResult.done) return 'completed';
+    if (handoffState === 'blocked') return 'blocked';
+    if (handoffState === 'awaiting-input') return 'needs_followup';
+    if (hasDiff || hasTouched) return 'advanced';
+    // Sem progresso concreto: só planejou (tem resumo/próximo passo) ou vazio.
+    if (hasSummary || hasNextStep) return 'plan_only';
+    return 'empty_response';
   }
 
   /**
@@ -3308,6 +3510,26 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
      * (defensivo: a memória NUNCA derruba o loop).
      */
     memoryNeurons: { path: string; title: string; content: string }[];
+    /**
+     * US-CTX1 (EP-CTX/ADR-0040) — snapshot da TENTATIVA ANTERIOR desta story,
+     * quando este é um re-dispatch (reclaim pós-crash M4 ou continuação M3).
+     * `null` na 1ª execução (nada a injetar). Fonte: AgentRuntimeState.lastError
+     * + outcome da última Iteration. Defensivo: falha => null.
+     */
+    priorAttempt: { lastError: string | null; lastOutcome: string | null } | null;
+    /**
+     * US-CTX2 (EP-CTX/ADR-0040) — handoffs ESTRUTURADOS das tasks das quais esta
+     * depende (irmãs já concluídas / blockers resolvidos), lidos de
+     * Card.completionMetadata. Vazio quando não há metadata. Injetado no prompt
+     * para a AI herdar changed_files/verification/residual_risk do trabalho pai.
+     */
+    parentHandoffs: { key: string; title: string; metadata: CompletionMetadata }[];
+    /**
+     * US-CTX3 (EP-CTX/ADR-0040) — motivo/dica da última continuação bounded
+     * (ex.: "run anterior só planejou"). `null` = sem continuação pendente.
+     * Fonte: AgentRuntimeState.livenessReason.
+     */
+    continuationReason: string | null;
   }> {
     const task = await this.prisma.card.findUnique({
       where: { id: taskId },
@@ -3459,6 +3681,71 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       memoryNeurons = [];
     }
 
+    // ── US-CTX1/CTX3 (EP-CTX/ADR-0040) — snapshot do AgentRuntimeState desta
+    // story (leitura ÚNICA, wide select) para: (1) tentativa anterior em
+    // re-dispatch e (2) motivo de continuação bounded. Totalmente defensivo:
+    // qualquer falha => priorAttempt=null / continuationReason=null.
+    let priorAttempt: { lastError: string | null; lastOutcome: string | null } | null = null;
+    let continuationReason: string | null = null;
+    const storyIdForCtx = task?.parentId ?? null;
+    if (storyIdForCtx) {
+      try {
+        const runtime = await this.prisma.agentRuntimeState.findUnique({
+          where: { storyId: storyIdForCtx },
+          select: { lastError: true, livenessReason: true },
+        });
+        if (runtime) {
+          continuationReason = runtime.livenessReason ?? null;
+          // outcome da última iteração da story-corrente (task): se houver
+          // qualquer sinal (erro prévio OU outcome não-ok), montamos o bloco.
+          const lastIter = await this.prisma.iteration.findFirst({
+            where: { cardId: taskId },
+            orderBy: { index: 'desc' },
+            select: { outcome: true },
+          });
+          const lastOutcome = lastIter?.outcome ?? null;
+          if (runtime.lastError || (lastOutcome && lastOutcome !== 'ok')) {
+            priorAttempt = { lastError: runtime.lastError ?? null, lastOutcome };
+          }
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Falha ao ler AgentRuntimeState em buildContext: ${(err as Error).message}`,
+        );
+        priorAttempt = null;
+        continuationReason = null;
+      }
+    }
+
+    // ── US-CTX2 (EP-CTX/ADR-0040) — handoffs ESTRUTURADOS das tasks pai/irmãs
+    // concluídas: lê Card.completionMetadata das mesmas irmãs `done` já
+    // consideradas em siblingHandoffs. Defensivo: metadata inválido é ignorado.
+    const parentHandoffs: { key: string; title: string; metadata: CompletionMetadata }[] = [];
+    if (task?.parentId) {
+      try {
+        const doneWithMeta = await this.prisma.card.findMany({
+          where: {
+            parentId: task.parentId,
+            type: 'task',
+            execState: 'done',
+            NOT: { id: taskId },
+            completionMetadata: { not: Prisma.JsonNull },
+          },
+          select: { key: true, title: true, completionMetadata: true },
+        });
+        for (const c of doneWithMeta) {
+          const raw = c.completionMetadata as unknown as CompletionMetadata | null;
+          if (raw && typeof raw === 'object') {
+            parentHandoffs.push({ key: c.key, title: c.title, metadata: raw });
+          }
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Falha ao ler completionMetadata em buildContext: ${(err as Error).message}`,
+        );
+      }
+    }
+
     return {
       taskTitle,
       project,
@@ -3476,6 +3763,9 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       storyContext: story ? { title: story.title ?? '', description: story.description ?? '' } : null,
       epicContext: epic ? { title: epic.title ?? '', description: epic.description ?? '' } : null,
       memoryNeurons,
+      priorAttempt,
+      parentHandoffs,
+      continuationReason,
     };
   }
 
@@ -3691,6 +3981,60 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
         lines.push('');
         lines.push(`### neurônio: ${n.path}${n.title ? ` — ${n.title}` : ''}`);
         lines.push(n.content.trim());
+      }
+    }
+
+    // US-CTX3 (EP-CTX/ADR-0040) — continuação DIRECIONADA. Quando o run anterior
+    // foi improdutivo-mas-recuperável (plan_only/empty_response) e re-despachamos
+    // dentro do cap, dizemos EXPLICITAMENTE o que fazer agora. Vem antes de tudo
+    // do histórico para orientar a próxima ação de imediato.
+    if (context.continuationReason) {
+      lines.push('');
+      lines.push('## ➡️ Continuação direcionada (re-dispatch automático)');
+      lines.push(
+        'O run anterior NÃO produziu progresso concreto (sem diff/DOD marcado). ' +
+          'Este é um re-dispatch para você EXECUTAR o próximo passo agora — não apenas planejar de novo.',
+      );
+      lines.push(`Motivo: ${context.continuationReason}`);
+    }
+
+    // US-CTX1 (EP-CTX/ADR-0040) — TENTATIVA ANTERIOR em re-dispatch (reclaim
+    // pós-crash M4 / continuação). Injeta erro e outcome anteriores para a AI
+    // não recomeçar "amnésica" após um crash. `null` na 1ª execução.
+    if (context.priorAttempt) {
+      lines.push('');
+      lines.push('## ⚠️ Tentativa anterior (re-dispatch) — leia antes de continuar');
+      lines.push(
+        'Esta story já esteve em execução e foi re-despachada (crash/reclaim ou continuação). ' +
+          'Use o que já foi tentado; NÃO reinicie do zero nem repita o mesmo erro.',
+      );
+      if (context.priorAttempt.lastOutcome) {
+        lines.push(`- Outcome da última iteração: ${context.priorAttempt.lastOutcome}`);
+      }
+      if (context.priorAttempt.lastError) {
+        lines.push(`- Último erro registrado: ${context.priorAttempt.lastError}`);
+      }
+    }
+
+    // US-CTX2 (EP-CTX/ADR-0040) — HANDOFF ESTRUTURADO das tasks das quais esta
+    // depende (irmãs concluídas). Herda changed_files/verification/dependencies/
+    // residual_risk do trabalho pai para não começar cega sobre o que já mudou.
+    if (context.parentHandoffs?.length) {
+      lines.push('');
+      lines.push('## 🔗 Handoff estruturado do trabalho anterior (tasks concluídas desta story):');
+      for (const h of context.parentHandoffs) {
+        const m = h.metadata;
+        lines.push('');
+        lines.push(`### ${h.key} — ${h.title}`);
+        if (m.changed_files?.length) {
+          lines.push(`- Arquivos alterados: ${m.changed_files.slice(0, 40).join(', ')}`);
+        }
+        if (m.verification) lines.push(`- Verificação: ${m.verification}`);
+        if (m.dependencies?.length) {
+          lines.push(`- Dependências: ${m.dependencies.slice(0, 20).join(', ')}`);
+        }
+        if (m.retry_notes) lines.push(`- Notas de retry: ${m.retry_notes}`);
+        if (m.residual_risk) lines.push(`- Risco residual: ${m.residual_risk}`);
       }
     }
 
