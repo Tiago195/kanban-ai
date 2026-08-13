@@ -134,6 +134,14 @@ export interface AgentRunResult {
   inputTokens?: number;
   outputTokens?: number;
   /**
+   * US-OBS2-5 (fatia mínima ex-OBS2-3) — proveniência de USO: identifica o
+   * PROVIDER que produziu esta telemetria de tokens (ex.: 'copilot', 'mock'),
+   * para que a contabilidade de tokens possa, no futuro, ser atribuída por
+   * provider. Opcional/retrocompatível: ausente = sem atribuição (zero mudança
+   * de comportamento). NÃO implica CostEvent/executionSegments (deferido).
+   */
+  provider?: string;
+  /**
    * BUG-A7: erro FATAL de infraestrutura (spawn falhou, modelo indisponível,
    * não autenticado, crash da CLI). Quando presente, esta "iteração" NÃO
    * representa trabalho da AI: o orchestrator deve escalar a humano e PARAR o

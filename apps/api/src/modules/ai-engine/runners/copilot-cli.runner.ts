@@ -243,6 +243,10 @@ export class CopilotCliRunner implements AgentRunner {
                     result.outputTokens = parsedTokens.outputTokens;
                   }
                 }
+                // US-OBS2-5: proveniência de uso — este runner é a Copilot CLI.
+                if (result.provider === undefined) {
+                  result.provider = 'copilot';
+                }
                 resolve(result);
                 return;
               }
@@ -253,6 +257,7 @@ export class CopilotCliRunner implements AgentRunner {
                   dodTouched: [],
                   nextStep: 'Revisar saída da CLI (nenhum result emitido)',
                   done: false,
+                  provider: 'copilot',
                 });
                 return;
               }

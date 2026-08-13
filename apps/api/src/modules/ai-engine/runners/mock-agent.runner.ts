@@ -95,6 +95,8 @@ export class MockAgentRunner implements AgentRunner {
       // LoopMetricsPanel exiba somas > 0 em dev/testes sem CLI real.
       inputTokens: partial.inputTokens ?? 1200,
       outputTokens: partial.outputTokens ?? 300,
+      // US-OBS2-5: proveniência de uso — este runner é o mock.
+      provider: 'mock',
       ...(partial.affectedFlows ? { affectedFlows: partial.affectedFlows } : {}),
       ...(partial.proposedDod ? { proposedDod: partial.proposedDod } : {}),
     });
