@@ -141,6 +141,14 @@ export interface AppConfig {
      */
     maxDerivedPerProblem: number;
     /**
+     * Loop-breaker de recorrência de bloqueio (EP-BLOCK / US-BLOCK4). Quantas
+     * recorrências CONSECUTIVAS da MESMA causa de bloqueio (cross-run) são
+     * toleradas antes de escalar a humano em vez de re-ciclar `blocked↔unblocked`.
+     * Contador durável em `AgentRuntimeState.consecutiveBlockCount`, resetado ao
+     * concluir a story. Default 2. `0` desliga. AGENT_MAX_CONSECUTIVE_BLOCKS.
+     */
+    maxConsecutiveBlocks: number;
+    /**
      * Gate de custo — orçamento de TEMPO por task. Soma de `durationMs` das
      * iterações da task; ao ultrapassar, o loop marca `needsHuman` (reason de
      * custo), para o auto-play graceful e emite `card.needs_human`.
@@ -452,6 +460,7 @@ export function loadConfig(): AppConfig {
       maxUnproductiveIterations: num(process.env.AGENT_MAX_UNPRODUCTIVE_ITERATIONS, 3),
       maxDerivedDepth: num(process.env.AGENT_MAX_DERIVED_DEPTH, 3),
       maxDerivedPerProblem: num(process.env.AGENT_MAX_DERIVED_PER_PROBLEM, 2),
+      maxConsecutiveBlocks: num(process.env.AGENT_MAX_CONSECUTIVE_BLOCKS, 2),
       maxTaskDurationMs: num(process.env.AGENT_MAX_TASK_DURATION_MS, 0),
       maxTaskTokens: num(process.env.AGENT_MAX_TASK_TOKENS, 0),
       serializeByRepo: process.env.AGENT_SERIALIZE_BY_REPO === 'true',

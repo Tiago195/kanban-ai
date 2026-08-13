@@ -107,8 +107,26 @@ export const WAKEUP_REASON = [
   'hitl_answered',
   'manual_step',
   'reconcile',
+  'blockers_resolved', // US-BLOCK3: todos os blockers (dependsOn) fecharam
+  'issue_unblock', // US-BLOCK2: owner=agent notificado para destravar
 ] as const;
 export type WakeupReason = (typeof WAKEUP_REASON)[number];
+
+/**
+ * EP-BLOCK / US-BLOCK1 (ADR-0039) — taxonomia typed de bloqueio. `null` no card
+ * = comportamento pré-BLOCK (bloqueio genérico), retrocompatível.
+ *
+ *  - dependency:  esperando uma dependência (`dependsOn`) fechar. AUTO-RESUMÍVEL,
+ *                 sem humano. Volta a "To Do"/`blocked-dep` e re-valida quando o
+ *                 blocker fecha. NÃO marca `needsHuman`.
+ *  - needs_input: esperando resposta humana (HITL). Marca `needsHuman`.
+ *  - capability:  gap de capacidade / falta ferramenta / cap esgotado. Marca
+ *                 `needsHuman` (permanente até intervenção).
+ *  - transient:   falha passageira (rede, rate-limit). Elegível a retry
+ *                 automático; NÃO marca `needsHuman` por si só.
+ */
+export const BLOCK_KIND = ['dependency', 'needs_input', 'capability', 'transient'] as const;
+export type BlockKind = (typeof BLOCK_KIND)[number];
 
 /** Modo de parada manual de uma sessão de agent. */
 export type StopMode = 'graceful' | 'hard';

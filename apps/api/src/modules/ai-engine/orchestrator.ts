@@ -1,14 +1,15 @@
 import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { StopMode } from '@kanban-ai/shared';
-import type { ExecState, AffectedFlow, LoopMetrics, WakeupReason } from '@kanban-ai/shared';
+import type { ExecState, AffectedFlow, LoopMetrics, WakeupReason, BlockKind, BlockedDescriptor } from '@kanban-ai/shared';
 import { isVerifiableEvidence, minimumArtifactSatisfied } from '@kanban-ai/shared';
 import type { ResultClass, CommitOutcome, StructuredEvidence } from '@kanban-ai/shared';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rm } from 'node:fs/promises';
 import { PrismaService } from '../../shared/db/prisma.service';
+import { Prisma } from '@prisma/client';
 import { APP_CONFIG, type AppConfig } from '../../shared/config/config';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
@@ -1229,6 +1230,10 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       where: { dependsOnId: taskId },
       select: { dependentId: true },
     });
+    // US-BLOCK3 — reverso do M3: acorda os dependentes cujo conjunto de blockers
+    // ficou totalmente resolvido. Roda ANTES do deleteMany abaixo, pois lê as
+    // arestas `TaskDependency` intactas para computar o `blockerSetHash`.
+    await this.wakeBlockersResolvedDependents(taskId);
     for (const { dependentId } of origins) {
       await this.prisma.taskDependency.deleteMany({
         where: { dependentId, dependsOnId: taskId },
@@ -1282,6 +1287,161 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       if (!this.isAutoRunning(storyId)) {
         await this.onStoryEnterInProgress(storyId);
       }
+    }
+  }
+
+  /**
+   * US-BLOCK3 — ponto de entrada público chamado pelo caminho de board/UI
+   * (`CardsService.move`) quando um card `cardId` chega numa coluna "Done".
+   * Espelha o gancho in-engine de `onTaskDone`: quando TODOS os blockers de um
+   * dependente fecham, acorda o bloqueado exatamente uma vez. Totalmente
+   * defensivo — uma falha aqui NUNCA pode derrubar o fluxo de mover card.
+   */
+  async onCardResolved(cardId: string): Promise<void> {
+    try {
+      await this.wakeBlockersResolvedDependents(cardId);
+    } catch (err) {
+      this.logger.warn(
+        `onCardResolved falhou (card=${cardId}) — segue: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * US-BLOCK3 (reverso do M3) — ao fechar `cardId`, para cada dependente
+   * (`TaskDependency where dependsOnId = cardId`) verifica se o conjunto INTEIRO
+   * de blockers dele ficou resolvido. Regras:
+   *  - Só `execState === 'done'` satisfaz um blocker; `cancelled`/qualquer outro
+   *    estado deixa a aresta ABERTA (a story permanece bloqueada) — reusa
+   *    `pendingDeps` (loop-helpers), que já trata só `done` como satisfação.
+   *  - Invariante 6: só acorda story em "In Progress".
+   *  - Idempotência: coalescing por story da WakeupQueue garante no-máx-1 wake
+   *    não-terminal; um `blockerSetHash` (hash ordenado dos `dependsOnId`
+   *    resolvidos) guardado no `stateJson` do `AgentRuntimeState` evita
+   *    re-disparar para o MESMO conjunto se a story voltar a bloquear por outra
+   *    causa (sem coluna nova).
+   */
+  private async wakeBlockersResolvedDependents(cardId: string): Promise<void> {
+    const edges = await this.prisma.taskDependency.findMany({
+      where: { dependsOnId: cardId },
+      select: { dependentId: true },
+    });
+    const seenStories = new Set<string>();
+    for (const { dependentId } of edges) {
+      const dependent = await this.loadTask(dependentId);
+      if (!dependent) continue;
+      // Conjunto de blockers do dependente (todas as arestas dependsOn dele).
+      if (dependent.dependsOn.length === 0) continue;
+      // `cancelled` NÃO satisfaz: só `done` (execState OU coluna "Done") resolve
+      // um blocker; qualquer outro estado deixa a aresta ABERTA.
+      const allResolved = await this.allBlockersResolved(dependent.dependsOn);
+      if (!allResolved) continue; // ainda bloqueado
+
+      const storyId = await this.resolveTaskStory(dependentId);
+      if (!storyId || seenStories.has(storyId)) continue;
+      seenStories.add(storyId);
+
+      // Invariante 6: só acorda story em In Progress.
+      if (!(await this.isStoryInProgress(storyId))) continue;
+
+      // blockerSetHash do conjunto resolvido — evita re-disparo p/ o MESMO set.
+      const hash = this.blockerSetHash(dependent.dependsOn);
+      if (await this.blockersAlreadyWaken(storyId, hash)) continue;
+
+      await this.log(
+        dependentId,
+        `blockers resolvidos (fechou ${cardId}) → acordando story ${storyId}`,
+      );
+      await this.enqueueWakeup(storyId, 'blockers_resolved');
+      await this.rememberBlockersWaken(storyId, hash);
+      // Garante o re-dispatch mesmo com a wakeup queue OFF (caminho durável é o
+      // preferido; este é o fallback in-process, idempotente).
+      if (!this.isAutoRunning(storyId)) {
+        await this.onStoryEnterInProgress(storyId);
+      }
+    }
+  }
+
+  /** Hash curto e ORDENADO dos ids de blockers de um conjunto (dedupe lógico). */
+  private blockerSetHash(dependsOnIds: string[]): string {
+    const canonical = [...new Set(dependsOnIds)].sort().join('|');
+    return createHash('sha1').update(canonical).digest('hex').slice(0, 12);
+  }
+
+  /**
+   * True SÓ se TODOS os blockers estão resolvidos. Um blocker está resolvido
+   * quando `execState === 'done'` OU está na coluna "Done" (board ou mini-kanban)
+   * — o caminho de board/UI move o card sem tocar `execState`. **`cancelled`
+   * (ou qualquer estado/coluna que não seja "Done") NÃO satisfaz**: deixa a
+   * aresta aberta.
+   */
+  private async allBlockersResolved(dependsOnIds: string[]): Promise<boolean> {
+    for (const id of dependsOnIds) {
+      const blocker = await this.prisma.card.findUnique({
+        where: { id },
+        select: {
+          execState: true,
+          boardColumn: { select: { title: true } },
+          taskColumn: { select: { title: true } },
+        },
+      });
+      if (!blocker) return false; // blocker ausente = aresta ainda aberta
+      const doneByState = fromPrismaExecState(blocker.execState) === 'done';
+      const doneByColumn =
+        blocker.boardColumn?.title?.trim().toLowerCase() === 'done' ||
+        blocker.taskColumn?.title?.trim().toLowerCase() === 'done';
+      if (!doneByState && !doneByColumn) return false;
+    }
+    return true;
+  }
+
+  /**
+   * US-BLOCK3 — leitura leve do último `blockerSetHash` já acordado, guardado no
+   * `stateJson` do `AgentRuntimeState` (chave `blockersResolvedHash`). Defensivo:
+   * na ausência da linha / JSON inválido, assume que ainda não acordou.
+   */
+  private async blockersAlreadyWaken(storyId: string, hash: string): Promise<boolean> {
+    try {
+      const row = await this.prisma.agentRuntimeState.findUnique({
+        where: { sessionId: storyId },
+        select: { stateJson: true },
+      });
+      if (!row) return false;
+      const state = JSON.parse(row.stateJson ?? '{}') as { blockersResolvedHash?: string };
+      return state.blockersResolvedHash === hash;
+    } catch {
+      return false;
+    }
+  }
+
+  /** US-BLOCK3 — persiste (merge) o `blockerSetHash` acordado no `stateJson`. */
+  private async rememberBlockersWaken(storyId: string, hash: string): Promise<void> {
+    try {
+      const row = await this.prisma.agentRuntimeState.findUnique({
+        where: { sessionId: storyId },
+        select: { stateJson: true },
+      });
+      let state: Record<string, unknown> = {};
+      if (row) {
+        try {
+          state = JSON.parse(row.stateJson ?? '{}') as Record<string, unknown>;
+        } catch {
+          state = {};
+        }
+      }
+      state.blockersResolvedHash = hash;
+      const stateJson = JSON.stringify(state);
+      await this.prisma.agentRuntimeState.upsert({
+        where: { sessionId: storyId },
+        update: { stateJson },
+        create: { sessionId: storyId, storyId, stateJson },
+      });
+    } catch (err) {
+      // Best-effort: sem o hash o pior caso é um wake extra (coalescido pela
+      // WakeupQueue). Nunca derruba o fluxo.
+      this.logger.warn(
+        `rememberBlockersWaken falhou (story=${storyId}) — segue: ${(err as Error).message}`,
+      );
     }
   }
 
@@ -1676,6 +1836,9 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
         `Story concluída — todas as tasks done. Promovida para ${targetCol.title}.`,
       );
 
+      // US-BLOCK4: fluxo feliz — zera o contador de recorrência de bloqueio.
+      await this.resetBlockRecurrence(storyId);
+
       // #10b: registrar resumo da story no épico pai (lastro cross-story).
       if (story.parentId) {
         await this.summarizeStoryToEpic(storyId, story.parentId);
@@ -2013,6 +2176,80 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * US-BLOCK2 (EP-BLOCK / ADR-0039) — roteia um card que entra em `blocked` por
+   * um {@link BlockedDescriptor} typed. Persiste o descriptor no card e decide o
+   * dono do unblock:
+   *
+   *  - `owner` = agentId  → enfileira **1** wake idempotente `issue_unblock` à
+   *    story. A idempotência vem do coalescing por story do
+   *    {@link WakeupQueueService} (no máx. 1 wake não-terminal por story) MAIS o
+   *    anti re-fire por `blockedOwnerNotifiedAt`: só notifica se o card ainda não
+   *    foi notificado NESTE bloqueio (campo null ou anterior à entrada em
+   *    blocked). Ao disparar, grava `blockedOwnerNotifiedAt = now`.
+   *  - `owner` = `'board'` OU descriptor ausente/malformado (prose-only) →
+   *    `needsHuman = true` (needs_attention humano). NÃO enfileira wake.
+   *
+   * Aditivo/retrocompatível: `Card.blocked`/`needsHuman` permanecem. Defensivo
+   * quanto à fila (nunca derruba o loop).
+   */
+  async routeBlockedCard(
+    cardId: string,
+    storyId: string,
+    descriptor: BlockedDescriptor | null | undefined,
+    blockedEnteredAt: Date = new Date(),
+  ): Promise<{ routedTo: 'agent' | 'human'; wakeEnqueued: boolean }> {
+    const owner = descriptor?.owner;
+    const action = descriptor?.action;
+    // Prose-only: descriptor ausente/malformado, ou dono = board => needsHuman.
+    if (
+      typeof owner !== 'string' ||
+      owner.length === 0 ||
+      typeof action !== 'string' ||
+      action.length === 0 ||
+      owner === 'board'
+    ) {
+      const reason =
+        owner === 'board'
+          ? action || 'Bloqueio direcionado ao board (humano).'
+          : 'Bloqueio sem descriptor typed (prose-only) — precisa de intervenção humana.';
+      await this.prisma.card.update({
+        where: { id: cardId },
+        data: {
+          blocked: true,
+          needsHuman: true,
+          needsHumanReason: reason,
+          blockedDescriptor: (descriptor ?? Prisma.JsonNull) as unknown as Prisma.InputJsonValue,
+        },
+      });
+      this.realtime.broadcast({ type: 'card.needs_human', taskId: cardId, storyId, reason });
+      return { routedTo: 'human', wakeEnqueued: false };
+    }
+
+    // owner = agentId → auto-notify por wake, anti re-fire por notifiedAt.
+    const current = await this.prisma.card.findUnique({
+      where: { id: cardId },
+      select: { blockedOwnerNotifiedAt: true },
+    });
+    const notifiedAt = current?.blockedOwnerNotifiedAt ?? null;
+    const alreadyNotified = notifiedAt != null && notifiedAt >= blockedEnteredAt;
+
+    await this.prisma.card.update({
+      where: { id: cardId },
+      data: {
+        blocked: true,
+        blockedDescriptor: descriptor as unknown as Prisma.InputJsonValue,
+        ...(alreadyNotified ? {} : { blockedOwnerNotifiedAt: new Date() }),
+      },
+    });
+
+    if (alreadyNotified) {
+      return { routedTo: 'agent', wakeEnqueued: false };
+    }
+    await this.enqueueWakeup(storyId, 'issue_unblock');
+    return { routedTo: 'agent', wakeEnqueued: true };
+  }
+
+  /**
    * Caminho de resgate ("needs human"): marca a task, para o auto-play graceful
    * e emite `card.needs_human`. Reusado pelo limite de falhas de validação
    * (#5), pelo gate de custo (#1) e pelo anti-thrash (#3).
@@ -2024,15 +2261,79 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
    * sem ter como responder/destravar. Com a pergunta sintética, `answerQuestion`
    * (caminho de resiliência) limpa `needsHuman` e retoma a iteração.
    */
+  /**
+   * EP-BLOCK / US-BLOCK4 — loop-breaker de recorrência de bloqueio (cross-run).
+   *
+   * Computa uma assinatura da causa do bloqueio (`blockKind` + hash curto do
+   * motivo) e a compara com a última causa registrada no `AgentRuntimeState`
+   * (durável, sobrevive a recovery/restart). Se a MESMA causa recorre, incrementa
+   * `consecutiveBlockCount`; se mudou, reseta o contador para 1. Retorna `true`
+   * quando o contador atinge `maxConsecutiveBlocks` (default 2, env
+   * `AGENT_MAX_CONSECUTIVE_BLOCKS`; `0` desliga) — sinal para o chamador escalar
+   * a humano em vez de re-ciclar `blocked↔unblocked`. Ver ADR-0039.
+   */
+  private async recordBlockRecurrence(
+    storyId: string,
+    kind: BlockKind,
+    reason: string,
+  ): Promise<boolean> {
+    const cap = this.config.agent.maxConsecutiveBlocks;
+    if (cap <= 0) return false; // gate desligado
+    const signature = `${kind}:${createHash('sha1').update(reason).digest('hex').slice(0, 12)}`;
+    try {
+      const prev = await this.prisma.agentRuntimeState.findUnique({
+        where: { storyId },
+        select: { lastBlockReason: true, consecutiveBlockCount: true },
+      });
+      const same = prev?.lastBlockReason === signature;
+      const nextCount = same ? (prev?.consecutiveBlockCount ?? 0) + 1 : 1;
+      // upsert defensivo: a linha de runtime pode ainda não existir para a story.
+      await this.prisma.agentRuntimeState.upsert({
+        where: { storyId },
+        create: {
+          sessionId: storyId,
+          storyId,
+          lastBlockReason: signature,
+          consecutiveBlockCount: nextCount,
+        },
+        update: { lastBlockReason: signature, consecutiveBlockCount: nextCount },
+      });
+      return nextCount >= cap;
+    } catch (err) {
+      this.logger.warn(
+        `recordBlockRecurrence falhou (story=${storyId}): ${(err as Error).message}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * US-BLOCK4 — zera o contador de recorrência ao CONCLUIR a story (fluxo feliz).
+   * Chamado de `promoteStory`. Idempotente e defensivo.
+   */
+  private async resetBlockRecurrence(storyId: string): Promise<void> {
+    try {
+      await this.prisma.agentRuntimeState.updateMany({
+        where: { storyId },
+        data: { consecutiveBlockCount: 0, lastBlockReason: null },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `resetBlockRecurrence falhou (story=${storyId}): ${(err as Error).message}`,
+      );
+    }
+  }
+
   private async escalateToHuman(
     taskId: string,
     storyId: string,
     reason: string,
     logMessage: string,
+    kind: BlockKind = 'capability',
   ): Promise<void> {
     await this.prisma.card.update({
       where: { id: taskId },
-      data: { needsHuman: true, needsHumanReason: reason },
+      data: { needsHuman: true, needsHumanReason: reason, blockKind: kind },
     });
 
     // Pergunta HITL sintética: dá ao humano um canal de resposta para destravar
@@ -2398,16 +2699,53 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
   private async setExecState(taskId: string, state: ExecState): Promise<void> {
     const current = await this.prisma.card.findUnique({
       where: { id: taskId },
-      select: { execState: true },
+      select: { execState: true, parentId: true },
     });
     if (fromPrismaExecState(current?.execState) === state) return;
+    // US-BLOCK1 (ADR-0039): blocked-dep é sempre um bloqueio de dependência.
+    // Ao sair de blocked-dep para outro estado, limpamos o blockKind de dependência.
+    // US-BLOCK2: ao SAIR de blocked-dep (unblock/resume/done), limpamos também o
+    // anti re-fire `blockedOwnerNotifiedAt` para que um bloqueio futuro possa
+    // notificar o owner de novo.
+    const enteringBlockedDep =
+      fromPrismaExecState(current?.execState) !== 'blocked-dep' && state === 'blocked-dep';
+    const leavingBlockedDep =
+      fromPrismaExecState(current?.execState) === 'blocked-dep' && state !== 'blocked-dep';
+    const blockKindPatch =
+      state === 'blocked-dep'
+        ? { blockKind: 'dependency' as BlockKind }
+        : leavingBlockedDep
+          ? { blockKind: null, blockedOwnerNotifiedAt: null }
+          : {};
     await this.prisma.card.update({
       where: { id: taskId },
-      data: { execState: toPrismaExecState(state) },
+      data: { execState: toPrismaExecState(state), ...blockKindPatch },
     });
     this.realtime.broadcast({ type: 'task.state.changed', taskId, execState: state });
     // #1/#3: espelhar o execState na coluna do mini-kanban da task.
     await this.moveTaskToColumnFor(taskId, state);
+
+    // US-BLOCK4 (ADR-0039): ao ENTRAR em blocked-dep, conta a recorrência da
+    // MESMA causa (assinatura = dependency + hash do taskId, estável para a
+    // mesma task). Se a task re-bloqueia pela dependência N vezes seguidas
+    // (ciclo blocked↔unblocked), escala a humano em vez de re-ciclar para sempre.
+    if (enteringBlockedDep) {
+      const storyId = current?.parentId ?? taskId;
+      const recurs = await this.recordBlockRecurrence(
+        storyId,
+        'dependency',
+        `dependency:${taskId}`,
+      );
+      if (recurs) {
+        await this.escalateToHuman(
+          taskId,
+          storyId,
+          'A task voltou a bloquear pela mesma dependência repetidas vezes (ciclo blocked↔unblocked).',
+          `US-BLOCK4: recorrência de bloqueio de dependência atingiu o limite (${this.config.agent.maxConsecutiveBlocks}) — escalando a humano.`,
+          'dependency',
+        );
+      }
+    }
   }
 
   /**

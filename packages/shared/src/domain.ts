@@ -9,6 +9,7 @@
  */
 
 import type {
+  BlockKind,
   CardType,
   ExecState,
   IterationPhase,
@@ -17,6 +18,22 @@ import type {
   StoryPoints,
   ValidationStrategy,
 } from './enums';
+
+/**
+ * Dono responsável por destravar um card bloqueado (EP-BLOCK / US-BLOCK2).
+ * Um `agentId` => auto-notify por wake; o literal `'board'` => needs_attention humano.
+ */
+export type BlockedOwner = string | 'board';
+
+/**
+ * Descriptor typed exigido ao mover um card para blocked (US-BLOCK2). `owner`
+ * roteia o unblock (agent => wake `issue_unblock`; `'board'` => needsHuman);
+ * `action` descreve em prosa curta o que precisa acontecer para destravar.
+ */
+export interface BlockedDescriptor {
+  owner: BlockedOwner;
+  action: string;
+}
 
 /** Item de checklist (usado no DOD). */
 export interface ChecklistItem {
@@ -183,6 +200,17 @@ export interface CardBase {
   needsHuman: boolean;
   /** Motivo do `needsHuman` (título do problema que esgotou as tentativas). */
   needsHumanReason: string | null;
+  /**
+   * EP-BLOCK / US-BLOCK1 — taxonomia typed do bloqueio corrente. `null`/ausente =
+   * bloqueio genérico (comportamento pré-BLOCK, retrocompatível). Ver `BlockKind`.
+   */
+  blockKind?: BlockKind | null;
+  /**
+   * EP-BLOCK / US-BLOCK2 — descriptor typed do bloqueio corrente (`{ owner, action }`).
+   * `null`/ausente = prose-only (sem descriptor) => needs_attention humano. Ver
+   * `BlockedDescriptor`.
+   */
+  blockedDescriptor?: BlockedDescriptor | null;
   /** Modelo de AI escolhido explicitamente para este card. null = herda do pai. */
   model: string | null;
   /**

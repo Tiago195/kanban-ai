@@ -30,6 +30,14 @@ enum ExecState {
   done
 }
 
+// EP-BLOCK / US-BLOCK1 (ADR-0039) — taxonomia typed de bloqueio.
+enum BlockKind {
+  dependency
+  needs_input
+  capability
+  transient
+}
+
 enum IterationPhase {
   reproduce
   analysis
@@ -58,6 +66,8 @@ enum WakeupReason {
   hitl_answered     // humano respondeu uma pergunta pendente
   manual_step       // "Rodar 1 iteração" / stepOnce
   reconcile         // re-enfileirado no boot a partir do board
+  blockers_resolved // EP-BLOCK/US-BLOCK3: dependência(s) fecharam → auto-wake
+  issue_unblock     // EP-BLOCK/US-BLOCK2: bloqueio de input resolvido pelo owner
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -174,6 +184,18 @@ model Card {
   // de validação (AGENT_MAX_VALIDATION_FAILURES). Flag/badge, não coluna nova.
   needsHuman       Boolean @default(false)
   needsHumanReason String?
+
+  // EP-BLOCK / US-BLOCK1 (ADR-0039) — taxonomia typed do bloqueio corrente.
+  // null = bloqueio genérico (comportamento pré-BLOCK, retrocompatível).
+  blockKind BlockKind?
+
+  // EP-BLOCK / US-BLOCK2 (ADR-0039) — descriptor typed do bloqueio ({ owner, action }).
+  // null = prose-only (sem descriptor) => needs_attention humano.
+  blockedDescriptor Json?
+
+  // Anti re-fire do wake de unblock (US-BLOCK2). Setado ao notificar o owner=agent;
+  // limpo quando o card sai de blocked (unblock/resume/done).
+  blockedOwnerNotifiedAt DateTime?
 
   // Modelo de AI para desenvolver este card. null = herda do pai
   // (task -> story -> epic -> board.defaultModel).
@@ -403,6 +425,15 @@ model AgentRuntimeState {
 
   /// Instante de expiração do lease (TTL + heartbeat). Null = sem claim.
   claimExpiresAt DateTime?
+
+  // ── Loop-breaker de recorrência de bloqueio (EP-BLOCK / US-BLOCK4) ────────
+  /// Recorrências CONSECUTIVAS da MESMA causa de bloqueio (cross-run, durável).
+  /// Zera ao concluir a story. Ver ADR-0039.
+  consecutiveBlockCount Int @default(0)
+
+  /// Assinatura da última causa de bloqueio (blockKind + hash curto do motivo).
+  /// null = nunca bloqueou / resetado. Ver ADR-0039.
+  lastBlockReason String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -613,6 +613,14 @@ export class CardsService {
       await this.emitEpicStatus(result.card.parentId);
     }
 
+    // US-BLOCK3 (EP-BLOCK) — caminho de board/UI para status→Done: quando um card
+    // chega numa coluna "Done" (task no mini-kanban ou story no board), acorda os
+    // dependentes cujo conjunto de blockers ficou totalmente resolvido (reverso
+    // do M3). Delegado ao orchestrator, que aplica invariante 6 + idempotência.
+    if (result.toColumn.title.trim().toLowerCase() === 'done') {
+      await this.orchestrator.onCardResolved(id);
+    }
+
     return this.findOne(id);
   }
 
