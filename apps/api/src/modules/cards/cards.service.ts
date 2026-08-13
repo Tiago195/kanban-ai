@@ -1,9 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { TASK_CREATION_COLUMNS, MISSING_REQUIRED_FIELDS } from '@kanban-ai/shared';
-import type { EpicDerivedStatus, MissingRequiredFieldsError } from '@kanban-ai/shared';
+import type { CardEventDTO, CardEventKind, EpicDerivedStatus, MissingRequiredFieldsError } from '@kanban-ai/shared';
 import type {
   AttachAssigneeDto,
   AttachLabelDto,
@@ -36,6 +36,8 @@ export interface EpicStatusView {
  */
 @Injectable()
 export class CardsService {
+  private readonly logger = new Logger(CardsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
@@ -376,6 +378,12 @@ export class CardsService {
 
     this.realtime.broadcast({ type: 'card.created', card: card as never });
 
+    await this.emitCardEvent(card.id, 'card_created', {
+      type: card.type,
+      key: card.key,
+      parentId: card.parentId ?? null,
+    });
+
     // BUG-09: quando uma task é adicionada a uma story que JÁ está em In Progress,
     // o loop engine precisa retomar — antes ele ficava parado (a story tinha 0
     // tasks quando entrou em In Progress, ou o auto-play já havia encerrado
@@ -591,6 +599,12 @@ export class CardsService {
       isTaskBoard: result.isTaskBoard,
     });
 
+    await this.emitCardEvent(id, 'card_moved', {
+      fromColumnId: result.fromColumnId,
+      toColumnId: dto.columnId,
+      isTaskBoard: result.isTaskBoard,
+    });
+
     // Story entrou em In Progress — evento dedicado (fundação p/ o loop engine).
     if (
       !result.isTaskBoard &&
@@ -599,6 +613,7 @@ export class CardsService {
       result.toColumn.title.trim().toLowerCase() === 'in progress'
     ) {
       this.realtime.broadcast({ type: 'story.entered_in_progress', storyId: id });
+      await this.emitCardEvent(id, 'story_entered_in_progress', { columnId: dto.columnId });
       // US-COLAB3: enfileira (coalesce) o wakeup durável ANTES de acordar direto.
       await this.orchestrator.enqueueWakeup(id, 'story_in_progress');
       // Acorda o loop engine (auto-play server-side).
@@ -656,6 +671,85 @@ export class CardsService {
       done: derived.done,
       total: derived.total,
     });
+
+    await this.emitCardEvent(epicId, 'epic_status_derived', {
+      status: derived.status,
+      done: derived.done,
+      total: derived.total,
+    });
+  }
+
+  /**
+   * US-OBS2-2 — Anexa uma linha ao log tipado e APPEND-ONLY `CardEvent`. Espelha
+   * as transições que já disparam eventos WS, mas de forma ESTRUTURADA e
+   * persistida (fonte de replay/tail incremental). É best-effort na borda: uma
+   * falha ao gravar o log NÃO deve corromper o estado nem derrubar a request —
+   * logamos e seguimos, como fazem os writes de `Activity`.
+   */
+  private async emitCardEvent(
+    cardId: string,
+    kind: CardEventKind,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.prisma.cardEvent.create({
+        data: { cardId, kind, payload: payload as Prisma.InputJsonValue },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Falha ao gravar CardEvent(kind=${kind}, cardId=${cardId}): ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * US-OBS2-2 — Tail incremental do log de eventos de um card. Retorna os eventos
+   * APÓS `since` (cursor por id), em ordem cronológica ascendente, com um limite
+   * são. É o que um webhook/consumidor externo faz polling: guarda o último `id`
+   * e o passa como `since` na próxima chamada. `since` ausente = do começo.
+   */
+  async listEvents(
+    cardId: string,
+    opts: { since?: string; limit?: number } = {},
+  ): Promise<CardEventDTO[]> {
+    const card = await this.prisma.card.findUnique({
+      where: { id: cardId },
+      select: { id: true },
+    });
+    if (!card) throw new NotFoundException('card inexistente');
+
+    const limit = Math.max(1, Math.min(opts.limit ?? 100, 500));
+
+    let afterTs: Date | undefined;
+    if (opts.since) {
+      const cursor = await this.prisma.cardEvent.findUnique({
+        where: { id: opts.since },
+        select: { ts: true, cardId: true },
+      });
+      // Cursor precisa existir e pertencer ao mesmo card — do contrário 400,
+      // para o consumidor detectar um cursor inválido em vez de receber tudo.
+      if (!cursor || cursor.cardId !== cardId) {
+        throw new BadRequestException('cursor `since` inválido para este card');
+      }
+      afterTs = cursor.ts;
+    }
+
+    const rows = await this.prisma.cardEvent.findMany({
+      where: {
+        cardId,
+        ...(afterTs ? { ts: { gt: afterTs } } : {}),
+      },
+      orderBy: [{ ts: 'asc' }, { id: 'asc' }],
+      take: limit,
+    });
+
+    return rows.map((r) => ({
+      id: r.id,
+      cardId: r.cardId,
+      kind: r.kind as CardEventKind,
+      payload: r.payload,
+      ts: r.ts.toISOString(),
+    }));
   }
 
   /** Edita campos de um card e emite `card.updated`. */
@@ -671,25 +765,25 @@ export class CardsService {
       await this.validateLoopType(card.boardId, dto.loopType);
     }
 
-    await this.prisma.card.update({
-      where: { id },
-      data: {
-        ...(dto.title !== undefined ? { title: dto.title } : {}),
-        ...(dto.description !== undefined ? { description: dto.description } : {}),
-        ...(dto.points !== undefined ? { points: dto.points } : {}),
-        ...(dto.blocked !== undefined ? { blocked: dto.blocked } : {}),
-        ...(dto.aiSummary !== undefined ? { aiSummary: dto.aiSummary } : {}),
-        ...(dto.aiProject !== undefined ? { aiProject: dto.aiProject } : {}),
-        ...(dto.aiNotes !== undefined ? { aiNotes: dto.aiNotes } : {}),
-        ...(dto.model !== undefined ? { model: dto.model } : {}),
-        ...(dto.loopType !== undefined ? { loopType: dto.loopType } : {}),
-        ...(dto.priority !== undefined ? { priority: dto.priority } : {}),
-        ...(dto.startInPlanMode !== undefined ? { startInPlanMode: dto.startInPlanMode } : {}),
-      },
-    });
+    const data: Prisma.CardUpdateInput = {
+      ...(dto.title !== undefined ? { title: dto.title } : {}),
+      ...(dto.description !== undefined ? { description: dto.description } : {}),
+      ...(dto.points !== undefined ? { points: dto.points } : {}),
+      ...(dto.blocked !== undefined ? { blocked: dto.blocked } : {}),
+      ...(dto.aiSummary !== undefined ? { aiSummary: dto.aiSummary } : {}),
+      ...(dto.aiProject !== undefined ? { aiProject: dto.aiProject } : {}),
+      ...(dto.aiNotes !== undefined ? { aiNotes: dto.aiNotes } : {}),
+      ...(dto.model !== undefined ? { model: dto.model } : {}),
+      ...(dto.loopType !== undefined ? { loopType: dto.loopType } : {}),
+      ...(dto.priority !== undefined ? { priority: dto.priority } : {}),
+      ...(dto.startInPlanMode !== undefined ? { startInPlanMode: dto.startInPlanMode } : {}),
+    };
+    await this.prisma.card.update({ where: { id }, data });
 
     const full = await this.findOne(id);
     this.realtime.broadcast({ type: 'card.updated', cardId: id, card: full as never });
+
+    await this.emitCardEvent(id, 'card_updated', { fields: Object.keys(data) });
     return full;
   }
 

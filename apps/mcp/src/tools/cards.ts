@@ -76,6 +76,43 @@ export function registerCardTools(server: McpServer, client: KanbanClient): void
 
   registerTool(
     server,
+    'list_card_events',
+    [
+      'US-OBS2-2 — Lê o LOG TIPADO E APPEND-ONLY de transições de um card',
+      '(GET /cards/:id/events). Cada evento é `{ id, cardId, kind, payload, ts }`, com',
+      '`kind` ∈ card_created | card_updated | card_moved | story_entered_in_progress |',
+      'epic_status_derived. É observabilidade estruturada (coexiste com as `activities`',
+      'de texto livre) — NÃO reintroduz DOR/acceptance.',
+      'TAIL INCREMENTAL: os eventos vêm em ordem cronológica ASCENDENTE; guarde o `id`',
+      'do último e passe-o como `since` na próxima chamada para receber só o que veio',
+      'depois. Use `limit` para o tamanho da página (default 100, teto 500).',
+    ].join(' '),
+    {
+      id: z.string().uuid(),
+      since: z
+        .string()
+        .uuid()
+        .optional()
+        .describe('Cursor: id do último evento já visto. Ausente = desde o começo.'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe('Tamanho da página (default 100).'),
+    },
+    async (args) =>
+      ok(
+        await client.get(`/cards/${args.id}/events`, {
+          since: args.since,
+          limit: args.limit,
+        }),
+      ),
+  );
+
+  registerTool(
+    server,
     'create_card',
     [
       'Cria um card (POST /cards). Hierarquia Epic → Story → Task via `parentId`.',

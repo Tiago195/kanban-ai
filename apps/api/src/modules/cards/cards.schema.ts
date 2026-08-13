@@ -159,3 +159,16 @@ export const createDependencySchema = z.object({
 });
 
 export type CreateDependencyDto = z.infer<typeof createDependencySchema>;
+
+/**
+ * US-OBS2-2 — Query do tail incremental do log de eventos de um card
+ * (`GET /cards/:id/events`). `since` é o cursor por id (o último evento já visto);
+ * `limit` limita a página (default 100, teto 500).
+ */
+export const listCardEventsQuerySchema = z.object({
+  /** Cursor por id: retorna só eventos APÓS este id. Ausente = do começo. */
+  since: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+
+export type ListCardEventsQueryDto = z.infer<typeof listCardEventsQuerySchema>;

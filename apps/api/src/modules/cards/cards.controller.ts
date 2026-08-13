@@ -20,6 +20,7 @@ import {
   createDodItemSchema,
   createFlowSchema,
   listCardsQuerySchema,
+  listCardEventsQuerySchema,
   moveCardSchema,
   updateCardSchema,
   updateDodItemSchema,
@@ -31,6 +32,7 @@ import {
   type CreateDodItemDto,
   type CreateFlowDto,
   type ListCardsQueryDto,
+  type ListCardEventsQueryDto,
   type MoveCardDto,
   type UpdateCardDto,
   type UpdateDodItemDto,
@@ -50,6 +52,15 @@ export class CardsController {
   @Get('cards/:id')
   findOne(@Param('id') id: string) {
     return this.cards.findOne(id);
+  }
+
+  // ── US-OBS2-2: tail incremental do log tipado de eventos do card ──
+  @Get('cards/:id/events')
+  listEvents(
+    @Param('id') id: string,
+    @Query(new ZodValidationPipe(listCardEventsQuerySchema)) query: ListCardEventsQueryDto,
+  ) {
+    return this.cards.listEvents(id, query);
   }
 
   @Post('cards')
