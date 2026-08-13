@@ -11,6 +11,7 @@ import type {
   CreateCardDto,
   CreateDodItemDto,
   CreateFlowDto,
+  FleetDashboard,
   IterationPhase,
   LoopMetrics,
   MoveCardDto,
@@ -312,6 +313,11 @@ export const apiClient = {
   /** #8: métricas de custo & qualidade do loop de uma story (agregadas). */
   getLoopMetrics(storyId: string): Promise<LoopMetrics> {
     return request<LoopMetrics>(`/cards/${storyId}/loop/metrics`);
+  },
+
+  /** US-OBS1: read-model agregado da frota (GET /dashboard). */
+  getFleetDashboard(): Promise<FleetDashboard> {
+    return request<FleetDashboard>("/dashboard");
   },
 
   stepLoop(storyId: string): Promise<{ ran: boolean }> {

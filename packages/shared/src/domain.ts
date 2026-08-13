@@ -406,6 +406,52 @@ export function minimumArtifactSatisfied(
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// US-OBS1 — Read-model agregado da frota (GET /dashboard)
+//
+// Contratos COMPARTILHADOS api↔web. São read-only e NUNCA carregam segredos
+// (path do repo-alvo `aiProject`, env, credenciais ou transcript bruto).
+// ─────────────────────────────────────────────────────────────
+
+/** Contagem de cards por coluna do board (frota). Compartilhado api↔web. */
+export interface FleetColumnCount {
+  column: string;   // um valor de BOARD_COLUMNS
+  epics: number;
+  stories: number;
+  tasks: number;
+  total: number;
+}
+
+/** Story em "In Progress" sem progresso recente (heurística de staleness). */
+export interface FleetStaleStory {
+  storyId: string;
+  key: string;                 // US-...
+  title: string;
+  execState: string;           // ExecState em runtime (pode vir 'blocked-dep')
+  lastIterationAt: string | null; // ISO; null se nunca iterou
+  staleMinutes: number;        // minutos desde a última iteração (ou entrada In Progress)
+}
+
+/** Burn/cost agregado da frota. NUNCA inclui segredos (path/env/token). */
+export interface FleetCostSummary {
+  activeStories: number;       // stories com loop ativo (In Progress)
+  totalIterations: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  derivedTaskRate: number;     // média ponderada por iterações
+  okIterationRate: number;     // média ponderada por iterações
+}
+
+/** Resposta de GET /dashboard. Read-model agregado, sem segredos. */
+export interface FleetDashboard {
+  generatedAt: string;         // ISO
+  columns: FleetColumnCount[]; // ordenado como BOARD_COLUMNS
+  staleStories: FleetStaleStory[];
+  cost: FleetCostSummary;
+}
+
+// ─────────────────────────────────────────────────────────────
+
 /**
  * Identidade ESTÁVEL de um agent da colmeia, derivada da sessão + story em que
  * ele trabalha. É o handle que amarra tudo o que um agent faz na memória viva:

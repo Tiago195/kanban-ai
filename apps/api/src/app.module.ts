@@ -13,6 +13,7 @@ import { ModelsModule } from './modules/models/models.module';
 import { AiEngineModule } from './modules/ai-engine/ai-engine.module';
 import { BacklogChatModule } from './modules/backlog-chat/backlog-chat.module';
 import { MemoryModule } from './modules/memory/memory.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { MemoryModule } from './modules/memory/memory.module';
     AiEngineModule,
     BacklogChatModule,
     MemoryModule,
+    DashboardModule,
   ],
 })
 export class AppModule {}

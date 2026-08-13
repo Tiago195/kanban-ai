@@ -257,6 +257,17 @@ export interface AppConfig {
      */
     worktreePreservePatch: boolean;
   };
+  /**
+   * US-OBS1 — configuração do dashboard de frota (`GET /dashboard`).
+   */
+  dashboard: {
+    /**
+     * Threshold (minutos) acima do qual uma story `In Progress` sem iteração
+     * recente é considerada "stale" no dashboard. Lido de
+     * `DASHBOARD_STALE_MINUTES`. Default `30`.
+     */
+    staleMinutes: number;
+  };
 }
 
 function num(value: string | undefined, fallback: number): number {
@@ -356,6 +367,9 @@ export function loadConfig(): AppConfig {
       worktreeMirrorIgnored: process.env.AGENT_WORKTREE_MIRROR_IGNORED !== 'false',
       worktreeInitSubmodules: process.env.AGENT_WORKTREE_INIT_SUBMODULES !== 'false',
       worktreePreservePatch: process.env.AGENT_WORKTREE_PRESERVE_PATCH !== 'false',
+    },
+    dashboard: {
+      staleMinutes: num(process.env.DASHBOARD_STALE_MINUTES, 30),
     },
   };
 }
