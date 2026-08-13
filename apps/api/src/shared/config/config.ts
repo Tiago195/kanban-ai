@@ -226,6 +226,36 @@ export interface AppConfig {
      * (`true` liga).
      */
     wakeupQueueEnabled: boolean;
+    /**
+     * US-OBS2 (ADR-0035, refina ADR-0008) — worktree ISOLADO por execução.
+     * Quando `true`, `resolveWorkdir` cria um `git worktree add` dedicado (branch
+     * `kanban-ai/<key>`) e `cleanupWorktree` roda `git worktree remove` só contra
+     * esse worktree (nunca contra o repo-alvo). Off por default = comportamento
+     * legado (agent coda direto no working tree do repo-alvo). Só têm efeito com
+     * a flag ligada. Env: AGENT_WORKTREE_ISOLATED (`true` liga).
+     */
+    worktreeIsolated: boolean;
+    /**
+     * US-OBS2 — ao criar o worktree isolado, espelha paths ignorados pesados
+     * (ex.: node_modules) do repo-alvo via SYMLINK (barato). Default `true`; só
+     * atua com `worktreeIsolated=true`. Env: AGENT_WORKTREE_MIRROR_IGNORED
+     * (`false` desliga).
+     */
+    worktreeMirrorIgnored: boolean;
+    /**
+     * US-OBS2 — ao criar o worktree isolado, roda
+     * `git submodule update --init --recursive`. Default `true`; só atua com
+     * `worktreeIsolated=true`. Env: AGENT_WORKTREE_INIT_SUBMODULES (`false`
+     * desliga).
+     */
+    worktreeInitSubmodules: boolean;
+    /**
+     * US-OBS2 — ao remover o worktree (trash/restart), captura o patch
+     * não-commitado para reaplicar numa recriação futura. Default `true`; só
+     * atua com `worktreeIsolated=true`. Env: AGENT_WORKTREE_PRESERVE_PATCH
+     * (`false` desliga).
+     */
+    worktreePreservePatch: boolean;
   };
 }
 
@@ -322,6 +352,10 @@ export function loadConfig(): AppConfig {
       claimTtlMs: num(process.env.AGENT_CLAIM_TTL_MS, 300_000),
       autostartDependents: process.env.AGENT_AUTOSTART_DEPENDENTS === 'true',
       wakeupQueueEnabled: process.env.AGENT_WAKEUP_QUEUE_ENABLED === 'true',
+      worktreeIsolated: process.env.AGENT_WORKTREE_ISOLATED === 'true',
+      worktreeMirrorIgnored: process.env.AGENT_WORKTREE_MIRROR_IGNORED !== 'false',
+      worktreeInitSubmodules: process.env.AGENT_WORKTREE_INIT_SUBMODULES !== 'false',
+      worktreePreservePatch: process.env.AGENT_WORKTREE_PRESERVE_PATCH !== 'false',
     },
   };
 }

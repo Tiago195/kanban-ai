@@ -136,3 +136,46 @@ test('loadConfig: intervalos inválidos caem no default', () => {
     }),
   );
 });
+
+// --- US-OBS2 (ADR-0035): flags do worktree isolado resiliente ---
+
+test('loadConfig: worktree flags têm defaults corretos (off/isolated, on/resto)', () => {
+  withEnv('AGENT_WORKTREE_ISOLATED', undefined, () =>
+    withEnv('AGENT_WORKTREE_MIRROR_IGNORED', undefined, () =>
+      withEnv('AGENT_WORKTREE_INIT_SUBMODULES', undefined, () =>
+        withEnv('AGENT_WORKTREE_PRESERVE_PATCH', undefined, () => {
+          const { agent } = loadConfig();
+          assert.equal(agent.worktreeIsolated, false, 'isolated default OFF (retrocompat)');
+          assert.equal(agent.worktreeMirrorIgnored, true);
+          assert.equal(agent.worktreeInitSubmodules, true);
+          assert.equal(agent.worktreePreservePatch, true);
+        }),
+      ),
+    ),
+  );
+});
+
+test('loadConfig: AGENT_WORKTREE_ISOLATED=true liga o worktree isolado', () => {
+  withEnv('AGENT_WORKTREE_ISOLATED', 'true', () => {
+    assert.equal(loadConfig().agent.worktreeIsolated, true);
+  });
+});
+
+test('loadConfig: AGENT_WORKTREE_ISOLATED só liga com o literal "true"', () => {
+  withEnv('AGENT_WORKTREE_ISOLATED', '1', () => {
+    assert.equal(loadConfig().agent.worktreeIsolated, false);
+  });
+});
+
+test('loadConfig: MIRROR/INIT/PRESERVE desligam com o literal "false"', () => {
+  withEnv('AGENT_WORKTREE_MIRROR_IGNORED', 'false', () =>
+    withEnv('AGENT_WORKTREE_INIT_SUBMODULES', 'false', () =>
+      withEnv('AGENT_WORKTREE_PRESERVE_PATCH', 'false', () => {
+        const { agent } = loadConfig();
+        assert.equal(agent.worktreeMirrorIgnored, false);
+        assert.equal(agent.worktreeInitSubmodules, false);
+        assert.equal(agent.worktreePreservePatch, false);
+      }),
+    ),
+  );
+});

@@ -9,6 +9,58 @@ type CommandResult = {
   stderr: string;
 };
 
+/**
+ * US-OBS2 (ADR-0035, refina ADR-0008) — política de worktree resiliente. As
+ * funções abaixo são PURAS (sem I/O) e decidem, a partir da config, o que o
+ * caminho de criação do worktree deve materializar. São exercitadas por specs
+ * de unidade independentemente do worktree real existir, e reusadas pelo fluxo
+ * de `resolveWorkdir` quando `worktreeIsolated=true`.
+ */
+export interface WorktreePolicy {
+  /** usa `git worktree add` por execução (senão, roda direto no repo-alvo). */
+  isolated: boolean;
+  /** espelha paths ignorados pesados (ex.: node_modules) via symlink. */
+  mirrorIgnoredPaths: boolean;
+  /** roda `git submodule update --init --recursive` no worktree. */
+  initSubmodules: boolean;
+  /** captura/reaplica patch não-commitado ao trash/restart. */
+  preservePatchOnTrash: boolean;
+}
+
+/** Deriva a `WorktreePolicy` das flags de config (função pura, testável). */
+export function resolveWorktreePolicy(config: AppConfig): WorktreePolicy {
+  const agent = config.agent;
+  return {
+    isolated: agent.worktreeIsolated,
+    mirrorIgnoredPaths: agent.worktreeMirrorIgnored,
+    initSubmodules: agent.worktreeInitSubmodules,
+    preservePatchOnTrash: agent.worktreePreservePatch,
+  };
+}
+
+/**
+ * Decide se um path ignorado deve ser ESPELHADO (symlink) para o worktree. Puro:
+ * só materializa quando a política pede e o candidato é um diretório "pesado"
+ * conhecido (node_modules, .venv, etc.) ou explicitamente marcado como ignorado.
+ * Nunca espelha `.git` nem paths que escapam do repo.
+ */
+export function shouldMirrorIgnoredPath(
+  policy: WorktreePolicy,
+  relPath: string,
+): boolean {
+  if (!policy.isolated || !policy.mirrorIgnoredPaths) return false;
+  const normalized = relPath.split(path.sep).join('/').replace(/^\.\//, '').replace(/\/+$/, '');
+  if (normalized.length === 0) return false;
+  if (normalized === '.git' || normalized.startsWith('.git/')) return false;
+  if (normalized.includes('..')) return false;
+  return true;
+}
+
+/** Puro: nome canônico do branch de execução para uma key sanitizada. */
+export function executionBranchName(safeKey: string): string {
+  return `kanban-ai/${safeKey}`;
+}
+
 /** #1: resultado de um script de validação rodado no worktree. */
 export interface ProjectCheckResult {
   /** nome do script npm (test/build/lint). */
@@ -31,6 +83,21 @@ export class WorkspaceService {
   private readonly fallbackDirsByKey = new Map<string, string>();
   /** Repo-alvo (aiProject) associado a cada key, para limpar o worktree certo. */
   private readonly targetRepoByKey = new Map<string, string>();
+  /**
+   * US-OBS2: worktree isolado criado para cada key (quando `worktreeIsolated`).
+   * Guarda o path do worktree e o repo-alvo do qual foi derivado, para o
+   * `cleanupWorktree` rodar `git worktree remove` SÓ contra worktrees que ESTE
+   * serviço criou (nunca contra o repo-alvo direto).
+   */
+  private readonly isolatedWorktreeByKey = new Map<
+    string,
+    { worktreePath: string; targetRepo: string; branch: string }
+  >();
+  /**
+   * US-OBS2 (PR-4): patch não-commitado capturado ao remover um worktree, para
+   * reaplicar na recriação (patch-preserve entre restarts). Chave = safeKey.
+   */
+  private readonly preservedPatchByKey = new Map<string, string>();
 
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
@@ -90,10 +157,239 @@ export class WorkspaceService {
     // houver commits.
     await this.ensureInitialCommit(resolvedTarget);
 
-    this.logger.log(
-      `workdir do agent resolvido para o repo-alvo (sem worktree): ${resolvedTarget} (key=${safeKey})`,
+    const policy = resolveWorktreePolicy(this.config);
+
+    // US-OBS2 (ADR-0035, refina ADR-0008): quando o worktree isolado está
+    // LIGADO, o agent trabalha num `git worktree` dedicado por execução — nunca
+    // no working tree do repo-alvo. Fallback EXATO ao comportamento legado
+    // (retornar o próprio repo-alvo) quando desligado, garantindo retrocompat.
+    if (!policy.isolated) {
+      this.logger.log(
+        `workdir do agent resolvido para o repo-alvo (sem worktree): ${resolvedTarget} (key=${safeKey})`,
+      );
+      return resolvedTarget;
+    }
+
+    const worktreePath = await this.createIsolatedWorktree(
+      safeKey,
+      resolvedTarget,
+      policy,
     );
-    return resolvedTarget;
+    this.logger.log(
+      `workdir do agent resolvido para worktree ISOLADO: ${worktreePath} ` +
+        `(key=${safeKey}, target=${resolvedTarget})`,
+    );
+    return worktreePath;
+  }
+
+  /**
+   * US-OBS2 (PR-0): cria (ou reaproveita) um worktree git isolado para a `key`,
+   * derivado de `targetRepo`, e retorna seu caminho absoluto. Cria um branch de
+   * execução `kanban-ai/<safeKey>` a partir do HEAD do repo-alvo. Todo o git é
+   * do ENGINE (ADR-0008): o agent nunca roda git. Mantém caminhos absolutos
+   * (ADR-0019). PR-2 (mirror ignored paths), PR-3 (submodules) e PR-4
+   * (patch-preserve) são aplicados aqui, atrás das respectivas flags.
+   */
+  private async createIsolatedWorktree(
+    safeKey: string,
+    targetRepo: string,
+    policy: WorktreePolicy,
+  ): Promise<string> {
+    // Reaproveita um worktree já criado para a mesma key (iterações da mesma
+    // story reusam o mesmo isolamento em vez de recriar).
+    const existing = this.isolatedWorktreeByKey.get(safeKey);
+    if (existing && (await this.pathExists(existing.worktreePath))) {
+      return existing.worktreePath;
+    }
+
+    const base = path.resolve(this.config.agent.workspacesDir);
+    await fs.mkdir(base, { recursive: true });
+    const worktreePath = path.join(base, safeKey);
+    const branch = executionBranchName(safeKey);
+
+    // Limpeza defensiva: se sobrou um worktree órfão desse path (restart), o
+    // `git worktree add` falharia. Removemos o registro e o diretório antes.
+    await this.pruneStaleWorktree(targetRepo, worktreePath);
+
+    // Cria o branch de execução (idempotente: se já existir, reusa). `-B` força
+    // o branch para o HEAD atual; usamos `add -B` que cria/reseta o branch.
+    await this.runGit(
+      ['worktree', 'add', '-B', branch, worktreePath, 'HEAD'],
+      targetRepo,
+    );
+
+    this.isolatedWorktreeByKey.set(safeKey, { worktreePath, targetRepo, branch });
+
+    // PR-2: espelha paths ignorados pesados (node_modules, etc.) via symlink.
+    if (policy.mirrorIgnoredPaths) {
+      await this.mirrorIgnoredPaths(targetRepo, worktreePath, policy);
+    }
+
+    // PR-3: inicializa submódulos no worktree.
+    if (policy.initSubmodules) {
+      await this.initSubmodules(worktreePath);
+    }
+
+    // PR-4: reaplica um patch preservado de uma execução anterior (restart).
+    if (policy.preservePatchOnTrash) {
+      await this.reapplyPreservedPatch(safeKey, worktreePath);
+    }
+
+    return worktreePath;
+  }
+
+  /**
+   * PR-2: materializa, DENTRO do worktree, os paths ignorados pesados do
+   * repo-alvo via SYMLINK (barato — não copia). Lê `.gitignore` do repo-alvo e
+   * cria links para as entradas de topo que existem como diretório no alvo e
+   * que a política aprova (`shouldMirrorIgnoredPath`). Best-effort: qualquer
+   * falha por entrada é logada e ignorada (nunca derruba a criação do worktree).
+   */
+  private async mirrorIgnoredPaths(
+    targetRepo: string,
+    worktreePath: string,
+    policy: WorktreePolicy,
+  ): Promise<void> {
+    const candidates = await this.readTopLevelIgnoredDirs(targetRepo);
+    for (const rel of candidates) {
+      if (!shouldMirrorIgnoredPath(policy, rel)) continue;
+      const source = path.join(targetRepo, rel);
+      const linkPath = path.join(worktreePath, rel);
+      try {
+        if (!(await this.isDirectory(source))) continue;
+        // Não sobrescreve algo já presente no worktree (ex.: versionado).
+        if (await this.pathExists(linkPath)) continue;
+        await fs.mkdir(path.dirname(linkPath), { recursive: true });
+        await fs.symlink(source, linkPath, 'dir');
+        this.logger.log(`mirror (symlink) de ignored path: ${rel} → ${source}`);
+      } catch (error: unknown) {
+        this.logger.warn(
+          `Falha ao espelhar ignored path ${rel}: ${this.extractErrorMessage(error)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Lê entradas de topo do `.gitignore` do repo-alvo que sejam diretórios,
+   * normalizadas para nomes relativos simples (ex.: `node_modules`, `.venv`).
+   * Não interpreta globs complexos — pega entradas simples de topo, que cobrem
+   * o caso pesado (node_modules) alvo do PR-2. Vazio se não houver `.gitignore`.
+   */
+  private async readTopLevelIgnoredDirs(targetRepo: string): Promise<string[]> {
+    let raw: string;
+    try {
+      raw = await fs.readFile(path.join(targetRepo, '.gitignore'), 'utf8');
+    } catch {
+      return [];
+    }
+    const out = new Set<string>();
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
+      if (trimmed.startsWith('!')) continue; // negação — ignora
+      // Só entradas de topo simples (sem `/` interno, sem glob).
+      const name = trimmed.replace(/\/+$/, '');
+      if (name.includes('/') || name.includes('*') || name.includes('?')) continue;
+      if (name.startsWith('.git')) continue;
+      out.add(name);
+    }
+    return [...out];
+  }
+
+  /** PR-3: inicializa submódulos no worktree (best-effort, não bloqueia). */
+  private async initSubmodules(worktreePath: string): Promise<void> {
+    try {
+      await this.runGit(['submodule', 'update', '--init', '--recursive'], worktreePath);
+      this.logger.log(`submódulos inicializados no worktree: ${worktreePath}`);
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Falha ao inicializar submódulos em ${worktreePath}: ${this.extractErrorMessage(error)}`,
+      );
+    }
+  }
+
+  /**
+   * PR-4: se há um patch preservado para esta key (capturado no cleanup de uma
+   * execução anterior — restart), reaplica-o no worktree recriado via
+   * `git apply`. Best-effort e idempotente-ish: em falha loga e segue (o
+   * trabalho não commitado seria refeito, mas o loop não quebra).
+   */
+  private async reapplyPreservedPatch(safeKey: string, worktreePath: string): Promise<void> {
+    const patch = this.preservedPatchByKey.get(safeKey);
+    if (!patch || patch.trim().length === 0) return;
+    try {
+      await this.applyPatch(worktreePath, patch);
+      this.logger.log(`patch preservado reaplicado no worktree: ${worktreePath}`);
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Falha ao reaplicar patch preservado em ${worktreePath}: ${this.extractErrorMessage(error)}`,
+      );
+    } finally {
+      this.preservedPatchByKey.delete(safeKey);
+    }
+  }
+
+  /** Aplica um unified diff no worktree via `git apply` (stdin). */
+  private applyPatch(worktreePath: string, patch: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const child = execFile(
+        'git',
+        ['apply', '--whitespace=nowarn', '-'],
+        { cwd: worktreePath, encoding: 'utf8', timeout: 15_000 },
+        (error, _stdout, stderr) => {
+          if (error) {
+            reject(new Error(`git apply falhou: ${stderr || error.message}`));
+            return;
+          }
+          resolve();
+        },
+      );
+      child.stdin?.end(patch);
+    });
+  }
+
+  /**
+   * PR-4: captura o patch não-commitado do worktree (git é do ENGINE, ADR-0008)
+   * como unified diff, para preservar entre restart. Retorna '' se não houver
+   * worktree isolado, não houver mudanças, ou em falha.
+   */
+  private async captureWorktreePatch(worktreePath: string): Promise<string> {
+    const run = (args: string[]): Promise<string> =>
+      new Promise<string>((resolve) => {
+        execFile(
+          'git',
+          args,
+          { cwd: worktreePath, encoding: 'utf8', timeout: 15_000, maxBuffer: 20 * 1024 * 1024 },
+          (error, stdout) => resolve(error ? '' : stdout ?? ''),
+        );
+      });
+    // `-N` faz arquivos novos aparecerem no diff sem alterar conteúdo.
+    await run(['add', '-A', '-N']);
+    let diff = await run(['diff', 'HEAD']);
+    if (!diff) diff = await run(['diff']);
+    return diff;
+  }
+
+  /**
+   * Remove qualquer registro/diretório órfão de um worktree que ocuparia
+   * `worktreePath` (restart deixou lixo). `git worktree prune` limpa registros
+   * mortos; depois removemos o diretório se ainda existir.
+   */
+  private async pruneStaleWorktree(targetRepo: string, worktreePath: string): Promise<void> {
+    try {
+      await this.runGit(['worktree', 'remove', '--force', worktreePath], targetRepo);
+    } catch {
+      // path pode nem estar registrado — segue para prune/limpeza de diretório.
+    }
+    try {
+      await this.runGit(['worktree', 'prune'], targetRepo);
+    } catch {
+      /* best-effort */
+    }
+    if (await this.pathExists(worktreePath)) {
+      await this.removeDirIfExists(worktreePath);
+    }
   }
 
   /**
@@ -356,15 +652,45 @@ export class WorkspaceService {
   }
 
   /**
-   * Limpeza de fim de story. No modelo atual o agent trabalha DIRETO no repo-alvo
-   * (sem worktree), então NÃO há working tree isolado a destruir — as mudanças
-   * ficam no próprio projeto, exatamente o comportamento desejado. Este método
-   * apenas solta o tracking em memória e remove eventuais diretórios de fallback
-   * antigos. Nunca toca no repo-alvo (não roda `git worktree remove`, que
-   * apagaria o trabalho do agent).
+   * Limpeza de fim de story.
+   *
+   * - Com o worktree isolado LIGADO (US-OBS2): captura o patch não-commitado
+   *   (PR-4, se `worktreePreservePatch`) para reaplicar numa recriação futura,
+   *   e roda `git worktree remove --force` APENAS contra o worktree que ESTE
+   *   serviço criou — NUNCA contra o repo-alvo direto (não apagaria o trabalho
+   *   do usuário).
+   * - Com o worktree DESLIGADO (legado): o agent trabalha direto no repo-alvo,
+   *   então NÃO há working tree isolado a destruir; apenas solta o tracking em
+   *   memória e limpa diretórios de fallback antigos (comportamento idêntico ao
+   *   anterior — nunca roda `git worktree remove`).
    */
   async cleanupWorktree(key: string): Promise<void> {
     const safeKey = this.sanitizeKey(key);
+
+    const isolated = this.isolatedWorktreeByKey.get(safeKey);
+    if (isolated) {
+      const policy = resolveWorktreePolicy(this.config);
+      if (policy.preservePatchOnTrash) {
+        const patch = await this.captureWorktreePatch(isolated.worktreePath).catch(() => '');
+        if (patch && patch.trim().length > 0) {
+          this.preservedPatchByKey.set(safeKey, patch);
+        }
+      }
+      try {
+        await this.runGit(
+          ['worktree', 'remove', '--force', isolated.worktreePath],
+          isolated.targetRepo,
+        );
+      } catch (error: unknown) {
+        this.logger.warn(
+          `Falha ao remover worktree isolado ${isolated.worktreePath}: ${this.extractErrorMessage(error)}`,
+        );
+        // Fallback: remove o diretório manualmente e limpa o registro.
+        await this.removeDirIfExists(isolated.worktreePath);
+        await this.runGit(['worktree', 'prune'], isolated.targetRepo).catch(() => undefined);
+      }
+      this.isolatedWorktreeByKey.delete(safeKey);
+    }
 
     const fallbackPath = this.fallbackDirsByKey.get(safeKey);
     if (fallbackPath) {
@@ -385,6 +711,16 @@ export class WorkspaceService {
     try {
       await fs.access(targetPath);
       return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** True se `targetPath` existe e é um diretório (segue symlinks). */
+  private async isDirectory(targetPath: string): Promise<boolean> {
+    try {
+      const stat = await fs.stat(targetPath);
+      return stat.isDirectory();
     } catch {
       return false;
     }
