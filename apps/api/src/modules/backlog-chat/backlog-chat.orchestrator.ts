@@ -521,20 +521,27 @@ export class BacklogChatOrchestrator implements OnModuleInit {
     // emitir `backlog.turn_done` (o novo turno segue o streaming).
     let hitlRespawn = false;
     const flushChunk = async () => {
-      if (!chunkBuffer || chunkBuffer.text.trim().length === 0) {
-        chunkBuffer = null;
+      // Captura-e-zera SÍNCRONO antes do await: em `onChunk`, ao trocar de kind
+      // (thought→output) fazíamos `void flushChunk()` (não-aguardado) e logo
+      // abaixo checávamos `if (!chunkBuffer)` — mas o flush async ainda não
+      // tinha zerado o buffer, então o `output` (ex.: "PONG") era anexado ao
+      // buffer antigo e se PERDIA (nunca persistia como mensagem `output`, e o
+      // chat "travava" sem resposta). Zerar o buffer aqui, de forma síncrona,
+      // torna o próximo `onChunk` determinístico.
+      const pending = chunkBuffer;
+      chunkBuffer = null;
+      if (!pending || pending.text.trim().length === 0) {
         return;
       }
       await this.prisma.backlogChatMessage.create({
         data: {
           sessionId,
           role: 'ai',
-          kind: chunkBuffer.kind,
-          text: chunkBuffer.text,
+          kind: pending.kind,
+          text: pending.text,
           channel,
         },
       });
-      chunkBuffer = null;
     };
 
     try {
