@@ -162,7 +162,7 @@ function ProjectCreateForm({
   const effectiveName = nameTouched ? name : deriveName(repoUrl);
 
   const urlValid = repoUrl.trim().length === 0 || isValidRepoUrl(repoUrl);
-  const needsCredential = authKind !== "none";
+  const needsCredential = authKind === "https";
 
   const submit = () => {
     setError(null);
@@ -247,7 +247,11 @@ function ProjectCreateForm({
         className="card-desc-input"
         data-testid="project-auth-kind"
         value={authKind}
-        onChange={(event) => setAuthKind(event.target.value as ProjectAuthKind)}
+        onChange={(event) => {
+          const kind = event.target.value as ProjectAuthKind;
+          setAuthKind(kind);
+          if (kind !== "https") setCredentialRef("");
+        }}
         style={{ marginBottom: 8 }}
       >
         {(Object.keys(AUTH_LABEL) as ProjectAuthKind[]).map((kind) => (
@@ -278,6 +282,14 @@ function ProjectCreateForm({
             lê o valor do ambiente na hora do clone.
           </div>
         </>
+      ) : null}
+
+      {authKind === "ssh" ? (
+        <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
+          🔑 O clone via <strong>SSH</strong> usa a chave montada no servidor (
+          <code>~/.ssh</code>). <strong>Nenhuma</strong> variável de ambiente é necessária — a
+          autenticação é feita pela chave privada do servidor.
+        </div>
       ) : null}
 
       {error ? (
