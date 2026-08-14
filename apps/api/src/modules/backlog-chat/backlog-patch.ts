@@ -63,6 +63,14 @@ function applyOp(
     proposal.epic.aiProject = requireString(op.value, path);
     return;
   }
+  if (path === '/epic/aiSummary') {
+    proposal.epic.aiSummary = requireString(op.value, path);
+    return;
+  }
+  if (path === '/epic/aiNotes') {
+    proposal.epic.aiNotes = requireString(op.value, path);
+    return;
+  }
 
   // ── Stories: add/remove ─────────────────────────────────────────────────────
   if (path === '/stories/-') {
@@ -301,7 +309,11 @@ function requireTask(value: unknown, path: string): BacklogProposalTask {
   const title = requireString(o.title, `${path}/title`);
   // Tasks são rascunhos; o backend atribui id estável ao adicionar.
   const id = typeof o.id === 'string' && o.id.length > 0 ? o.id : randomUUID();
-  return { id, title };
+  const task: BacklogProposalTask = { id, title };
+  if (o.description !== undefined) {
+    task.description = requireString(o.description, `${path}/description`);
+  }
+  return task;
 }
 
 function requireTaskArray(value: unknown, path: string): BacklogProposalTask[] {

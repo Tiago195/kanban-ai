@@ -1043,6 +1043,8 @@ export class BacklogChatOrchestrator implements OnModuleInit {
       points: proposal.epic.points,
       parentId: null,
       backlogChatSessionId: sessionId,
+      aiSummary: proposal.epic.aiSummary,
+      aiNotes: proposal.epic.aiNotes,
       ...(epicAiProject ? { aiProject: epicAiProject } : {}),
     });
     created.push({

@@ -24,8 +24,16 @@ type Tab = "repo" | "memory";
  * pelo que a AI já aprendeu (aba "O que a AI sabe" — os neurônios da colmeia).
  *
  * NÃO edita neurônios (escrita é do domínio do agent/loop). A lista de memória
- * é hoje GLOBAL à colmeia — vira por-Project quando US-PROJ4 namespacear o
- * índice por `projectId` (o backend já sinaliza isso).
+ * NÃO edita neurônios (escrita é do domínio do agent/loop).
+ *
+ * **Dois escopos, não um.** O Explorador combina conteúdo de escopos diferentes,
+ * então cada aba mostra SÓ o controle que de fato governa seu conteúdo (evita o
+ * anti-padrão de "fake filter" — um seletor que não filtra nada):
+ *  - Aba "Repositório": conteúdo é POR-PROJETO → mostra o seletor de projeto.
+ *  - Aba "O que a AI sabe": a memória é a COLMEIA compartilhada por toda a frota
+ *    (não muda com o projeto) → o seletor some e dá lugar a um cabeçalho de
+ *    escopo "Colmeia". Vira por-Project quando US-PROJ4 namespacear o índice por
+ *    `projectId`; aí o seletor volta a fazer sentido nesta aba.
  */
 export function ProjectExplorer({ onClose }: { onClose: () => void }) {
   const projectsQuery = useProjects();
@@ -47,7 +55,7 @@ export function ProjectExplorer({ onClose }: { onClose: () => void }) {
         <div className="kb-modal">
           <div className="modal-header">
             <div className="modal-title-row">
-              <h2 style={{ margin: 0, fontSize: 16 }}>🗂️ Explorador de projeto</h2>
+              <h2 style={{ margin: 0, fontSize: 16 }}>🗂️ Explorador</h2>
               <button className="modal-close" onClick={onClose} aria-label="Fechar">
                 ✕
               </button>
@@ -63,22 +71,6 @@ export function ProjectExplorer({ onClose }: { onClose: () => void }) {
               />
             ) : (
               <>
-                <div className="modal-section" style={{ marginBottom: 12 }}>
-                  <div className="modal-section-title">Projeto</div>
-                  <select
-                    className="card-desc-input"
-                    data-testid="project-explorer-select"
-                    value={activeId ?? ""}
-                    onChange={(event) => setSelectedId(event.target.value)}
-                  >
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} — {p.repoUrl}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
                 <div className="kb-tabs" role="tablist" style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                   <button
                     role="tab"
@@ -87,7 +79,7 @@ export function ProjectExplorer({ onClose }: { onClose: () => void }) {
                     className={"kb-btn " + (tab === "repo" ? "kb-btn-primary" : "kb-btn-ghost")}
                     onClick={() => setTab("repo")}
                   >
-                    Repositório
+                    📁 Repositório
                   </button>
                   <button
                     role="tab"
@@ -96,14 +88,25 @@ export function ProjectExplorer({ onClose }: { onClose: () => void }) {
                     className={"kb-btn " + (tab === "memory" ? "kb-btn-primary" : "kb-btn-ghost")}
                     onClick={() => setTab("memory")}
                   >
-                    O que a AI sabe
+                    🐝 O que a AI sabe
                   </button>
                 </div>
 
+                {/* Cada aba mostra só o controle de escopo que governa seu conteúdo. */}
                 {tab === "repo" ? (
-                  <RepoTab projectId={activeId} />
+                  <>
+                    <ProjectScopePicker
+                      projects={projects}
+                      activeId={activeId}
+                      onChange={setSelectedId}
+                    />
+                    <RepoTab projectId={activeId} />
+                  </>
                 ) : (
-                  <MemoryTab projectId={activeId} />
+                  <>
+                    <HiveScopeHeader />
+                    <MemoryTab projectId={activeId} />
+                  </>
                 )}
               </>
             )}
@@ -201,7 +204,7 @@ function MemoryTab({ projectId }: { projectId: string | null }) {
         <div style={{ color: "var(--text-muted)" }}>Carregando memória…</div>
       ) : neurons.length === 0 ? (
         <EmptyState
-          title="A AI ainda não sabe nada sobre este projeto"
+          title="A AI ainda não aprendeu nada"
           hint="Quando os agents rodarem, os neurônios que eles aprenderem aparecem aqui."
         />
       ) : (
@@ -352,6 +355,94 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
       <span style={{ minWidth: 160, color: "var(--text-muted)", fontSize: 13 }}>{label}</span>
       <span>{children}</span>
+    </div>
+  );
+}
+
+// ── Cabeçalhos de escopo (deixam claro POR ESTRUTURA o que governa cada aba) ──
+
+/**
+ * Seletor de projeto — só aparece na aba "Repositório", onde de fato filtra o
+ * conteúdo. Fica ao lado de um rótulo de escopo "Projeto" para simetria com o
+ * cabeçalho da colmeia.
+ */
+function ProjectScopePicker({
+  projects,
+  activeId,
+  onChange,
+}: {
+  projects: { id: string; name: string; repoUrl: string }[];
+  activeId: string | null;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <div
+      className="scope-bar"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 12px",
+        marginBottom: 12,
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        background: "var(--surface, transparent)",
+      }}
+    >
+      <span
+        className="chip"
+        style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}
+      >
+        📁 Projeto
+      </span>
+      <select
+        className="card-desc-input"
+        data-testid="project-explorer-select"
+        value={activeId ?? ""}
+        onChange={(event) => onChange(event.target.value)}
+        style={{ flex: 1, margin: 0 }}
+      >
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name} — {p.repoUrl}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/**
+ * Cabeçalho da aba de memória. A colmeia é um escopo ÚNICO (toda a frota), então
+ * NÃO há seletor de projeto aqui — o próprio cabeçalho comunica o escopo. Isso
+ * evita o "fake filter" (um seletor que não muda o conteúdo) que confundia o
+ * usuário ao trocar de projeto e ver o mesmo conhecimento.
+ */
+function HiveScopeHeader() {
+  return (
+    <div
+      className="scope-bar"
+      data-testid="hive-scope-header"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 12px",
+        marginBottom: 12,
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        background: "var(--surface, transparent)",
+      }}
+    >
+      <span
+        className="chip"
+        style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}
+      >
+        🐝 Colmeia
+      </span>
+      <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+        Memória compartilhada por toda a frota de agents — não é específica de um projeto.
+      </span>
     </div>
   );
 }

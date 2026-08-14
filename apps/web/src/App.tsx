@@ -285,8 +285,8 @@ export default function App() {
             />
           }
         />
-        <Route path="/backlog-chat" element={<BacklogChatRoute boardId={boardId} />} />
-        <Route path="/backlog-chat/:sessionId" element={<BacklogChatRoute boardId={boardId} />} />
+        <Route path="/backlog-chat" element={<BacklogChatRoute />} />
+        <Route path="/backlog-chat/:sessionId" element={<BacklogChatRoute />} />
       </Routes>
     </div>
   );
@@ -296,13 +296,24 @@ export default function App() {
  * Ponte entre a rota e o `BacklogChatView`. Lê o `:sessionId` da URL (F5-safe:
  * o histórico é reidratado do backend) e navega para a URL com id assim que a
  * sessão é criada, de modo que o reload reabra a MESMA conversa.
+ *
+ * Resolve o board-alvo aqui (não recebe por prop) para poder distinguir
+ * "board carregando" de "board indisponível" e oferecer retry — assim o chat
+ * nunca fica preso num "Iniciando conversa…" infinito quando os boards ainda
+ * não resolveram ou falharam.
  */
-function BacklogChatRoute({ boardId }: { boardId: string | null }) {
+function BacklogChatRoute() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  const { boardId, isLoading, isError, refetch } = usePrimaryBoardId();
+  // Sem board após a query resolver (erro ou lista vazia) = indisponível.
+  const boardUnavailable = !isLoading && !boardId;
   return (
     <BacklogChatView
       boardId={boardId}
+      boardLoading={isLoading}
+      boardUnavailable={boardUnavailable || isError}
+      onRetryBoard={() => void refetch()}
       routeSessionId={sessionId ?? null}
       onSessionCreated={(id) => navigate(`/backlog-chat/${id}`, { replace: true })}
       onSelectSession={(id) => navigate(`/backlog-chat/${id}`)}

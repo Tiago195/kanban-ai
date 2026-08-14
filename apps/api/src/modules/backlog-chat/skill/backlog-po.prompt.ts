@@ -146,10 +146,15 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
     lines.push('');
     lines.push('Como agir neste chat da story:');
     lines.push(
-      '- Quando o humano pedir tasks (ou já for óbvio que ele quer decompor), **EMITA a proposta de tasks ' +
-        'como um bloco de controle** `KANBAN_TASKS` (formato abaixo), cobrindo a story de ponta a ponta. NÃO ' +
-        'liste as tasks em texto puro — o front renderiza cada task do bloco como um item CLICÁVEL. Uma task é ' +
-        'uma unidade de trabalho executável; **não tem pontos nem DoD**.',
+      '- Quando o humano **pedir explicitamente** tasks/subtarefas (ex.: "quebre em tasks", "adicione ' +
+        'subtarefas"), **EMITA a proposta de tasks como um bloco de controle** `KANBAN_TASKS` (formato ' +
+        'abaixo), cobrindo a story de ponta a ponta. NÃO liste as tasks em texto puro — o front renderiza ' +
+        'cada task do bloco como um item CLICÁVEL. Uma task é uma unidade de trabalho executável; **não tem ' +
+        'pontos nem DoD**.',
+    );
+    lines.push(
+      '- **Sem pedido explícito, NÃO proponha tasks** — a story é a unidade de valor; o refinamento em ' +
+        'tasks acontece só quando o humano pedir (mesmo padrão determinístico da proposta de backlog).',
     );
     lines.push(
       '- Formato do bloco (uma linha, JSON válido entre os marcadores):',
@@ -273,6 +278,13 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
       'objetivo, escopo, usuários, restrições ou o "pronto", faça UMA pergunta objetiva por vez ' +
       'usando o bloco KANBAN_QUESTION. Só proponha o backlog quando tiver contexto suficiente.',
   );
+  lines.push(
+    'Você também **pode e deve inspecionar o repositório-alvo via shell** durante a descoberta ' +
+      '(ex.: `pwd` para o caminho absoluto, `ls`/`tree` para a estrutura, ler `README`/arquivos-chave). ' +
+      'Isso deixa a proposta ancorada no código real (fluxos/áreas afetadas mais precisos) e, sobretudo, ' +
+      'te dá o **caminho ABSOLUTO** que vai em `epic.aiProject` — sem ele, mover uma story para "In ' +
+      'Progress" abre o modal "Falta o Projeto-alvo".',
+  );
   lines.push('');
   lines.push('<<<KANBAN_QUESTION>>>');
   lines.push('{ "prompt": "<pergunta objetiva>", "options": ["<opção curta A>", "<opção curta B>", "<opção curta C>"] }');
@@ -295,7 +307,7 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
   lines.push(BACKLOG_PROPOSAL_MARKERS.open);
   lines.push('{');
   lines.push('  "version": 1,');
-  lines.push('  "epic": { "title": "<título do épico>", "description": "<2–4 linhas>", "points": 8, "aiProject": "<caminho ABSOLUTO do repo-alvo, ex.: /home/user/dev/meu-projeto>" },');
+  lines.push('  "epic": { "title": "<título do épico>", "description": "<2–4 linhas>", "points": 8, "aiSummary": "<1–2 linhas: contexto/objetivo do épico para quem for lê-lo>", "aiNotes": "<opcional: escopo técnico, dependências, restrições do épico>", "aiProject": "<caminho ABSOLUTO do repo-alvo, ex.: /home/user/dev/meu-projeto>" },');
   lines.push('  "stories": [');
   lines.push('    {');
   lines.push('      "title": "<story 1>",');
@@ -317,9 +329,10 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
   lines.push(`- \`points\`: apenas valores Fibonacci ∈ {${pointsList}}. Omita se não souber estimar. **Tasks não têm pontos.**`);
   lines.push('- `stories`: enxuto. Cada story é uma fatia de valor entregável, com descrição rica (2–5 linhas).');
   lines.push('- `aiSummary` / `aiNotes`: opcionais mas recomendados — dão contexto ao agente que vai executar a story depois.');
+  lines.push('- `epic.aiSummary` / `epic.aiNotes`: opcionais mas recomendados — dão ao épico o MESMO contexto de IA que as stories (o painel do épico exibe "Notas para a AI"). `aiSummary` = objetivo/contexto do épico; `aiNotes` = escopo técnico, dependências, restrições. **NÃO** é DoR/acceptance (proibidos — ADR-0007). Sem eles, o épico nasce "vazio de contexto".');
   lines.push('- `dod`: **recomendado** — 3–7 itens objetivos, verificáveis e escritos como resultado ("X está feito/testado/documentado"). É o único checklist (sem DoR/acceptance). Cada item vira um DodItem do card story ao aplicar.');
   lines.push('- `affectedFlows`: **opcional** — inclua quando já der para antecipar os fluxos/áreas do código que a story toca. Cada item tem `name` (fluxo/área), `files` (paths prováveis, pode ser lista vazia) e `note` (opcional). Omita o campo se não fizer sentido ainda.');
-  lines.push('- `tasks`: **OPCIONAL e SOB DEMANDA (padrão determinístico: NÃO rascunhe tasks).** Só inclua `tasks` numa story quando o humano **pedir explicitamente** tasks/subtarefas (ex.: "quebre em tasks", "adicione subtarefas"). **Não** decida por conta própria com base em "achou óbvio" — isso gera granularidade desigual entre stories. Sem pedido explícito, **omita o campo `tasks` em TODAS as stories** (a story é a unidade de valor; o refinamento em tasks e o DoD acontecem depois no board). Quando pedido, aplique a MESMA decisão a todas as stories da proposta (todas com tasks ou nenhuma), para granularidade consistente. Task tem só `title` (sem pontos, sem DoD); vira card `type:task` filho da story ao aplicar.');
+  lines.push('- `tasks`: **OPCIONAL e SOB DEMANDA (padrão determinístico: NÃO rascunhe tasks).** Só inclua `tasks` numa story quando o humano **pedir explicitamente** tasks/subtarefas (ex.: "quebre em tasks", "adicione subtarefas"). **Não** decida por conta própria com base em "achou óbvio" — isso gera granularidade desigual entre stories. Sem pedido explícito, **omita o campo `tasks` em TODAS as stories** (a story é a unidade de valor; o refinamento em tasks e o DoD acontecem depois no board). Quando pedido, aplique a MESMA decisão a todas as stories da proposta (todas com tasks ou nenhuma), para granularidade consistente. Task tem `title` e `description` opcional (sem pontos, sem DoD); vira card `type:task` filho da story ao aplicar.');
   lines.push('- Não repita a proposta como texto solto fora do bloco — o bloco é a fonte da verdade.');
 
   // ── Fase de refinamento cirúrgico (só quando já há proposta) ────────────────
@@ -341,11 +354,12 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
     lines.push('  "ops": [');
     lines.push('    { "op": "replace", "path": "/epic/title", "value": "<novo título>" },');
     lines.push('    { "op": "replace", "path": "/epic/aiProject", "value": "<caminho absoluto do repo-alvo>" },');
+    lines.push('    { "op": "replace", "path": "/epic/aiNotes", "value": "<notas técnicas / escopo do épico>" },');
     lines.push('    { "op": "replace", "path": "/stories/0/points", "value": 5 },');
     lines.push('    { "op": "replace", "path": "/stories/0/aiNotes", "value": "<notas técnicas>" },');
     lines.push('    { "op": "replace", "path": "/stories/0/dod", "value": ["<critério 1>", "<critério 2>"] },');
     lines.push('    { "op": "replace", "path": "/stories/0/affectedFlows", "value": [ { "name": "<fluxo>", "files": ["<path>"], "note": "" } ] },');
-    lines.push('    { "op": "add", "path": "/stories/0/tasks/-", "value": { "title": "<nova task>" } },');
+    lines.push('    { "op": "add", "path": "/stories/0/tasks/-", "value": { "title": "<nova task>", "description": "<opcional>" } },');
     lines.push('    { "op": "add", "path": "/stories/-", "value": { "title": "<nova story>", "points": 3 } },');
     lines.push('    { "op": "remove", "path": "/stories/2" }');
     lines.push('  ]');
@@ -354,8 +368,8 @@ export function buildBacklogPrompt(input: BuildBacklogPromptInput): string {
     lines.push('');
     lines.push('Regras do patch:');
     lines.push('- `baseVersion`: a versão da proposta corrente exibida acima.');
-    lines.push('- `path` válidos: `/epic/title`, `/epic/description`, `/epic/points`, `/epic/aiProject`; por story: `/stories/<i>/title`, `/stories/<i>/description`, `/stories/<i>/aiSummary`, `/stories/<i>/aiNotes`, `/stories/<i>/points`, `/stories/<i>/dod` (array inteiro de strings), `/stories/<i>/affectedFlows` (array inteiro de flows). Para adicionar/remover story: `add` em `/stories/-` (fim) e `remove` em `/stories/<i>`. Para tasks de uma story: `replace` em `/stories/<i>/tasks` (array inteiro), `add` em `/stories/<i>/tasks/-` (fim) e `remove`/`replace` em `/stories/<i>/tasks/<j>`.');
-    lines.push(`- \`points\` só Fibonacci ∈ {${pointsList}}. Task tem só \`title\` (sem pontos).`);
+    lines.push('- `path` válidos: `/epic/title`, `/epic/description`, `/epic/points`, `/epic/aiSummary`, `/epic/aiNotes`, `/epic/aiProject`; por story: `/stories/<i>/title`, `/stories/<i>/description`, `/stories/<i>/aiSummary`, `/stories/<i>/aiNotes`, `/stories/<i>/points`, `/stories/<i>/dod` (array inteiro de strings), `/stories/<i>/affectedFlows` (array inteiro de flows). Para adicionar/remover story: `add` em `/stories/-` (fim) e `remove` em `/stories/<i>`. Para tasks de uma story: `replace` em `/stories/<i>/tasks` (array inteiro), `add` em `/stories/<i>/tasks/-` (fim) e `remove`/`replace` em `/stories/<i>/tasks/<j>` (task aceita `title` e `description`).');
+    lines.push(`- \`points\` só Fibonacci ∈ {${pointsList}}. Task tem \`title\` e \`description\` opcional (sem pontos).`);
     lines.push('- Só inclua ops para o que o humano pediu. NÃO toque em itens não solicitados.');
     lines.push('- Se o humano pedir uma mudança grande que reestrutura tudo, aí sim emita um KANBAN_BACKLOG novo com `version` incrementado.');
     if (input.focusStory) {

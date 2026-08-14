@@ -267,6 +267,21 @@ export interface BacklogProposal {
     description?: string;
     points?: StoryPoints;
     /**
+     * Contexto de AI do épico — **mesmo campo do Card** (`Card.aiSummary`).
+     * Resumo/objetivo do épico em linguagem natural. Ao aplicar (`/apply`) vai
+     * direto para `aiSummary` do card épico. Opcional (retrocompatível). Ver
+     * ADR-0024.
+     */
+    aiSummary?: string;
+    /**
+     * Notas de AI do épico — **mesmo campo do Card** (`Card.aiNotes`).
+     * Contexto/escopo técnico do épico (dependências, restrições, pontos de
+     * atenção). NÃO é acceptance/DoR (proibidos no v1 — ADR-0007). Ao aplicar
+     * vai para `aiNotes` do card épico — a UI do painel do épico já expõe este
+     * campo ("Notas para a AI"). Opcional (retrocompatível). Ver ADR-0024.
+     */
+    aiNotes?: string;
+    /**
      * Caminho absoluto do repositório-alvo (aiProject) que o agente PO
      * inspecionou via shell durante a descoberta. Persistido no card épico ao
      * aplicar (`/apply`); as stories filhas herdam este valor no loop engine
@@ -286,7 +301,7 @@ export interface BacklogProposal {
  * mudança num ponto específico — garante que só o solicitado muda.
  *
  * `path` aponta para um campo editável: `/epic/title`, `/epic/description`,
- * `/epic/points`, `/stories/<i>/title`, `/stories/<i>/description`,
+ * `/epic/points`, `/epic/aiSummary`, `/epic/aiNotes`, `/stories/<i>/title`, `/stories/<i>/description`,
  * `/stories/<i>/aiSummary`, `/stories/<i>/aiNotes`, `/stories/<i>/points`,
  * `/stories/<i>/dod`, `/stories/<i>/affectedFlows`, `/stories/<i>/tasks`
  * (arrays inteiros). `add`/`remove` operam sobre `/stories/<i>` e sobre

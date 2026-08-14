@@ -21,15 +21,13 @@
 
 <!-- ⚠️ Bloqueio observado de clone ssh (2026-08-13, investigado sob pedido do usuário) — NÃO é bug de código, é config de ambiente. Repo `git@github.com:uol-universo-online/uolcs-host-...-provisioner-api.git` falha ao clonar por DOIS motivos empilhados: (1) `PROJECTS_ALLOW_SSH=false` (default no docker-compose.yml) → o clone é REJEITADO no guard `assertSshAllowed` antes de tentar, com erro claro mencionando `PROJECTS_ALLOW_SSH=true`; (2) mesmo habilitando a flag, o container `kanban-ai-api` NÃO tem `/root/.ssh/` (nenhuma chave montada) → `ssh -T git@github.com` dentro do container volta VAZIO (sem identidade), logo não autentica no repo PRIVADO da org. No HOST o `git ls-remote` do mesmo repo funciona (a chave do host tem acesso). CORREÇÃO de ambiente (não requer código): setar `PROJECTS_ALLOW_SSH=true` E montar a chave ssh no container (ex.: volume `~/.ssh:/root/.ssh:ro` + `known_hosts`, ou ssh-agent forwarding), OU usar URL https com credencial (`authKind` https + PAT via `onAuth`). Reavaliar se vale uma story de "montar ssh no container" separada. -->
 
-# in progress
-
 <!-- Itens vagos/bloqueados abaixo permanecem parkeados (aguardam clarificação ou conflitam com ADR aceito) — não são parte de nenhum épico ativo. -->
 
 - [ ] Precisamos melhorar o chat de conversa do backlog-chat
   - ⚠️ **Bloqueado (aguarda clarificação):** item vago, sem sintoma nem critério de aceite. O que melhorar? (UX/layout, streaming de resposta, contexto injetado no prompt, persistência do histórico, latência?) Não é implementável "1 a 1" sem escopo definido pelo usuário.
 
-- [ ] tentar disponibilizar tudo em docker
-  - ⚠️ **Bloqueado (conflita com ADR-0019, aceito):** a API precisa rodar no **host** porque o loop engine dá `spawn` no Copilot CLI com `cwd` = git worktree dentro do repo-alvo (`aiProject`), que é um caminho arbitrário do FS do usuário; dentro do Docker a API só enxerga `/app`. O `docker-compose.yml` já expõe o profile opt-in `docker-app` para subir Nest+Vite em container (dev do próprio framework). Não há ação segura sem violar o ADR — reabrir só se o worktree isolado deixar de ser stub e o alvo for montável.
+# in progress
+
 
 # done
 <!-- apenas ultimas 2 tarefas, para n poluir o arquivo -->

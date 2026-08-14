@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BacklogChatMessage, BacklogProposalStory } from "@kanban-ai/shared";
 
@@ -21,6 +21,12 @@ import {
 
 export interface BacklogChatViewProps {
   boardId: string | null;
+  /** Estado da query de boards — usado para distinguir "carregando board" de "criando sessão". */
+  boardLoading?: boolean;
+  /** Boards falharam ou nenhum board existe — o chat não tem onde criar a sessão. */
+  boardUnavailable?: boolean;
+  /** Retenta carregar os boards (usado no empty-state de erro). */
+  onRetryBoard?: () => void;
   /** sessionId vindo da URL (`/backlog-chat/:sessionId`), ou null em `/backlog-chat`. */
   routeSessionId: string | null;
   /** Chamado quando uma sessão nova é criada, para o router refletir o id na URL. */
@@ -43,6 +49,9 @@ export interface BacklogChatViewProps {
  */
 export function BacklogChatView({
   boardId,
+  boardLoading = false,
+  boardUnavailable = false,
+  onRetryBoard,
   routeSessionId,
   onSessionCreated,
   onSelectSession,
@@ -62,10 +71,14 @@ export function BacklogChatView({
     title: string;
   } | null>(null);
 
+  const [createFailed, setCreateFailed] = useState(false);
   const createSession = useMutation({
     mutationFn: (bid: string) => apiClient.createBacklogSession(bid),
-    onSuccess: (res) => onSessionCreated(res.id),
-    onError: () => showToast("Falha ao iniciar o chat de backlog"),
+    onSuccess: (res) => {
+      setCreateFailed(false);
+      onSessionCreated(res.id);
+    },
+    onError: () => setCreateFailed(true),
   });
 
   // Numa sessão applied, "✨ Materializar tasks" na thread da proposta resolve a
@@ -99,8 +112,10 @@ export function BacklogChatView({
       hasRequestedRef.current = false;
       return;
     }
-    // Só cria sessão quando a URL não tem id (rota /backlog-chat sem :sessionId).
-    if (boardId && !creating && !hasRequestedRef.current) {
+    // Só cria sessão quando a URL não tem id (rota /backlog-chat sem :sessionId),
+    // já temos um board-alvo, e a última tentativa não falhou (evita loop de
+    // auto-retry — o usuário reativa manualmente pelo botão do empty-state).
+    if (boardId && !creating && !createFailed && !hasRequestedRef.current) {
       hasRequestedRef.current = true;
       createMutate(boardId, {
         onError: () => {
@@ -108,7 +123,18 @@ export function BacklogChatView({
         },
       });
     }
-  }, [boardId, sessionId, creating, createMutate]);
+  }, [boardId, sessionId, creating, createFailed, createMutate]);
+
+  // Retenta a criação da sessão após uma falha (botão no empty-state). Se o
+  // board também está indisponível, retenta o carregamento dos boards primeiro.
+  const retryBoot = () => {
+    if (boardUnavailable) {
+      onRetryBoard?.();
+      return;
+    }
+    setCreateFailed(false);
+    hasRequestedRef.current = false;
+  };
 
   const {
     messages,
@@ -168,6 +194,49 @@ export function BacklogChatView({
   }
 
   const busy = isSending || isAnswering;
+
+  // Empty-state distingue os estados de boot para nunca ficar num "Iniciando
+  // conversa…" infinito: (1) board carregando, (2) board indisponível/erro,
+  // (3) falha ao criar a sessão, (4) criando, (5) sessão pronta. Só (4) mostra
+  // um spinner transitório; (2) e (3) oferecem "Tentar novamente".
+  let emptyStateNode: ReactNode;
+  if (!sessionId && boardUnavailable) {
+    emptyStateNode = (
+      <div className="backlog-chat-boot backlog-chat-boot-error">
+        <span className="backlog-chat-boot-icon">⚠️</span>
+        <p className="backlog-chat-boot-title">Não foi possível carregar o board</p>
+        <p className="backlog-chat-boot-hint">
+          O chat precisa de um board para criar o backlog. Verifique sua conexão e tente de novo.
+        </p>
+        <button type="button" className="btn btn-primary btn-sm" onClick={retryBoot}>
+          Tentar novamente
+        </button>
+      </div>
+    );
+  } else if (!sessionId && createFailed) {
+    emptyStateNode = (
+      <div className="backlog-chat-boot backlog-chat-boot-error">
+        <span className="backlog-chat-boot-icon">⚠️</span>
+        <p className="backlog-chat-boot-title">Não consegui iniciar a conversa</p>
+        <p className="backlog-chat-boot-hint">
+          Falha ao criar a sessão de backlog. Isso costuma ser temporário.
+        </p>
+        <button type="button" className="btn btn-primary btn-sm" onClick={retryBoot}>
+          Tentar novamente
+        </button>
+      </div>
+    );
+  } else if (!sessionId && (boardLoading || createSession.isPending || !boardId)) {
+    emptyStateNode = (
+      <div className="backlog-chat-boot">
+        <span className="backlog-chat-boot-spinner" aria-hidden="true" />
+        <p className="backlog-chat-boot-hint">Iniciando conversa…</p>
+      </div>
+    );
+  } else {
+    emptyStateNode =
+      "Conte à IA o que você quer construir. Ela vai te ajudar a estruturar um épico com histórias.";
+  }
 
   const refreshSessions = () => {
     void queryClient.invalidateQueries({ queryKey: ["backlog-sessions", boardId] });
@@ -243,11 +312,7 @@ export function BacklogChatView({
             }
             submitLabel="Enviar"
             busyLabel="Enviando…"
-            emptyState={
-              createSession.isPending || !sessionId
-                ? "Iniciando conversa…"
-                : "Conte à IA o que você quer construir. Ela vai te ajudar a estruturar um épico com histórias."
-            }
+            emptyState={emptyStateNode}
             questionHint={
               pending ? (
                 <div className="agent-chat-question-hint">

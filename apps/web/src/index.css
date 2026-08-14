@@ -2202,6 +2202,52 @@
 .backlog-chat-body .chat-bubble {
   box-sizing: border-box;
 }
+/* Empty-state de boot: distingue "carregando/criando" de "erro com retry".
+   Substitui o antigo texto solto "Iniciando conversa…" que podia ficar infinito. */
+.backlog-chat-boot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 16px;
+  max-width: 420px;
+  margin: 0 auto;
+  text-align: center;
+}
+.backlog-chat-boot-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+.backlog-chat-boot-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.backlog-chat-boot-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.backlog-chat-boot-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  animation: backlog-chat-boot-spin 0.7s linear infinite;
+}
+@keyframes backlog-chat-boot-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .backlog-chat-boot-spinner {
+    animation-duration: 2s;
+  }
+}
 .backlog-chat-body .agent-chat-input {
   max-width: 720px;
   width: 100%;
