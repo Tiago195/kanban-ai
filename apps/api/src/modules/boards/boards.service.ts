@@ -76,6 +76,18 @@ export class BoardsService {
   }
 
   /**
+   * US-F3.10 — define (ou limpa, com null) o adapter default do quadro (raiz da
+   * cascata de adapter, análogo a setDefaultModel) e emite `board.updated`.
+   */
+  async setDefaultAdapter(id: string, defaultAdapter: string | null) {
+    const board = await this.prisma.board.findUnique({ where: { id }, select: { id: true } });
+    if (!board) throw new NotFoundException('board inexistente');
+    await this.prisma.board.update({ where: { id }, data: { defaultAdapter } });
+    this.realtime.broadcast({ type: 'board.updated', boardId: id, defaultAdapter });
+    return this.findOne(id);
+  }
+
+  /**
    * EP-PROJECT / US-PROJ6 — associa (ou desassocia, com null) o `Project` do
    * quadro (raiz da cascata de repo-alvo). Valida a FK quando não-nula (recusa
    * projectId inexistente) e emite `board.updated` para a UI refletir sem F5.

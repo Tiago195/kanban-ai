@@ -5,9 +5,6 @@ import type { PrismaService } from '../../shared/db/prisma.service';
 import type { RealtimeService } from '../../realtime/realtime.service';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
 import { Orchestrator } from './orchestrator';
-import type { MemoryIndexService } from '../memory/memory-index.service';
-import type { MemoryGitService } from '../memory/memory-git.service';
-import type { MemoryBootstrapService } from '../memory/memory-bootstrap.service';
 import type { WorkspaceService } from './workspaces/workspace.service';
 import type { ValidationRunner } from './validators/validation.runner';
 import type { AgentRunner } from './runners/agent-runner.interface';
@@ -133,11 +130,8 @@ function makeOrchestrator(prisma: FakePrisma, wakeup: FakeWakeup) {
     realtime.svc,
     { run: async () => ({ detail: '', summary: '', dodTouched: [] }) } as unknown as AgentRunner,
     config,
-    { query: async () => [], commitAndReindex: async () => ({ oid: 'x', branch: 'main', projection: {} }) } as unknown as MemoryIndexService,
-    { readNeuron: async () => null } as unknown as MemoryGitService,
-    { bootstrapFromRepo: async () => [] } as unknown as MemoryBootstrapService,
     wakeup.svc,
-    undefined as unknown as ConstructorParameters<typeof Orchestrator>[11],
+    undefined as unknown as ConstructorParameters<typeof Orchestrator>[8],
   );
   return { orch, realtime };
 }

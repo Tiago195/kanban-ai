@@ -1,5 +1,17 @@
 import { z } from 'zod';
 import { STORY_POINTS } from '@kanban-ai/shared';
+import type { AgentAdapterKind } from '@kanban-ai/shared';
+import { AGENT_ADAPTER_KINDS } from '../../shared/config/config';
+
+/**
+ * US-F3.10 — adapter por card, validado contra o catálogo de kinds na ESCRITA
+ * (a leitura da cascata ignora valores desconhecidos, mas o certo é nem deixar
+ * entrar). null limpa o override e volta a herdar.
+ */
+const adapterField = z
+  .enum([...AGENT_ADAPTER_KINDS] as [AgentAdapterKind, ...AgentAdapterKind[]])
+  .nullable()
+  .optional();
 
 /** Schema de criação de card (epic/story/task). */
 export const createCardSchema = z.object({
@@ -90,6 +102,7 @@ export const updateCardSchema = z
     aiProject: z.string().optional(),
     aiNotes: z.string().optional(),
     model: z.string().nullable().optional(),
+    adapter: adapterField, // US-F3.10 — cascata de adapter (custo por card)
     loopType: z.string().min(1).nullable().optional(),
     priority: z.number().int().nullable().optional(),
     startInPlanMode: z.boolean().optional(),

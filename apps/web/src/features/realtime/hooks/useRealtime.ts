@@ -119,34 +119,6 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
           useAgentChatStore.getState().setStreaming(event.taskId, false);
         }
 
-        // ── Memória viva (ADR-0027, EP-81/US-206): reflete estado sem F5 ──
-        // Os eventos memory.* NÃO dependem de boardId (a memória é global à
-        // colmeia). O cliente reage refazendo fetch contra o índice: invalida a
-        // chave do neurônio afetado (quando o evento carrega `path`) e a lista.
-        if (
-          event.type === "memory.locked" ||
-          event.type === "memory.released" ||
-          event.type === "memory.updated"
-        ) {
-          void queryClient.invalidateQueries({ queryKey: queryKeys.memory(event.path) });
-          void queryClient.invalidateQueries({ queryKey: queryKeys.memory() });
-          return;
-        }
-
-        if (event.type === "memory.conflict") {
-          void queryClient.invalidateQueries({
-            queryKey: queryKeys.memory(event.conflict.path),
-          });
-          void queryClient.invalidateQueries({ queryKey: queryKeys.memory() });
-          return;
-        }
-
-        if (event.type === "memory.review") {
-          void queryClient.invalidateQueries({ queryKey: queryKeys.memory(event.item.path) });
-          void queryClient.invalidateQueries({ queryKey: queryKeys.memory() });
-          return;
-        }
-
         if (event.type === "review.comment_added") {
           void queryClient.invalidateQueries({
             queryKey: queryKeys.reviewComments(event.cardId),
@@ -162,6 +134,31 @@ export function useRealtime(url?: string, boardId?: string | null): UseRealtimeR
           });
           // US-PROJ6: a lista de Projects (badge de clone) também reflete sem F5.
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+          // US-UX.4: a faixa de conhecimento dos cards acompanha o clone.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.projectsKnowledge });
+          return;
+        }
+
+        // US-F1.3: estado do build do grafo de conhecimento (graphify) é
+        // por-Project — mesma reação do clone_state (badge/estado sem F5).
+        if (event.type === "project.graph_state") {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.projectRepoInfo(event.projectId),
+          });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+          // US-UX.4: grafo mudou → contagens da faixa de conhecimento mudam.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.projectsKnowledge });
+          // US-F4.2: o grafo mudou (building→ready|failed) → refaz TODAS as
+          // projeções abertas (o prefixo cobre qualquer modo/params). É o que
+          // tira a aba "Grafo" do estado "construindo" sem F5.
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.projectGraph(event.projectId),
+          });
+          // US-F5.4: a wiki deriva do grafo — regenerada após o build, o
+          // prefixo invalida índice E artigos abertos.
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.projectWiki(event.projectId),
+          });
           return;
         }
 

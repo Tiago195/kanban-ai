@@ -1,0 +1,63 @@
+- generic [ref=f3e3]:
+  - banner [ref=f3e4]:
+    - heading "Sprint Board" [level=1] [ref=f3e5]
+    - generic [ref=f3e6]:
+      - searchbox "Buscar cards" [ref=f3e7]
+      - combobox "Filtrar por label" [ref=f3e8]:
+        - option "Todas as labels" [selected]
+      - combobox "Filtrar por agente" [ref=f3e9]:
+        - option "Todos os agentes" [selected]
+      - button "✨ Criar backlog" [ref=f3e10] [cursor=pointer]
+      - button "🤖 Agentes" [ref=f3e11] [cursor=pointer]
+      - button "🗄️ Projetos" [ref=f3e12] [cursor=pointer]
+      - button "🗂️ Explorador" [ref=f3e13] [cursor=pointer]
+      - button "🔁 Loops" [ref=f3e14] [cursor=pointer]
+      - button "🔕 Review OFF" [ref=f3e15] [cursor=pointer]
+      - button "+ Coluna" [ref=f3e16] [cursor=pointer]
+      - button "⤓ Export" [ref=f3e17] [cursor=pointer]
+      - button "⤒ Import" [ref=f3e18] [cursor=pointer]
+      - combobox "Selecionar tema" [ref=f3e19] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+  - generic [ref=f3e20]:
+    - generic [ref=f3e21]:
+      - generic [ref=f3e22]: Épicos
+      - generic [ref=f3e23]: "0"
+    - generic [ref=f3e24]:
+      - generic [ref=f3e25]: Histórias
+      - generic [ref=f3e26]: "0"
+    - generic [ref=f3e27]:
+      - generic [ref=f3e28]: Tasks
+      - generic [ref=f3e29]: "0"
+    - generic [ref=f3e30]:
+      - generic [ref=f3e31]: Pontos concluídos
+      - generic [ref=f3e32]: "0"
+      - generic [ref=f3e33]: /
+      - generic [ref=f3e34]: "0"
+    - generic "Progresso da sprint (story points)" [ref=f3e35]
+    - generic [ref=f3e36]:
+      - generic [ref=f3e37]: Bloqueados
+      - generic [ref=f3e38]: "0"
+  - generic [ref=f3e39]: Carregando board…
+  - generic [ref=f3e43]:
+    - generic [ref=f3e45]:
+      - heading "🤖 Agentes responsáveis" [level=2] [ref=f3e46]
+      - button "Fechar" [ref=f3e47] [cursor=pointer]: ✕
+    - generic [ref=f3e48]:
+      - generic [ref=f3e49]:
+        - generic [ref=f3e50]: 🧠 Modelo de AI do quadro (default)
+        - combobox [disabled] [ref=f3e51]:
+          - option "Usar default do login (—)" [selected]
+        - generic [ref=f3e52]:
+          - text: "Default efetivo:"
+          - strong [ref=f3e53]: —
+          - text: . Épicos, histórias e tasks herdam este modelo quando não definem o seu. 0 modelo(s) disponíveis para o login.
+      - generic [ref=f3e54]: Nenhum agente ainda.
+      - generic [ref=f3e56]:
+        - generic [ref=f3e57]: ➕ Novo agente
+        - textbox "Nome do novo agente…" [active] [ref=f3e59]
+        - combobox [disabled] [ref=f3e60]:
+          - option "Usar default do quadro (—)" [selected]
+        - 'textbox "Instruções do agente (AGENTS.md): como ele deve agir, foco, regras…" [ref=f3e61]'
+        - button "+ Agente" [disabled] [ref=f3e63] [cursor=pointer]

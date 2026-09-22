@@ -1,0 +1,729 @@
+- generic [ref=f2e3]:
+  - banner [ref=f2e4]:
+    - heading "Sprint Board" [level=1] [ref=f2e5]
+    - generic [ref=f2e6]:
+      - searchbox "Buscar cards" [ref=f2e7]
+      - combobox "Filtrar por label" [ref=f2e8]:
+        - option "Todas as labels" [selected]
+        - option "Bug"
+        - option "Feature"
+        - option "Chore"
+        - option "Docs"
+        - option "Urgent"
+      - combobox "Filtrar por agente" [ref=f2e9]:
+        - option "Todos os agentes" [selected]
+        - option "Claude-Dev"
+        - option "GPT-Reviewer"
+        - option "Copilot-QA"
+      - button "✨ Criar backlog" [ref=f2e10] [cursor=pointer]
+      - button "🤖 Agentes" [ref=f2e11] [cursor=pointer]
+      - button "🗄️ Projetos" [ref=f2e12] [cursor=pointer]
+      - button "🗂️ Explorador" [ref=f2e13] [cursor=pointer]
+      - button "🔁 Loops" [ref=f2e14] [cursor=pointer]
+      - button "🔕 Review OFF" [ref=f2e15] [cursor=pointer]
+      - button "+ Coluna" [ref=f2e16] [cursor=pointer]
+      - button "⤓ Export" [ref=f2e17] [cursor=pointer]
+      - button "⤒ Import" [ref=f2e18] [cursor=pointer]
+      - combobox "Selecionar tema" [ref=f2e19] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+  - generic [ref=f2e20]:
+    - generic [ref=f2e21]:
+      - generic [ref=f2e22]: Épicos
+      - generic [ref=f2e23]: "2"
+    - generic [ref=f2e24]:
+      - generic [ref=f2e25]: Histórias
+      - generic [ref=f2e26]: "5"
+    - generic [ref=f2e27]:
+      - generic [ref=f2e28]: Tasks
+      - generic [ref=f2e29]: "6"
+    - generic [ref=f2e30]:
+      - generic [ref=f2e31]: Pontos concluídos
+      - generic [ref=f2e32]: "0"
+      - generic [ref=f2e33]: /
+      - generic [ref=f2e34]: "21"
+    - generic "Progresso da sprint (story points)" [ref=f2e35]
+    - generic [ref=f2e36]:
+      - generic [ref=f2e37]: Bloqueados
+      - generic [ref=f2e38]: "1"
+  - generic [ref=f2e39]:
+    - complementary [ref=f2e50]:
+      - generic [ref=f2e51]:
+        - generic [ref=f2e52]: ÉPICOS
+        - generic [ref=f2e53]: "2"
+        - button "+ Épico" [ref=f2e54] [cursor=pointer]
+      - generic [ref=f2e55]:
+        - generic [ref=f2e56] [cursor=pointer]:
+          - generic [ref=f2e57]:
+            - generic [ref=f2e58]: EP-1
+            - generic [ref=f2e59]: IN PROGRESS
+          - generic [ref=f2e60]: Onboarding de novos clientes
+          - generic [ref=f2e62]: 🧩 0/4 histórias
+        - generic [ref=f2e64] [cursor=pointer]:
+          - generic [ref=f2e65]:
+            - generic [ref=f2e66]: EP-19
+            - generic [ref=f2e67]: IN PROGRESS
+          - generic [ref=f2e68]: AUDIT-F2 epico
+          - generic [ref=f2e70]: 🧩 0/1 histórias
+    - generic [ref=f2e72]:
+      - generic [ref=f2e73]:
+        - generic [ref=f2e74]:
+          - generic [ref=f2e75]: Backlog
+          - generic [ref=f2e76]: "1"
+          - generic [ref=f2e77]: 5 pts
+        - button "STORY US-8 5 Auditoria de acesso EP-1 · Onboarding de novos clientes 📝" [ref=f2e79] [cursor=pointer]:
+          - generic [ref=f2e80]:
+            - generic [ref=f2e81]: STORY
+            - generic [ref=f2e82]: US-8
+            - generic [ref=f2e83]: "5"
+          - generic [ref=f2e84]: Auditoria de acesso
+          - generic "Onboarding de novos clientes" [ref=f2e85]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f2e86]: 📝
+        - button "+ Adicionar história" [ref=f2e88] [cursor=pointer]
+      - generic [ref=f2e89]:
+        - generic [ref=f2e90]:
+          - generic [ref=f2e91]: To Do
+          - generic [ref=f2e92]: "1"
+          - generic [ref=f2e93]: 3 pts
+          - generic [ref=f2e94]: 1/5
+        - button "STORY US-6 ⛔ 3 Recuperação de senha EP-1 · Onboarding de novos clientes 📝" [ref=f2e96] [cursor=pointer]:
+          - generic [ref=f2e97]:
+            - generic [ref=f2e98]: STORY
+            - generic [ref=f2e99]: US-6
+            - generic [ref=f2e100]: ⛔
+            - generic [ref=f2e101]: "3"
+          - generic [ref=f2e102]: Recuperação de senha
+          - generic "Onboarding de novos clientes" [ref=f2e103]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f2e104]: 📝
+        - button "+ Adicionar história" [ref=f2e106] [cursor=pointer]
+      - generic [ref=f2e107]:
+        - generic [ref=f2e108]:
+          - generic [ref=f2e109]: In Progress
+          - generic [ref=f2e110]: "2"
+          - generic [ref=f2e111]: 5 pts
+          - generic [ref=f2e112]: 2/3
+        - generic [ref=f2e113]:
+          - button "STORY US-20 🙋 task precisa de você Validar separador vazio no slugify EP-19 · AUDIT-F2 epico" [ref=f2e114] [cursor=pointer]:
+            - generic [ref=f2e115]:
+              - generic [ref=f2e116]: STORY
+              - generic [ref=f2e117]: US-20
+              - generic "Uma task desta história precisa de você — abra a história para responder no chat da task." [ref=f2e118]: 🙋 task precisa de você
+            - generic [ref=f2e119]: Validar separador vazio no slugify
+            - generic "AUDIT-F2 epico" [ref=f2e120]: EP-19 · AUDIT-F2 epico
+          - button "STORY US-2 5 🙋 task precisa de você Cadastro com e-mail e senha EP-1 · Onboarding de novos clientes 📝" [ref=f2e121] [cursor=pointer]:
+            - generic [ref=f2e122]:
+              - generic [ref=f2e123]: STORY
+              - generic [ref=f2e124]: US-2
+              - generic [ref=f2e125]: "5"
+              - generic "Uma task desta história precisa de você — abra a história para responder no chat da task." [ref=f2e126]: 🙋 task precisa de você
+            - generic [ref=f2e127]: Cadastro com e-mail e senha
+            - generic "Onboarding de novos clientes" [ref=f2e128]: EP-1 · Onboarding de novos clientes
+            - generic [ref=f2e129]: 📝
+      - generic [ref=f2e131]:
+        - generic [ref=f2e132]:
+          - generic [ref=f2e133]: Review
+          - generic [ref=f2e134]: "1"
+          - generic [ref=f2e135]: 8 pts
+          - generic [ref=f2e136]: 1/3
+        - button "STORY US-7 8 Dashboard inicial EP-1 · Onboarding de novos clientes 📝" [ref=f2e138] [cursor=pointer]:
+          - generic [ref=f2e139]:
+            - generic [ref=f2e140]: STORY
+            - generic [ref=f2e141]: US-7
+            - generic [ref=f2e142]: "8"
+          - generic [ref=f2e143]: Dashboard inicial
+          - generic "Onboarding de novos clientes" [ref=f2e144]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f2e145]: 📝
+      - generic [ref=f2e148]:
+        - generic [ref=f2e149]: Done
+        - generic [ref=f2e150]: "0"
+    - status [ref=f2e152]
+  - generic [ref=f2e43]:
+    - generic [ref=f2e45]:
+      - heading "🗂️ Explorador" [level=2] [ref=f2e46]
+      - button "Fechar" [ref=f2e47] [cursor=pointer]: ✕
+    - generic [ref=f2e48]:
+      - tablist [ref=f2e153]:
+        - tab "📁 Repositório" [ref=f2e154] [cursor=pointer]
+        - tab "🐝 O que a AI sabe" [ref=f2e155] [cursor=pointer]
+        - tab "🕸️ Grafo" [active] [selected] [ref=f2e156] [cursor=pointer]
+        - tab "📖 Wiki" [ref=f2e157] [cursor=pointer]
+      - generic [ref=f2e158]:
+        - generic [ref=f2e159]: 📁 Projeto
+        - combobox [ref=f2e160]:
+          - option "audit-f44-slugify — https://github.com/simov/slugify.git" [selected]
+          - option "array-move — https://github.com/sindresorhus/array-move"
+      - generic [ref=f2e161]:
+        - textbox "Buscar nó por nome ou arquivo…" [ref=f2e163]
+        - generic [ref=f2e164]: Exibindo 84 de 84 nós · 76 de 76 arestas · 12 comunidades
+        - generic [ref=f2e165]:
+          - generic [ref=f2e166]:
+            - generic [ref=f2e167]: Comunidades (maiores primeiro)
+            - generic [ref=f2e168]:
+              - button "Change Log (30)" [ref=f2e169] [cursor=pointer]:
+                - text: Change Log
+                - generic [ref=f2e170]: (30)
+              - button "package.json (14)" [ref=f2e171] [cursor=pointer]:
+                - text: package.json
+                - generic [ref=f2e172]: (14)
+              - button "devDependencies (9)" [ref=f2e173] [cursor=pointer]:
+                - text: devDependencies
+                - generic [ref=f2e174]: (9)
+              - button "slugify (7)" [ref=f2e175] [cursor=pointer]:
+                - text: slugify
+                - generic [ref=f2e176]: (7)
+              - button "scripts (6)" [ref=f2e177] [cursor=pointer]:
+                - text: scripts
+                - generic [ref=f2e178]: (6)
+              - button "files (5)" [ref=f2e179] [cursor=pointer]:
+                - text: files
+                - generic [ref=f2e180]: (5)
+              - button "keywords (5)" [ref=f2e181] [cursor=pointer]:
+                - text: keywords
+                - generic [ref=f2e182]: (5)
+              - button "slugify.d.ts (3)" [ref=f2e183] [cursor=pointer]:
+                - text: slugify.d.ts
+                - generic [ref=f2e184]: (3)
+              - button "slugify.js (2)" [ref=f2e185] [cursor=pointer]:
+                - text: slugify.js
+                - generic [ref=f2e186]: (2)
+              - button "build.js (1)" [ref=f2e187] [cursor=pointer]:
+                - text: build.js
+                - generic [ref=f2e188]: (1)
+              - button "locales.js (1)" [ref=f2e189] [cursor=pointer]:
+                - text: locales.js
+                - generic [ref=f2e190]: (1)
+              - button "test/slugify.js (1)" [ref=f2e191] [cursor=pointer]:
+                - text: test/slugify.js
+                - generic [ref=f2e192]: (1)
+          - generic [ref=f2e193]:
+            - generic [ref=f2e194]: Esqueleto do sistema — os 84 nós mais conectados
+            - generic [ref=f2e195]:
+              - generic [ref=f2e196]:
+                - generic [ref=f2e197]: Change Log
+                - button "Change Log document grau 29 CHANGELOG.md" [ref=f2e199] [cursor=pointer]:
+                  - generic [ref=f2e200]:
+                    - generic [ref=f2e202]: Change Log
+                    - generic [ref=f2e203]: document
+                  - generic [ref=f2e204]: grau 29
+                  - code [ref=f2e208]: CHANGELOG.md
+                - button "CHANGELOG.md document grau 1 CHANGELOG.md" [ref=f2e209] [cursor=pointer]:
+                  - generic [ref=f2e210]:
+                    - generic [ref=f2e212]: CHANGELOG.md
+                    - generic [ref=f2e213]: document
+                  - generic [ref=f2e214]: grau 1
+                  - code [ref=f2e218]: CHANGELOG.md
+                - button "v1.0.1 (2016-08-08) document grau 1 CHANGELOG.md" [ref=f2e219] [cursor=pointer]:
+                  - generic [ref=f2e220]:
+                    - generic [ref=f2e222]: v1.0.1 (2016-08-08)
+                    - generic [ref=f2e223]: document
+                  - generic [ref=f2e224]: grau 1
+                  - code [ref=f2e228]: CHANGELOG.md
+                - button "v1.1.0 (2017-01-08) document grau 1 CHANGELOG.md" [ref=f2e229] [cursor=pointer]:
+                  - generic [ref=f2e230]:
+                    - generic [ref=f2e232]: v1.1.0 (2017-01-08)
+                    - generic [ref=f2e233]: document
+                  - generic [ref=f2e234]: grau 1
+                  - code [ref=f2e238]: CHANGELOG.md
+                - button "v1.2.2 (2017-11-09) document grau 1 CHANGELOG.md" [ref=f2e239] [cursor=pointer]:
+                  - generic [ref=f2e240]:
+                    - generic [ref=f2e242]: v1.2.2 (2017-11-09)
+                    - generic [ref=f2e243]: document
+                  - generic [ref=f2e244]: grau 1
+                  - code [ref=f2e248]: CHANGELOG.md
+                - button "v1.2.3 (2017-11-13) document grau 1 CHANGELOG.md" [ref=f2e249] [cursor=pointer]:
+                  - generic [ref=f2e250]:
+                    - generic [ref=f2e252]: v1.2.3 (2017-11-13)
+                    - generic [ref=f2e253]: document
+                  - generic [ref=f2e254]: grau 1
+                  - code [ref=f2e258]: CHANGELOG.md
+                - button "v1.2.6 (2017-11-24) document grau 1 CHANGELOG.md" [ref=f2e259] [cursor=pointer]:
+                  - generic [ref=f2e260]:
+                    - generic [ref=f2e262]: v1.2.6 (2017-11-24)
+                    - generic [ref=f2e263]: document
+                  - generic [ref=f2e264]: grau 1
+                  - code [ref=f2e268]: CHANGELOG.md
+                - button "v1.2.7 (2017-12-17) document grau 1 CHANGELOG.md" [ref=f2e269] [cursor=pointer]:
+                  - generic [ref=f2e270]:
+                    - generic [ref=f2e272]: v1.2.7 (2017-12-17)
+                    - generic [ref=f2e273]: document
+                  - generic [ref=f2e274]: grau 1
+                  - code [ref=f2e278]: CHANGELOG.md
+                - button "v1.2.8 (2017-12-23) document grau 1 CHANGELOG.md" [ref=f2e279] [cursor=pointer]:
+                  - generic [ref=f2e280]:
+                    - generic [ref=f2e282]: v1.2.8 (2017-12-23)
+                    - generic [ref=f2e283]: document
+                  - generic [ref=f2e284]: grau 1
+                  - code [ref=f2e288]: CHANGELOG.md
+                - button "v1.2.9 (2017-12-30) document grau 1 CHANGELOG.md" [ref=f2e289] [cursor=pointer]:
+                  - generic [ref=f2e290]:
+                    - generic [ref=f2e292]: v1.2.9 (2017-12-30)
+                    - generic [ref=f2e293]: document
+                  - generic [ref=f2e294]: grau 1
+                  - code [ref=f2e298]: CHANGELOG.md
+                - button "v1.3.0 (2018-05-13) document grau 1 CHANGELOG.md" [ref=f2e299] [cursor=pointer]:
+                  - generic [ref=f2e300]:
+                    - generic [ref=f2e302]: v1.3.0 (2018-05-13)
+                    - generic [ref=f2e303]: document
+                  - generic [ref=f2e304]: grau 1
+                  - code [ref=f2e308]: CHANGELOG.md
+                - button "v1.3.1 (2018-08-05) document grau 1 CHANGELOG.md" [ref=f2e309] [cursor=pointer]:
+                  - generic [ref=f2e310]:
+                    - generic [ref=f2e312]: v1.3.1 (2018-08-05)
+                    - generic [ref=f2e313]: document
+                  - generic [ref=f2e314]: grau 1
+                  - code [ref=f2e318]: CHANGELOG.md
+                - button "v1.3.4 (2018-12-06) document grau 1 CHANGELOG.md" [ref=f2e319] [cursor=pointer]:
+                  - generic [ref=f2e320]:
+                    - generic [ref=f2e322]: v1.3.4 (2018-12-06)
+                    - generic [ref=f2e323]: document
+                  - generic [ref=f2e324]: grau 1
+                  - code [ref=f2e328]: CHANGELOG.md
+                - button "v1.3.5 (2019-09-08) document grau 1 CHANGELOG.md" [ref=f2e329] [cursor=pointer]:
+                  - generic [ref=f2e330]:
+                    - generic [ref=f2e332]: v1.3.5 (2019-09-08)
+                    - generic [ref=f2e333]: document
+                  - generic [ref=f2e334]: grau 1
+                  - code [ref=f2e338]: CHANGELOG.md
+                - button "v1.3.6 (2019-11-03) document grau 1 CHANGELOG.md" [ref=f2e339] [cursor=pointer]:
+                  - generic [ref=f2e340]:
+                    - generic [ref=f2e342]: v1.3.6 (2019-11-03)
+                    - generic [ref=f2e343]: document
+                  - generic [ref=f2e344]: grau 1
+                  - code [ref=f2e348]: CHANGELOG.md
+                - button "v1.4.2 (2020-06-23) document grau 1 CHANGELOG.md" [ref=f2e349] [cursor=pointer]:
+                  - generic [ref=f2e350]:
+                    - generic [ref=f2e352]: v1.4.2 (2020-06-23)
+                    - generic [ref=f2e353]: document
+                  - generic [ref=f2e354]: grau 1
+                  - code [ref=f2e358]: CHANGELOG.md
+                - button "v1.4.5 (2020-07-26) document grau 1 CHANGELOG.md" [ref=f2e359] [cursor=pointer]:
+                  - generic [ref=f2e360]:
+                    - generic [ref=f2e362]: v1.4.5 (2020-07-26)
+                    - generic [ref=f2e363]: document
+                  - generic [ref=f2e364]: grau 1
+                  - code [ref=f2e368]: CHANGELOG.md
+                - button "v1.4.7 (2021-02-21) document grau 1 CHANGELOG.md" [ref=f2e369] [cursor=pointer]:
+                  - generic [ref=f2e370]:
+                    - generic [ref=f2e372]: v1.4.7 (2021-02-21)
+                    - generic [ref=f2e373]: document
+                  - generic [ref=f2e374]: grau 1
+                  - code [ref=f2e378]: CHANGELOG.md
+                - button "v1.5.1 (2021-05-02) document grau 1 CHANGELOG.md" [ref=f2e379] [cursor=pointer]:
+                  - generic [ref=f2e380]:
+                    - generic [ref=f2e382]: v1.5.1 (2021-05-02)
+                    - generic [ref=f2e383]: document
+                  - generic [ref=f2e384]: grau 1
+                  - code [ref=f2e388]: CHANGELOG.md
+                - button "v1.5.2 (2021-05-08) document grau 1 CHANGELOG.md" [ref=f2e389] [cursor=pointer]:
+                  - generic [ref=f2e390]:
+                    - generic [ref=f2e392]: v1.5.2 (2021-05-08)
+                    - generic [ref=f2e393]: document
+                  - generic [ref=f2e394]: grau 1
+                  - code [ref=f2e398]: CHANGELOG.md
+                - button "v1.5.3 (2021-05-11) document grau 1 CHANGELOG.md" [ref=f2e399] [cursor=pointer]:
+                  - generic [ref=f2e400]:
+                    - generic [ref=f2e402]: v1.5.3 (2021-05-11)
+                    - generic [ref=f2e403]: document
+                  - generic [ref=f2e404]: grau 1
+                  - code [ref=f2e408]: CHANGELOG.md
+                - button "v1.6.0 (2021-07-15) document grau 1 CHANGELOG.md" [ref=f2e409] [cursor=pointer]:
+                  - generic [ref=f2e410]:
+                    - generic [ref=f2e412]: v1.6.0 (2021-07-15)
+                    - generic [ref=f2e413]: document
+                  - generic [ref=f2e414]: grau 1
+                  - code [ref=f2e418]: CHANGELOG.md
+                - button "v1.6.1 (2021-10-04) document grau 1 CHANGELOG.md" [ref=f2e419] [cursor=pointer]:
+                  - generic [ref=f2e420]:
+                    - generic [ref=f2e422]: v1.6.1 (2021-10-04)
+                    - generic [ref=f2e423]: document
+                  - generic [ref=f2e424]: grau 1
+                  - code [ref=f2e428]: CHANGELOG.md
+                - button "v1.6.2 (2021-11-07) document grau 1 CHANGELOG.md" [ref=f2e429] [cursor=pointer]:
+                  - generic [ref=f2e430]:
+                    - generic [ref=f2e432]: v1.6.2 (2021-11-07)
+                    - generic [ref=f2e433]: document
+                  - generic [ref=f2e434]: grau 1
+                  - code [ref=f2e438]: CHANGELOG.md
+                - button "v1.6.3 (2021-11-22) document grau 1 CHANGELOG.md" [ref=f2e439] [cursor=pointer]:
+                  - generic [ref=f2e440]:
+                    - generic [ref=f2e442]: v1.6.3 (2021-11-22)
+                    - generic [ref=f2e443]: document
+                  - generic [ref=f2e444]: grau 1
+                  - code [ref=f2e448]: CHANGELOG.md
+                - button "v1.6.4 (2021-12-16) document grau 1 CHANGELOG.md" [ref=f2e449] [cursor=pointer]:
+                  - generic [ref=f2e450]:
+                    - generic [ref=f2e452]: v1.6.4 (2021-12-16)
+                    - generic [ref=f2e453]: document
+                  - generic [ref=f2e454]: grau 1
+                  - code [ref=f2e458]: CHANGELOG.md
+                - button "v1.6.5 (2022-01-03) document grau 1 CHANGELOG.md" [ref=f2e459] [cursor=pointer]:
+                  - generic [ref=f2e460]:
+                    - generic [ref=f2e462]: v1.6.5 (2022-01-03)
+                    - generic [ref=f2e463]: document
+                  - generic [ref=f2e464]: grau 1
+                  - code [ref=f2e468]: CHANGELOG.md
+                - button "v1.6.6 (2023-03-26) document grau 1 CHANGELOG.md" [ref=f2e469] [cursor=pointer]:
+                  - generic [ref=f2e470]:
+                    - generic [ref=f2e472]: v1.6.6 (2023-03-26)
+                    - generic [ref=f2e473]: document
+                  - generic [ref=f2e474]: grau 1
+                  - code [ref=f2e478]: CHANGELOG.md
+                - button "v1.6.8 (2026-03-13) document grau 1 CHANGELOG.md" [ref=f2e479] [cursor=pointer]:
+                  - generic [ref=f2e480]:
+                    - generic [ref=f2e482]: v1.6.8 (2026-03-13)
+                    - generic [ref=f2e483]: document
+                  - generic [ref=f2e484]: grau 1
+                  - code [ref=f2e488]: CHANGELOG.md
+                - button "v1.6.9 (2026-04-01) document grau 1 CHANGELOG.md" [ref=f2e489] [cursor=pointer]:
+                  - generic [ref=f2e490]:
+                    - generic [ref=f2e492]: v1.6.9 (2026-04-01)
+                    - generic [ref=f2e493]: document
+                  - generic [ref=f2e494]: grau 1
+                  - code [ref=f2e498]: CHANGELOG.md
+              - generic [ref=f2e499]:
+                - generic [ref=f2e500]: package.json
+                - button "package.json code grau 14 package.json" [ref=f2e502] [cursor=pointer]:
+                  - generic [ref=f2e503]:
+                    - generic [ref=f2e505]: package.json
+                    - generic [ref=f2e506]: code
+                  - generic [ref=f2e507]: grau 14
+                  - code [ref=f2e511]: package.json
+                - button "repository code grau 3 package.json" [ref=f2e512] [cursor=pointer]:
+                  - generic [ref=f2e513]:
+                    - generic [ref=f2e515]: repository
+                    - generic [ref=f2e516]: code
+                  - generic [ref=f2e517]: grau 3
+                  - code [ref=f2e521]: package.json
+                - button "engines code grau 2 package.json" [ref=f2e522] [cursor=pointer]:
+                  - generic [ref=f2e523]:
+                    - generic [ref=f2e525]: engines
+                    - generic [ref=f2e526]: code
+                  - generic [ref=f2e527]: grau 2
+                  - code [ref=f2e531]: package.json
+                - button "author code grau 1 package.json" [ref=f2e532] [cursor=pointer]:
+                  - generic [ref=f2e533]:
+                    - generic [ref=f2e535]: author
+                    - generic [ref=f2e536]: code
+                  - generic [ref=f2e537]: grau 1
+                  - code [ref=f2e541]: package.json
+                - button "description code grau 1 package.json" [ref=f2e542] [cursor=pointer]:
+                  - generic [ref=f2e543]:
+                    - generic [ref=f2e545]: description
+                    - generic [ref=f2e546]: code
+                  - generic [ref=f2e547]: grau 1
+                  - code [ref=f2e551]: package.json
+                - button "node code grau 1 package.json" [ref=f2e552] [cursor=pointer]:
+                  - generic [ref=f2e553]:
+                    - generic [ref=f2e555]: node
+                    - generic [ref=f2e556]: code
+                  - generic [ref=f2e557]: grau 1
+                  - code [ref=f2e561]: package.json
+                - button "homepage code grau 1 package.json" [ref=f2e562] [cursor=pointer]:
+                  - generic [ref=f2e563]:
+                    - generic [ref=f2e565]: homepage
+                    - generic [ref=f2e566]: code
+                  - generic [ref=f2e567]: grau 1
+                  - code [ref=f2e571]: package.json
+                - button "license code grau 1 package.json" [ref=f2e572] [cursor=pointer]:
+                  - generic [ref=f2e573]:
+                    - generic [ref=f2e575]: license
+                    - generic [ref=f2e576]: code
+                  - generic [ref=f2e577]: grau 1
+                  - code [ref=f2e581]: package.json
+                - button "main code grau 1 package.json" [ref=f2e582] [cursor=pointer]:
+                  - generic [ref=f2e583]:
+                    - generic [ref=f2e585]: main
+                    - generic [ref=f2e586]: code
+                  - generic [ref=f2e587]: grau 1
+                  - code [ref=f2e591]: package.json
+                - button "name code grau 1 package.json" [ref=f2e592] [cursor=pointer]:
+                  - generic [ref=f2e593]:
+                    - generic [ref=f2e595]: name
+                    - generic [ref=f2e596]: code
+                  - generic [ref=f2e597]: grau 1
+                  - code [ref=f2e601]: package.json
+                - button "type code grau 1 package.json" [ref=f2e602] [cursor=pointer]:
+                  - generic [ref=f2e603]:
+                    - generic [ref=f2e605]: type
+                    - generic [ref=f2e606]: code
+                  - generic [ref=f2e607]: grau 1
+                  - code [ref=f2e611]: package.json
+                - button "url code grau 1 package.json" [ref=f2e612] [cursor=pointer]:
+                  - generic [ref=f2e613]:
+                    - generic [ref=f2e615]: url
+                    - generic [ref=f2e616]: code
+                  - generic [ref=f2e617]: grau 1
+                  - code [ref=f2e621]: package.json
+                - button "types code grau 1 package.json" [ref=f2e622] [cursor=pointer]:
+                  - generic [ref=f2e623]:
+                    - generic [ref=f2e625]: types
+                    - generic [ref=f2e626]: code
+                  - generic [ref=f2e627]: grau 1
+                  - code [ref=f2e631]: package.json
+                - button "version code grau 1 package.json" [ref=f2e632] [cursor=pointer]:
+                  - generic [ref=f2e633]:
+                    - generic [ref=f2e635]: version
+                    - generic [ref=f2e636]: code
+                  - generic [ref=f2e637]: grau 1
+                  - code [ref=f2e641]: package.json
+              - generic [ref=f2e642]:
+                - generic [ref=f2e643]: scripts
+                - button "scripts code grau 6 package.json" [ref=f2e645] [cursor=pointer]:
+                  - generic [ref=f2e646]:
+                    - generic [ref=f2e648]: scripts
+                    - generic [ref=f2e649]: code
+                  - generic [ref=f2e650]: grau 6
+                  - code [ref=f2e654]: package.json
+                - button "build code grau 1 package.json" [ref=f2e655] [cursor=pointer]:
+                  - generic [ref=f2e656]:
+                    - generic [ref=f2e658]: build
+                    - generic [ref=f2e659]: code
+                  - generic [ref=f2e660]: grau 1
+                  - code [ref=f2e664]: package.json
+                - button "build:changelog code grau 1 package.json" [ref=f2e665] [cursor=pointer]:
+                  - generic [ref=f2e666]:
+                    - generic [ref=f2e668]: build:changelog
+                    - generic [ref=f2e669]: code
+                  - generic [ref=f2e670]: grau 1
+                  - code [ref=f2e674]: package.json
+                - button "test code grau 1 package.json" [ref=f2e675] [cursor=pointer]:
+                  - generic [ref=f2e676]:
+                    - generic [ref=f2e678]: test
+                    - generic [ref=f2e679]: code
+                  - generic [ref=f2e680]: grau 1
+                  - code [ref=f2e684]: package.json
+                - button "test:ci code grau 1 package.json" [ref=f2e685] [cursor=pointer]:
+                  - generic [ref=f2e686]:
+                    - generic [ref=f2e688]: test:ci
+                    - generic [ref=f2e689]: code
+                  - generic [ref=f2e690]: grau 1
+                  - code [ref=f2e694]: package.json
+                - button "test:cov code grau 1 package.json" [ref=f2e695] [cursor=pointer]:
+                  - generic [ref=f2e696]:
+                    - generic [ref=f2e698]: test:cov
+                    - generic [ref=f2e699]: code
+                  - generic [ref=f2e700]: grau 1
+                  - code [ref=f2e704]: package.json
+              - generic [ref=f2e705]:
+                - generic [ref=f2e706]: slugify
+                - button "slugify document grau 6 README.md" [ref=f2e708] [cursor=pointer]:
+                  - generic [ref=f2e709]:
+                    - generic [ref=f2e711]: slugify
+                    - generic [ref=f2e712]: document
+                  - generic [ref=f2e713]: grau 6
+                  - code [ref=f2e717]: README.md
+                - button "README.md document grau 1 README.md" [ref=f2e718] [cursor=pointer]:
+                  - generic [ref=f2e719]:
+                    - generic [ref=f2e721]: README.md
+                    - generic [ref=f2e722]: document
+                  - generic [ref=f2e723]: grau 1
+                  - code [ref=f2e727]: README.md
+                - button "Contribute document grau 1 README.md" [ref=f2e728] [cursor=pointer]:
+                  - generic [ref=f2e729]:
+                    - generic [ref=f2e731]: Contribute
+                    - generic [ref=f2e732]: document
+                  - generic [ref=f2e733]: grau 1
+                  - code [ref=f2e737]: README.md
+                - button "Extend document grau 1 README.md" [ref=f2e738] [cursor=pointer]:
+                  - generic [ref=f2e739]:
+                    - generic [ref=f2e741]: Extend
+                    - generic [ref=f2e742]: document
+                  - generic [ref=f2e743]: grau 1
+                  - code [ref=f2e747]: README.md
+                - button "Locales document grau 1 README.md" [ref=f2e748] [cursor=pointer]:
+                  - generic [ref=f2e749]:
+                    - generic [ref=f2e751]: Locales
+                    - generic [ref=f2e752]: document
+                  - generic [ref=f2e753]: grau 1
+                  - code [ref=f2e757]: README.md
+                - button "Options document grau 1 README.md" [ref=f2e758] [cursor=pointer]:
+                  - generic [ref=f2e759]:
+                    - generic [ref=f2e761]: Options
+                    - generic [ref=f2e762]: document
+                  - generic [ref=f2e763]: grau 1
+                  - code [ref=f2e767]: README.md
+                - button "Remove document grau 1 README.md" [ref=f2e768] [cursor=pointer]:
+                  - generic [ref=f2e769]:
+                    - generic [ref=f2e771]: Remove
+                    - generic [ref=f2e772]: document
+                  - generic [ref=f2e773]: grau 1
+                  - code [ref=f2e777]: README.md
+              - generic [ref=f2e778]:
+                - generic [ref=f2e779]: devDependencies
+                - button "devDependencies code grau 5 package.json" [ref=f2e781] [cursor=pointer]:
+                  - generic [ref=f2e782]:
+                    - generic [ref=f2e784]: devDependencies
+                    - generic [ref=f2e785]: code
+                  - generic [ref=f2e786]: grau 5
+                  - code [ref=f2e790]: package.json
+                - button "coveralls code grau 2 package.json" [ref=f2e791] [cursor=pointer]:
+                  - generic [ref=f2e792]:
+                    - generic [ref=f2e794]: coveralls
+                    - generic [ref=f2e795]: code
+                  - generic [ref=f2e796]: grau 2
+                  - code [ref=f2e800]: package.json
+                - button "github-changes code grau 2 package.json" [ref=f2e801] [cursor=pointer]:
+                  - generic [ref=f2e802]:
+                    - generic [ref=f2e804]: github-changes
+                    - generic [ref=f2e805]: code
+                  - generic [ref=f2e806]: grau 2
+                  - code [ref=f2e810]: package.json
+                - button "mocha code grau 2 package.json" [ref=f2e811] [cursor=pointer]:
+                  - generic [ref=f2e812]:
+                    - generic [ref=f2e814]: mocha
+                    - generic [ref=f2e815]: code
+                  - generic [ref=f2e816]: grau 2
+                  - code [ref=f2e820]: package.json
+                - button "nyc code grau 2 package.json" [ref=f2e821] [cursor=pointer]:
+                  - generic [ref=f2e822]:
+                    - generic [ref=f2e824]: nyc
+                    - generic [ref=f2e825]: code
+                  - generic [ref=f2e826]: grau 2
+                  - code [ref=f2e830]: package.json
+                - button "coveralls concept grau 1 package.json" [ref=f2e831] [cursor=pointer]:
+                  - generic [ref=f2e832]:
+                    - generic [ref=f2e834]: coveralls
+                    - generic [ref=f2e835]: concept
+                  - generic [ref=f2e836]: grau 1
+                  - code [ref=f2e840]: package.json
+                - button "github-changes concept grau 1 package.json" [ref=f2e841] [cursor=pointer]:
+                  - generic [ref=f2e842]:
+                    - generic [ref=f2e844]: github-changes
+                    - generic [ref=f2e845]: concept
+                  - generic [ref=f2e846]: grau 1
+                  - code [ref=f2e850]: package.json
+                - button "mocha concept grau 1 package.json" [ref=f2e851] [cursor=pointer]:
+                  - generic [ref=f2e852]:
+                    - generic [ref=f2e854]: mocha
+                    - generic [ref=f2e855]: concept
+                  - generic [ref=f2e856]: grau 1
+                  - code [ref=f2e860]: package.json
+                - button "nyc concept grau 1 package.json" [ref=f2e861] [cursor=pointer]:
+                  - generic [ref=f2e862]:
+                    - generic [ref=f2e864]: nyc
+                    - generic [ref=f2e865]: concept
+                  - generic [ref=f2e866]: grau 1
+                  - code [ref=f2e870]: package.json
+              - generic [ref=f2e871]:
+                - generic [ref=f2e872]: files
+                - button "files code grau 5 package.json" [ref=f2e874] [cursor=pointer]:
+                  - generic [ref=f2e875]:
+                    - generic [ref=f2e877]: files
+                    - generic [ref=f2e878]: code
+                  - generic [ref=f2e879]: grau 5
+                  - code [ref=f2e883]: package.json
+                - button "LICENSE concept grau 1 package.json" [ref=f2e884] [cursor=pointer]:
+                  - generic [ref=f2e885]:
+                    - generic [ref=f2e887]: LICENSE
+                    - generic [ref=f2e888]: concept
+                  - generic [ref=f2e889]: grau 1
+                  - code [ref=f2e893]: package.json
+                - button "README.md concept grau 1 package.json" [ref=f2e894] [cursor=pointer]:
+                  - generic [ref=f2e895]:
+                    - generic [ref=f2e897]: README.md
+                    - generic [ref=f2e898]: concept
+                  - generic [ref=f2e899]: grau 1
+                  - code [ref=f2e903]: package.json
+                - button "slugify.d.ts concept grau 1 package.json" [ref=f2e904] [cursor=pointer]:
+                  - generic [ref=f2e905]:
+                    - generic [ref=f2e907]: slugify.d.ts
+                    - generic [ref=f2e908]: concept
+                  - generic [ref=f2e909]: grau 1
+                  - code [ref=f2e913]: package.json
+                - button "slugify.js concept grau 1 package.json" [ref=f2e914] [cursor=pointer]:
+                  - generic [ref=f2e915]:
+                    - generic [ref=f2e917]: slugify.js
+                    - generic [ref=f2e918]: concept
+                  - generic [ref=f2e919]: grau 1
+                  - code [ref=f2e923]: package.json
+              - generic [ref=f2e924]:
+                - generic [ref=f2e925]: keywords
+                - button "keywords code grau 5 package.json" [ref=f2e927] [cursor=pointer]:
+                  - generic [ref=f2e928]:
+                    - generic [ref=f2e930]: keywords
+                    - generic [ref=f2e931]: code
+                  - generic [ref=f2e932]: grau 5
+                  - code [ref=f2e936]: package.json
+                - button "slug concept grau 1 package.json" [ref=f2e937] [cursor=pointer]:
+                  - generic [ref=f2e938]:
+                    - generic [ref=f2e940]: slug
+                    - generic [ref=f2e941]: concept
+                  - generic [ref=f2e942]: grau 1
+                  - code [ref=f2e946]: package.json
+                - button "slugify concept grau 1 package.json" [ref=f2e947] [cursor=pointer]:
+                  - generic [ref=f2e948]:
+                    - generic [ref=f2e950]: slugify
+                    - generic [ref=f2e951]: concept
+                  - generic [ref=f2e952]: grau 1
+                  - code [ref=f2e956]: package.json
+                - button "url concept grau 1 package.json" [ref=f2e957] [cursor=pointer]:
+                  - generic [ref=f2e958]:
+                    - generic [ref=f2e960]: url
+                    - generic [ref=f2e961]: concept
+                  - generic [ref=f2e962]: grau 1
+                  - code [ref=f2e966]: package.json
+                - button "urlify concept grau 1 package.json" [ref=f2e967] [cursor=pointer]:
+                  - generic [ref=f2e968]:
+                    - generic [ref=f2e970]: urlify
+                    - generic [ref=f2e971]: concept
+                  - generic [ref=f2e972]: grau 1
+                  - code [ref=f2e976]: package.json
+              - generic [ref=f2e977]:
+                - generic [ref=f2e978]: slugify.d.ts
+                - button "slugify.d.ts code grau 2 slugify.d.ts" [ref=f2e980] [cursor=pointer]:
+                  - generic [ref=f2e981]:
+                    - generic [ref=f2e983]: slugify.d.ts
+                    - generic [ref=f2e984]: code
+                  - generic [ref=f2e985]: grau 2
+                  - code [ref=f2e989]: slugify.d.ts
+                - button "ExtendArgs code grau 1 slugify.d.ts" [ref=f2e990] [cursor=pointer]:
+                  - generic [ref=f2e991]:
+                    - generic [ref=f2e993]: ExtendArgs
+                    - generic [ref=f2e994]: code
+                  - generic [ref=f2e995]: grau 1
+                  - code [ref=f2e999]: slugify.d.ts
+                - button "slugify code grau 1 slugify.d.ts" [ref=f2e1000] [cursor=pointer]:
+                  - generic [ref=f2e1001]:
+                    - generic [ref=f2e1003]: slugify
+                    - generic [ref=f2e1004]: code
+                  - generic [ref=f2e1005]: grau 1
+                  - code [ref=f2e1009]: slugify.d.ts
+              - generic [ref=f2e1010]:
+                - generic [ref=f2e1011]: slugify.js
+                - button "slugify.js code grau 1 slugify.js" [ref=f2e1013] [cursor=pointer]:
+                  - generic [ref=f2e1014]:
+                    - generic [ref=f2e1016]: slugify.js
+                    - generic [ref=f2e1017]: code
+                  - generic [ref=f2e1018]: grau 1
+                  - code [ref=f2e1022]: slugify.js
+                - button "replace() code grau 1 slugify.js" [ref=f2e1023] [cursor=pointer]:
+                  - generic [ref=f2e1024]:
+                    - generic [ref=f2e1026]: replace()
+                    - generic [ref=f2e1027]: code
+                  - generic [ref=f2e1028]: grau 1
+                  - code [ref=f2e1032]: slugify.js
+              - generic [ref=f2e1033]:
+                - generic [ref=f2e1034]: build.js
+                - button "build.js code grau 0 bin/build.js" [ref=f2e1036] [cursor=pointer]:
+                  - generic [ref=f2e1037]:
+                    - generic [ref=f2e1039]: build.js
+                    - generic [ref=f2e1040]: code
+                  - generic [ref=f2e1041]: grau 0
+                  - code [ref=f2e1045]: bin/build.js
+              - generic [ref=f2e1046]:
+                - generic [ref=f2e1047]: locales.js
+                - button "locales.js code grau 0 test/locales.js" [ref=f2e1049] [cursor=pointer]:
+                  - generic [ref=f2e1050]:
+                    - generic [ref=f2e1052]: locales.js
+                    - generic [ref=f2e1053]: code
+                  - generic [ref=f2e1054]: grau 0
+                  - code [ref=f2e1058]: test/locales.js
+              - generic [ref=f2e1059]:
+                - generic [ref=f2e1060]: test/slugify.js
+                - button "test/slugify.js code grau 0 test/slugify.js" [ref=f2e1062] [cursor=pointer]:
+                  - generic [ref=f2e1063]:
+                    - generic [ref=f2e1065]: test/slugify.js
+                    - generic [ref=f2e1066]: code
+                  - generic [ref=f2e1067]: grau 0
+                  - code [ref=f2e1071]: test/slugify.js

@@ -74,3 +74,82 @@ que nenhum valor de token aparece.
   disponibilidade de seleção. Rejeitada.
 - **Um controller solto para adapters:** a spec pede reusar o `@Controller('agents')`
   existente (`GET /agents/models`) para não multiplicar controllers. Adotado.
+
+## Emenda — 2026-08-29 (US-F3.1): `AGENT_ADAPTER` é a ÚNICA fonte de verdade
+
+A decisão original deixou **duas chaves para a mesma decisão**: `AGENT_ADAPTER`
+e o legado `AGENT_RUNNER_KIND` (o trecho "Retrocompat: `AGENT_RUNNER_KIND=mock`
+… continua forçando o mock" no bullet de DI). Esta emenda **supersede esse
+trecho**: a seleção de runner tem uma única fonte de verdade.
+
+- **Precedência (implementada em `resolveAgentAdapter`, `config.ts`):**
+  1. `AGENT_ADAPTER` explícito (não-vazio) **vence** — valor desconhecido cai
+     no default de **catálogo** `copilot-cli` (`DEFAULT_AGENT_ADAPTER`, o mesmo
+     fallback do registry para kinds não-wired);
+  2. ausente/vazio, o alias **DEPRECADO** `AGENT_RUNNER_KIND`
+     (`mock|copilot-cli`) é honrado — com **um** warning de deprecação no boot
+     (não a cada resolução), dizendo para usar `AGENT_ADAPTER`;
+  3. sem os dois → default do **processo** `mock`
+     (`DEFAULT_PROCESS_AGENT_ADAPTER`), preservando o ADR-0014 (emendado na
+     mesma data): dev sem `.env` fica no runner determinístico, sem
+     subprocesso real/quota/login.
+- **Config:** `config.agentAdapter` é o único campo de seleção;
+  `config.agent.runnerKind` vira campo **legado DERIVADO** de `agentAdapter`
+  (`mock` sse `agentAdapter === 'mock'`) — os dois não podem mais divergir.
+- **DI:** o `useFactory` de `AGENT_RUNNER` não consulta mais
+  `AGENT_RUNNER_KIND`/`runnerKind`; resolve sempre via
+  `registry.resolveActive()`.
+- **Janela de deprecação:** `AGENT_RUNNER_KIND` (e o campo derivado
+  `agent.runnerKind`) permanecem por **uma versão** e serão removidos na
+  seguinte. `.env.example` documenta `AGENT_ADAPTER` como a chave; o compose
+  base faz **passthrough puro** das duas envs com default vazio
+  (`${AGENT_ADAPTER:-}` / `${AGENT_RUNNER_KIND:-}`, vazio conta como ausente)
+  — o compose não tem opinião própria sobre a seleção: quem só tem o alias no
+  `.env` segue honrado (com o warning), e sem nada setado o boot cai no
+  default do processo `mock` sem warning.
+- **Nenhuma mudança de comportamento:** a matriz completa (nenhuma env / só
+  legado / só `AGENT_ADAPTER` / ambos / valores desconhecidos) resolve
+  exatamente como antes da unificação. O `isDefault` de `GET /agents/adapters`
+  segue refletindo o adapter **ativo efetivo** (`config.agentAdapter`), não um
+  default de catálogo.
+
+## Emenda — 2026-08-29 (US-F3.10): cascata de adapter por card
+
+O épico EP-F3 tem foco declarado em **custo**: trocar de vendor globalmente não
+basta — é preciso rodar task simples em adapter barato e task difícil em caro.
+Esta emenda torna a seleção de adapter **por card**, em cascata, mantendo
+`AGENT_ADAPTER` como a cauda global da resolução (a emenda US-F3.1 permanece:
+é a única fonte de verdade **global**).
+
+- **Schema (aditivo):** `Card.adapter String?` e `Board.defaultAdapter String?`,
+  espelhando o par `model`/`defaultModel`. Escrita validada contra o catálogo
+  de kinds (`AGENT_ADAPTER_KINDS`) nos schemas Zod da API; valores desconhecidos
+  que porventura estejam no banco são IGNORADOS na leitura (a cascata continua).
+- **Resolução (espelho de `resolveCardModel`):** task → story → epic →
+  `board.defaultAdapter` → `config.agentAdapter` (que já embute `AGENT_ADAPTER`
+  → default do processo `mock`). Implementada em
+  `Orchestrator.resolveCardAdapter` (dispatch) e `CardsService.resolveAdapter`/
+  `attachResolvedModel` (leitura da API: `resolvedAdapter` no card).
+- **Runner por card:** `runIteration` resolve o runner pelo adapter efetivo via
+  `AgentAdapterRegistry.resolve(kind)` (instâncias cacheadas pelo registry). O
+  token `AGENT_RUNNER` **permanece** como estava (resolvido no boot) e é o
+  fallback quando o registry não está injetado — specs que instanciam o
+  `Orchestrator` posicionalmente seguem válidas (o registry entra como último
+  parâmetro `@Optional()`).
+- **Recovery lane VENCE a cascata** (`resolveDispatchAdapter`): wake de
+  recuperação status-only roda no adapter **global** com o `AGENT_CHEAP_MODEL_ID`
+  (como antes). Racional: o cheap model id vive no namespace de modelos do
+  adapter global (em outro vendor seria 404), e a recuperação nunca pode ficar
+  mais cara do que hoje — nem herdar o adapter caro do card.
+- **Modelo × vendor (débito da US-F3.9):** o `TanStackRunner` valida CEDO (antes
+  de rede/ESM) o modelo por-card contra o vendor, via `vendorModelIssue` — só
+  acusa mismatch **certo** (alias do domínio como 'opus', id no formato do
+  catálogo Copilot/org, ou id que casa o padrão de OUTRO vendor); id neutro/
+  desconhecido passa (o provider é quem valida — mapear aliases exigiria um
+  catálogo vivo por vendor, com risco de drift e substituição silenciosa
+  errada). Mismatch vira `fatalError` legível (BUG-A7): escala a humano com
+  instrução acionável em vez de 404 opaco no meio do loop. O override
+  `<VENDOR>_MODEL` é escolha explícita do operador e não passa pela checagem.
+- **`GET /agents/adapters` inalterado:** `isDefault` segue marcando o adapter
+  global efetivo — que agora é, precisamente, a cauda da cascata. O adapter
+  efetivo POR CARD é exposto pelos endpoints de cards (`resolvedAdapter`).

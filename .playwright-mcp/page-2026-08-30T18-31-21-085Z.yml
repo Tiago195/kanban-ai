@@ -1,0 +1,129 @@
+- generic [ref=f31e4]:
+  - complementary "Áreas do explorador" [ref=f31e5]:
+    - button "Voltar ao quadro" [ref=f31e6] [cursor=pointer]:
+      - generic [ref=f31e7]: ←
+    - navigation "Áreas" [ref=f31e9]:
+      - button "Projetos" [ref=f31e10] [cursor=pointer]:
+        - generic [ref=f31e11]: 🗄️
+      - button "O que a AI sabe" [ref=f31e13] [cursor=pointer]:
+        - generic [ref=f31e14]: 🐝
+      - button "Grafo" [ref=f31e16] [cursor=pointer]:
+        - generic [ref=f31e17]: 🕸️
+      - button "Wiki" [ref=f31e19] [cursor=pointer]:
+        - generic [ref=f31e20]: 📖
+  - generic [ref=f31e22]:
+    - banner [ref=f31e23]:
+      - heading "O que a AI sabe" [level=1] [ref=f31e24]: 🐝 O que a AI sabe
+      - generic [ref=f31e25]: os neurônios que a frota aprendeu
+      - generic [ref=f31e30]:
+        - generic [ref=f31e31]: 📁 Projeto
+        - combobox "Projeto selecionado" [ref=f31e32]:
+          - option "audit-f44-slugify — https://github.com/simov/slugify.git"
+          - option "array-move — https://github.com/sindresorhus/array-move" [selected]
+      - combobox "Selecionar tema" [ref=f31e26] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro"
+        - option "◐ Alto contraste" [selected]
+    - main [ref=f31e27]:
+      - generic [ref=f31e34]:
+        - textbox "Buscar por nó, arquivo, pergunta, título ou tag…" [ref=f31e35]
+        - generic [ref=f31e36]: Destilado de 7 memória(s) pelo reflect · vereditos de 2026-08-30 · o código que mudou desde o aprendizado é sinalizado
+        - generic [ref=f31e37]:
+          - generic [ref=f31e38]: 🧠 O que a AI aprendeu (2)
+          - generic [ref=f31e39]:
+            - generic [ref=f31e40]:
+              - generic [ref=f31e41]:
+                - generic [ref=f31e42]: ✓ preferido
+                - strong [ref=f31e43]:
+                  - code [ref=f31e44]: arrayMoveImmutable()
+                - code [ref=f31e45]: index.js
+              - generic [ref=f31e46]: 2× útil · último sinal 2026-08-25
+              - list [ref=f31e47]:
+                - listitem [ref=f31e48]:
+                  - text: “Qual função usar para reordenar cards de uma lista?”
+                  - generic [ref=f31e49]: — 2026-08-25 · útil
+                - listitem [ref=f31e50]:
+                  - text: “Como mover um item sem mutar o array original?”
+                  - generic [ref=f31e51]: — 2026-08-10 · útil
+            - generic [ref=f31e52]:
+              - generic [ref=f31e53]:
+                - generic [ref=f31e54]: · tentativo
+                - strong [ref=f31e55]:
+                  - code [ref=f31e56]: arrayMoveMutable(array, fromIndex, toIndex)
+                - code [ref=f31e57]: readme.md
+              - generic [ref=f31e58]: 1× útil (ainda não corroborado) · último sinal 2026-08-22
+              - list [ref=f31e59]:
+                - listitem [ref=f31e60]:
+                  - text: “Onde está documentado o contrato de arrayMoveMutable?”
+                  - generic [ref=f31e61]: — 2026-08-22 · útil
+        - generic [ref=f31e62]:
+          - generic [ref=f31e63]: ⚖️ Contestado (1)
+          - generic [ref=f31e65]:
+            - generic [ref=f31e66]:
+              - generic [ref=f31e67]: ⚖ contestado
+              - strong [ref=f31e68]:
+                - code [ref=f31e69]: arrayMoveMutable()
+              - code [ref=f31e70]: index.js
+            - generic [ref=f31e71]: "1× útil · 1× beco/correção → a recência diz: beco sem saída · último sinal 2026-08-28"
+            - list [ref=f31e72]:
+              - listitem [ref=f31e73]:
+                - text: “arrayMoveMutable modifica o array recebido?”
+                - generic [ref=f31e74]: — 2026-08-20 · útil
+        - generic [ref=f31e75]:
+          - generic [ref=f31e76]: 🚧 Becos sem saída (2)
+          - generic [ref=f31e77]:
+            - generic [ref=f31e78]:
+              - generic [ref=f31e79]:
+                - generic [ref=f31e80]: ⛔ não re-deduzir
+                - generic [ref=f31e81]: “Existe suporte para mover um range de itens de uma vez?”
+              - generic [ref=f31e82]: · 2026-08-27
+            - generic [ref=f31e84]:
+              - generic [ref=f31e85]:
+                - generic [ref=f31e86]: ⛔ não re-deduzir
+                - generic [ref=f31e87]: “arrayMoveMutable devolve o array reordenado?”
+              - generic [ref=f31e88]:
+                - code [ref=f31e89]: index_arraymovemutable
+                - generic [ref=f31e90]: · 2026-08-28
+        - generic [ref=f31e91]:
+          - generic [ref=f31e92]: ✏️ Correções (1)
+          - generic [ref=f31e94]:
+            - generic [ref=f31e95]: "“arrayMove aceita índice negativo?” → Aceita: índices negativos contam a partir do fim do array (ver readme)."
+            - generic [ref=f31e96]: 2026-08-26
+        - group [ref=f31e97]:
+          - generic "Memórias cruas (7)" [ref=f31e98] [cursor=pointer]
+          - generic [ref=f31e99]:
+            - 'button "Como mover um item sem mutar o array original? memory/learning_20260810_100000_como_mover_um_item_sem_mutar_o_array_original.md Usar arrayMoveImmutable(array, from, to): devolve um array NOVO com o item movido. learning" [ref=f31e100] [cursor=pointer]':
+              - strong [ref=f31e102]: Como mover um item sem mutar o array original?
+              - code [ref=f31e103]: memory/learning_20260810_100000_como_mover_um_item_sem_mutar_o_array_original.md
+              - generic [ref=f31e104]: "Usar arrayMoveImmutable(array, from, to): devolve um array NOVO com o item movido."
+              - generic [ref=f31e105]: learning
+            - 'button "arrayMoveMutable modifica o array recebido? memory/learning_20260820_140000_arraymovemutable_modifica_o_array_recebido.md Sim: arrayMoveMutable usa splice in-place sobre o próprio array. learning" [ref=f31e107] [cursor=pointer]':
+              - strong [ref=f31e109]: arrayMoveMutable modifica o array recebido?
+              - code [ref=f31e110]: memory/learning_20260820_140000_arraymovemutable_modifica_o_array_recebido.md
+              - generic [ref=f31e111]: "Sim: arrayMoveMutable usa splice in-place sobre o próprio array."
+              - generic [ref=f31e112]: learning
+            - button "Onde está documentado o contrato de arrayMoveMutable? memory/learning_20260822_111500_onde_está_documentado_o_contrato_de_arraymovemutab.md No readme.md, seção arrayMoveMutable(array, fromIndex, toIndex). learning" [ref=f31e114] [cursor=pointer]:
+              - strong [ref=f31e116]: Onde está documentado o contrato de arrayMoveMutable?
+              - code [ref=f31e117]: memory/learning_20260822_111500_onde_está_documentado_o_contrato_de_arraymovemutab.md
+              - generic [ref=f31e118]: No readme.md, seção arrayMoveMutable(array, fromIndex, toIndex).
+              - generic [ref=f31e119]: learning
+            - button "Qual função usar para reordenar cards de uma lista? memory/learning_20260825_093000_qual_função_usar_para_reordenar_cards_de_uma_lista.md arrayMoveImmutable — reordena sem efeito colateral; ideal para estado de UI. learning" [ref=f31e121] [cursor=pointer]:
+              - strong [ref=f31e123]: Qual função usar para reordenar cards de uma lista?
+              - code [ref=f31e124]: memory/learning_20260825_093000_qual_função_usar_para_reordenar_cards_de_uma_lista.md
+              - generic [ref=f31e125]: arrayMoveImmutable — reordena sem efeito colateral; ideal para estado de UI.
+              - generic [ref=f31e126]: learning
+            - button "arrayMove aceita índice negativo? memory/learning_20260826_132000_arraymove_aceita_índice_negativo.md Achei que não aceitava. learning" [ref=f31e128] [cursor=pointer]:
+              - strong [ref=f31e130]: arrayMove aceita índice negativo?
+              - code [ref=f31e131]: memory/learning_20260826_132000_arraymove_aceita_índice_negativo.md
+              - generic [ref=f31e132]: Achei que não aceitava.
+              - generic [ref=f31e133]: learning
+            - button "Existe suporte para mover um range de itens de uma vez? memory/learning_20260827_080000_existe_suporte_para_mover_um_range_de_itens_de_uma.md Não existe API de range no pacote — só um item por chamada. learning" [ref=f31e135] [cursor=pointer]:
+              - strong [ref=f31e137]: Existe suporte para mover um range de itens de uma vez?
+              - code [ref=f31e138]: memory/learning_20260827_080000_existe_suporte_para_mover_um_range_de_itens_de_uma.md
+              - generic [ref=f31e139]: Não existe API de range no pacote — só um item por chamada.
+              - generic [ref=f31e140]: learning
+            - button "arrayMoveMutable devolve o array reordenado? memory/learning_20260828_164500_arraymovemutable_devolve_o_array_reordenado.md Tentei usar o retorno — é undefined; o caminho não levou a nada. learning" [ref=f31e142] [cursor=pointer]:
+              - strong [ref=f31e144]: arrayMoveMutable devolve o array reordenado?
+              - code [ref=f31e145]: memory/learning_20260828_164500_arraymovemutable_devolve_o_array_reordenado.md
+              - generic [ref=f31e146]: Tentei usar o retorno — é undefined; o caminho não levou a nada.
+              - generic [ref=f31e147]: learning

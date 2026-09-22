@@ -1,0 +1,79 @@
+- generic [ref=f20e4]:
+  - complementary "Áreas do explorador" [ref=f20e5]:
+    - button "Voltar ao quadro" [ref=f20e6] [cursor=pointer]:
+      - generic [ref=f20e7]: ←
+    - navigation "Áreas" [ref=f20e9]:
+      - button "Projetos" [ref=f20e10] [cursor=pointer]:
+        - generic [ref=f20e11]: 🗄️
+      - button "O que a AI sabe" [ref=f20e13] [cursor=pointer]:
+        - generic [ref=f20e14]: 🐝
+      - button "Grafo" [ref=f20e16] [cursor=pointer]:
+        - generic [ref=f20e17]: 🕸️
+      - button "Wiki" [ref=f20e19] [cursor=pointer]:
+        - generic [ref=f20e20]: 📖
+  - generic [ref=f20e22]:
+    - banner [ref=f20e23]:
+      - heading "Grafo" [level=1] [ref=f20e24]: 🕸️ Grafo
+      - generic [ref=f20e25]: o grafo de conhecimento do código
+      - generic [ref=f20e30]:
+        - generic [ref=f20e31]: 📁 Projeto
+        - combobox "Projeto selecionado" [ref=f20e32]:
+          - option "audit-f44-slugify — https://github.com/simov/slugify.git" [selected]
+          - option "array-move — https://github.com/sindresorhus/array-move"
+      - combobox "Selecionar tema" [ref=f20e26] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+    - main [ref=f20e27]:
+      - generic [ref=f20e33]:
+        - generic [ref=f20e34]:
+          - button "← Visão geral" [ref=f20e1162] [cursor=pointer]
+          - textbox "Buscar nó por nome ou arquivo…" [ref=f20e35]
+        - generic [ref=f20e36]: Exibindo 15 de 84 nós · 14 de 76 arestas · 12 comunidades
+        - generic [ref=f20e1163]:
+          - generic [ref=f20e1164]:
+            - generic [ref=f20e1165]: Vizinhança de “package.json”
+            - generic [ref=f20e1166]: "profundidade:"
+            - button "1" [ref=f20e1167] [cursor=pointer]
+            - button "2" [ref=f20e1168] [cursor=pointer]
+            - button "3" [ref=f20e1169] [cursor=pointer]
+          - generic [ref=f20e1170]:
+            - text: code
+            - code [ref=f20e1171]: package.json
+            - text: · grau 14 · package.json
+          - generic [ref=f20e1172]:
+            - generic [ref=f20e1173]:
+              - text: Cards que tocaram
+              - code [ref=f20e1174]: package.json
+            - generic [ref=f20e1175]: Nenhum card deste board registrou trabalho neste arquivo — os vínculos vêm dos fluxos afetados e dos handoffs das iterações, então só existem onde a frota (ou um humano) declarou o arquivo.
+          - img "Ego-grafo de package.json" [ref=f20e1176]:
+            - generic "package —contains→ package_author" [ref=f20e1177]
+            - generic "package —contains→ package_description" [ref=f20e1178]
+            - generic "package —contains→ package_devdependencies" [ref=f20e1179]
+            - generic "package —contains→ package_engines" [ref=f20e1180]
+            - generic "package —contains→ package_files" [ref=f20e1181]
+            - generic "package —contains→ package_homepage" [ref=f20e1182]
+            - generic "package —contains→ package_keywords" [ref=f20e1183]
+            - generic "package —contains→ package_license" [ref=f20e1184]
+            - generic "package —contains→ package_main" [ref=f20e1185]
+            - generic "package —contains→ package_name" [ref=f20e1186]
+            - generic "package —contains→ package_repository" [ref=f20e1187]
+            - generic "package —contains→ package_scripts" [ref=f20e1188]
+            - generic "package —contains→ package_types" [ref=f20e1189]
+            - generic "package —contains→ package_version" [ref=f20e1190]
+            - generic "package.json (code, grau 14) package.json" [ref=f20e1191] [cursor=pointer]: package.json
+            - generic "author (code, grau 1) package.json" [ref=f20e1193] [cursor=pointer]: author
+            - generic "description (code, grau 1) package.json" [ref=f20e1195] [cursor=pointer]: description
+            - generic "engines (code, grau 2) package.json" [ref=f20e1197] [cursor=pointer]: engines
+            - generic "homepage (code, grau 1) package.json" [ref=f20e1199] [cursor=pointer]: homepage
+            - generic "license (code, grau 1) package.json" [ref=f20e1201] [cursor=pointer]: license
+            - generic "main (code, grau 1) package.json" [ref=f20e1203] [cursor=pointer]: main
+            - generic "name (code, grau 1) package.json" [ref=f20e1205] [cursor=pointer]: name
+            - generic "repository (code, grau 3) package.json" [ref=f20e1207] [cursor=pointer]: repository
+            - generic "types (code, grau 1) package.json" [ref=f20e1209] [cursor=pointer]: types
+            - generic "version (code, grau 1) package.json" [ref=f20e1211] [cursor=pointer]: version
+            - generic "devDependencies (code, grau 5) package.json" [ref=f20e1213] [cursor=pointer]: devDependencies
+            - generic "scripts (code, grau 6) package.json" [ref=f20e1215] [cursor=pointer]: scripts
+            - generic "files (code, grau 5) package.json" [ref=f20e1217] [cursor=pointer]: files
+            - generic "keywords (code, grau 5) package.json" [ref=f20e1219] [cursor=pointer]: keywords
+          - generic [ref=f20e1221]: "14 vizinho(s) até profundidade 1 · relações: contains · clique num nó para expandir a partir dele"

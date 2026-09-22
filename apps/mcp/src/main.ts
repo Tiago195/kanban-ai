@@ -29,7 +29,6 @@ import { registerTaxonomyTools } from './tools/taxonomy.js';
 import { registerContextTools } from './tools/context.js';
 import { registerLoopTools } from './tools/loop.js';
 import { registerBacklogTools } from './tools/backlog.js';
-import { registerMemoryTools } from './tools/memory.js';
 import { registerResources } from './resources/index.js';
 import { registerStreaming } from './streaming.js';
 
@@ -63,7 +62,6 @@ function buildServer(deps: ServerDeps): McpServer {
   registerContextTools(server, client);
   registerLoopTools(server, client);
   registerBacklogTools(server, client);
-  registerMemoryTools(server, client);
   registerResources(server, client);
 
   // Streaming WS → notificações MCP (fase 2). Lê o path configurável do WS.

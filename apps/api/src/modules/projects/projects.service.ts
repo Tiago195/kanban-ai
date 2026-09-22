@@ -29,6 +29,10 @@ export class ProjectsService {
       cloneState: row.cloneState,
       lastError: row.lastError,
       lastSyncedAt: row.lastSyncedAt ? row.lastSyncedAt.toISOString() : null,
+      // US-F1.3 — estado do build do grafo de conhecimento (graphify).
+      graphState: row.graphState,
+      graphBuiltAt: row.graphBuiltAt ? row.graphBuiltAt.toISOString() : null,
+      graphLastError: row.graphLastError,
       tenantId: row.tenantId,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),

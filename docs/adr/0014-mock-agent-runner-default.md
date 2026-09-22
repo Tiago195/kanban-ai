@@ -39,3 +39,19 @@ feliz do mock).
   o orquestrador.
 - O caminho de task derivada existe mas não é validado por E2E nesta fatia (validação
   sempre passa por decisão de escopo).
+
+## Emenda — 2026-08-29 (US-F3.1): env unificada em `AGENT_ADAPTER`
+
+A env de seleção `AGENT_RUNNER_KIND` foi unificada em **`AGENT_ADAPTER`**
+(ADR-0036, emenda da mesma data): `AGENT_RUNNER_KIND` vira alias **DEPRECADO**,
+honrado só na ausência de `AGENT_ADAPTER` (com um warning de deprecação no
+boot) e removido na próxima versão.
+
+**A decisão central deste ADR é preservada:** sem nenhuma env de seleção, o
+default do processo continua sendo o **mock** (`DEFAULT_PROCESS_AGENT_ADAPTER`
+em `config.ts`), pelo mesmo motivo original — não acoplar dev/testes a
+subprocessos reais, worktrees e não-determinismo (nem a quota/login da CLI).
+O default `copilot-cli` citado pelo ADR-0036 é o default de **catálogo**
+(fallback de valor explícito desconhecido e de kinds sem runner wired), não o
+default do processo. Precedência completa e detalhes: emenda US-F3.1 do
+ADR-0036.

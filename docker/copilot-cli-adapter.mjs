@@ -360,6 +360,13 @@ async function main() {
         affectedFlows: normalizeFlows(structured.affectedFlows),
         nextStep: typeof structured.nextStep === 'string' ? structured.nextStep : '',
         done: structured.done === true,
+        // US-F5.0 (BUG-BRIDGE1): `evidence` e `learnings` eram parseados do
+        // bloco KANBAN_RESULT e DESCARTADOS aqui — nenhum aprendizado jamais
+        // chegou ao orchestrator pelo caminho de produção. Repassamos os campos
+        // crus; a normalização tolerante vive no `CliAdapter.parseLine`
+        // (parseEvidence/parseLearnings), que é quem valida a forma.
+        ...(structured.evidence !== undefined ? { evidence: structured.evidence } : {}),
+        ...(structured.learnings !== undefined ? { learnings: structured.learnings } : {}),
         ...tokenUsage,
       });
       return;
@@ -375,11 +382,16 @@ async function main() {
     emit({
       kind: 'result',
       detail: text || err.trim() || `Copilot CLI encerrou com código ${code}.`,
-      summary: (lastLine(text) || lastLine(err) || 'Iteração concluída pelo Copilot CLI.').slice(0, 240),
+      summary: (lastLine(text) || lastLine(err) || 'Iteração inconclusa (sem bloco KANBAN_RESULT).').slice(0, 240),
       dodTouched: [],
       affectedFlows: [],
       nextStep: '',
-      done: code === 0 && !fatalError,
+      // US-F5.0 (BUG-BRIDGE1): antes, exit 0 sem NENHUM bloco KANBAN_RESULT
+      // válido caía em `done: true` — prosa solta, resposta vazia, marcador
+      // órfão ou JSON inválido FECHAVAM a task sem resultado estruturado algum.
+      // Fechar task é decisão que exige evidência, não ausência dela: sem bloco
+      // válido, a iteração é sempre inconclusa (`done: false`) e o loop segue.
+      done: false,
       ...tokenUsage,
       ...(fatalError ? { fatalError } : {}),
     });

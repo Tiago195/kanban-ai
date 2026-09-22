@@ -1,0 +1,79 @@
+- generic [ref=f6e4]:
+  - complementary "Áreas do explorador" [ref=f6e5]:
+    - button "Voltar ao quadro" [ref=f6e6] [cursor=pointer]:
+      - generic [ref=f6e7]: ←
+    - navigation "Áreas" [ref=f6e9]:
+      - button "Projetos" [ref=f6e10] [cursor=pointer]:
+        - generic [ref=f6e11]: 🗄️
+      - button "O que a AI sabe" [ref=f6e13] [cursor=pointer]:
+        - generic [ref=f6e14]: 🐝
+      - button "Grafo" [ref=f6e16] [cursor=pointer]:
+        - generic [ref=f6e17]: 🕸️
+      - button "Wiki" [ref=f6e19] [cursor=pointer]:
+        - generic [ref=f6e20]: 📖
+  - generic [ref=f6e22]:
+    - banner [ref=f6e23]:
+      - heading "Wiki" [level=1] [ref=f6e24]: 📖 Wiki
+      - generic [ref=f6e25]: a base de conhecimento derivada do grafo
+      - generic [ref=f6e29]:
+        - generic [ref=f6e30]: 📁 Projeto
+        - combobox "Projeto selecionado" [ref=f6e31]:
+          - option "audit-f44-slugify — https://github.com/simov/slugify.git" [selected]
+          - option "array-move — https://github.com/sindresorhus/array-move"
+    - main [ref=f6e26]:
+      - generic [ref=f6e32]:
+        - generic [ref=f6e33]:
+          - button "← Índice" [ref=f6e95] [cursor=pointer]
+          - generic [ref=f6e34]: 📖 22 artigos
+          - generic [ref=f6e35]: gerada em 8/30/2026, 1:07:11 PM
+        - generic [ref=f6e37]:
+          - generic [ref=f6e38]: slugify
+          - paragraph [ref=f6e39]: "> 7 nodes"
+          - generic [ref=f6e96]: Key Concepts
+          - list [ref=f6e97]:
+            - listitem [ref=f6e98]:
+              - strong [ref=f6e99]: slugify
+              - text: (6 connections) —
+              - code [ref=f6e100]: README.md
+            - listitem [ref=f6e101]:
+              - strong [ref=f6e102]: README.md
+              - text: (1 connections) —
+              - code [ref=f6e103]: README.md
+            - listitem [ref=f6e104]:
+              - strong [ref=f6e105]: Contribute
+              - text: (1 connections) —
+              - code [ref=f6e106]: README.md
+            - listitem [ref=f6e107]:
+              - strong [ref=f6e108]: Extend
+              - text: (1 connections) —
+              - code [ref=f6e109]: README.md
+            - listitem [ref=f6e110]:
+              - strong [ref=f6e111]: Locales
+              - text: (1 connections) —
+              - code [ref=f6e112]: README.md
+            - listitem [ref=f6e113]:
+              - strong [ref=f6e114]: Options
+              - text: (1 connections) —
+              - code [ref=f6e115]: README.md
+            - listitem [ref=f6e116]:
+              - strong [ref=f6e117]: Remove
+              - text: (1 connections) —
+              - code [ref=f6e118]: README.md
+          - generic [ref=f6e43]: Relationships
+          - list [ref=f6e119]:
+            - listitem [ref=f6e120]: No strong cross-community connections detected
+          - generic [ref=f6e121]: Source Files
+          - list [ref=f6e122]:
+            - listitem [ref=f6e123]:
+              - code [ref=f6e124]: README.md
+          - generic [ref=f6e125]: Audit Trail
+          - list [ref=f6e72]:
+            - listitem [ref=f6e73]: "EXTRACTED: 6 (100%)"
+            - listitem [ref=f6e75]: "INFERRED: 0 (0%)"
+            - listitem [ref=f6e77]: "AMBIGUOUS: 0 (0%)"
+          - paragraph [ref=f6e93]: "---"
+          - paragraph [ref=f6e94]:
+            - text: "*Part of the graphify knowledge wiki. See"
+            - link "index" [ref=f6e126] [cursor=pointer]:
+              - /url: "#"
+            - text: to navigate.*

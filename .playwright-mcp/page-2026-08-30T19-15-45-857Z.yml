@@ -1,0 +1,28 @@
+- generic [ref=f47e4]:
+  - complementary "Áreas do explorador" [ref=f47e5]:
+    - button "Voltar ao quadro" [ref=f47e6] [cursor=pointer]:
+      - generic [ref=f47e7]: ←
+    - navigation "Áreas" [ref=f47e9]:
+      - button "Projetos" [ref=f47e10] [cursor=pointer]:
+        - generic [ref=f47e11]: 🗄️
+      - button "O que a AI sabe" [disabled] [ref=f47e13]:
+        - generic [ref=f47e14]: 🐝
+      - button "Grafo" [disabled] [ref=f47e16]:
+        - generic [ref=f47e17]: 🕸️
+      - button "Wiki" [disabled] [ref=f47e19]:
+        - generic [ref=f47e20]: 📖
+  - generic [ref=f47e22]:
+    - banner [ref=f47e23]:
+      - heading "Wiki" [level=1] [ref=f47e24]: 📖 Wiki
+      - generic [ref=f47e25]: a base de conhecimento derivada do grafo
+      - generic [ref=f47e26]:
+        - generic [ref=f47e27]: 📁 Projeto
+        - combobox "Projeto selecionado" [ref=f47e28]:
+          - option "audit-f44-slugify — https://github.com/simov/slugify.git" [selected]
+          - option "array-move — https://github.com/sindresorhus/array-move"
+      - combobox "Selecionar tema" [ref=f47e29] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+    - main [ref=f47e30]:
+      - generic [ref=f47e31]: Carregando projetos…

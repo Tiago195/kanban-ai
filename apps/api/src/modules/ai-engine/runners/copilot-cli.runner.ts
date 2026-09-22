@@ -331,6 +331,11 @@ export class CopilotCliRunner implements AgentRunner {
           nextStep: event.nextStep,
           done: event.done,
           evidence: event.evidence,
+          // US-F5.0 (BUG-BRIDGE1): o evento JSONL já trazia `learnings`
+          // (parseado/normalizado no CliAdapter.parseLine), mas este mapeamento
+          // o descartava — segunda metade do vazamento que impedia qualquer
+          // aprendizado de chegar ao `persistLearning` do orchestrator.
+          learnings: event.learnings,
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
           fatalError: event.fatalError,

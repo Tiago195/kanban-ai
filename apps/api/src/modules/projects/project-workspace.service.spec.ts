@@ -336,3 +336,30 @@ test('remove: apaga o diretório gerenciado (idempotente)', { skip: !GIT_AVAILAB
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('US-F2.3: ensureCloned REUSA clone ready existente (não re-clona, não apaga o .hive)', async () => {
+  const root = tmpRoot();
+  try {
+    // Clone "existente": .git no disco + linha ready. O repoUrl é INVÁLIDO de
+    // propósito — se o serviço tentasse re-clonar, falharia; reusar = sucesso.
+    const localPath = path.join(root, 'p1');
+    fsSync.mkdirSync(path.join(localPath, '.git'), { recursive: true });
+    fsSync.mkdirSync(path.join(localPath, '.hive', 'modules'), { recursive: true });
+    fsSync.writeFileSync(path.join(localPath, '.hive', 'modules', 'x.md'), '# memoria\n');
+    const { prisma } = makePrisma(makeRow({ cloneState: 'ready', localPath }));
+    const { realtime, events } = makeRealtime();
+    const svc = new ProjectWorkspaceService(prisma, makeConfig(root), realtime);
+
+    const out = await svc.ensureCloned('p1');
+    assert.equal(out, localPath);
+    // A memória do Project (fonte da verdade pós-F2.3) sobreviveu intacta.
+    assert.equal(
+      fsSync.readFileSync(path.join(localPath, '.hive', 'modules', 'x.md'), 'utf8'),
+      '# memoria\n',
+    );
+    // Nenhum novo ciclo de clone foi emitido (nem cloning nem ready).
+    assert.deepEqual(statesFrom(events), []);
+  } finally {
+    fsSync.rmSync(root, { recursive: true, force: true });
+  }
+});

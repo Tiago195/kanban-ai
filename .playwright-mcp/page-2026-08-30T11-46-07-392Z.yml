@@ -1,0 +1,53 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - heading "Sprint Board" [level=1] [ref=e5]
+    - generic [ref=e6]:
+      - searchbox "Buscar cards" [ref=e7]
+      - combobox "Filtrar por label" [ref=e8]:
+        - option "Todas as labels" [selected]
+      - combobox "Filtrar por agente" [ref=e9]:
+        - option "Todos os agentes" [selected]
+      - button "✨ Criar backlog" [ref=e10] [cursor=pointer]
+      - button "🤖 Agentes" [ref=e11] [cursor=pointer]
+      - button "🗄️ Projetos" [ref=e12] [cursor=pointer]
+      - button "🗂️ Explorador" [ref=e13] [cursor=pointer]
+      - button "🔁 Loops" [ref=e14] [cursor=pointer]
+      - button "🔕 Review OFF" [ref=e15] [cursor=pointer]
+      - button "+ Coluna" [ref=e16] [cursor=pointer]
+      - button "⤓ Export" [ref=e17] [cursor=pointer]
+      - button "⤒ Import" [ref=e18] [cursor=pointer]
+      - combobox "Selecionar tema" [ref=e19] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+  - generic [ref=e20]:
+    - generic [ref=e21]:
+      - generic [ref=e22]: Épicos
+      - generic [ref=e23]: "0"
+    - generic [ref=e24]:
+      - generic [ref=e25]: Histórias
+      - generic [ref=e26]: "0"
+    - generic [ref=e27]:
+      - generic [ref=e28]: Tasks
+      - generic [ref=e29]: "0"
+    - generic [ref=e30]:
+      - generic [ref=e31]: Pontos concluídos
+      - generic [ref=e32]: "0"
+      - generic [ref=e33]: /
+      - generic [ref=e34]: "0"
+    - generic "Progresso da sprint (story points)" [ref=e35]
+    - generic [ref=e36]:
+      - generic [ref=e37]: Bloqueados
+      - generic [ref=e38]: "0"
+  - generic [ref=e39]: Carregando board…
+  - generic [ref=e43]:
+    - generic [ref=e45]:
+      - heading "🗄️ Projetos (repositórios git)" [level=2] [ref=e46]
+      - button "Fechar" [ref=e47] [cursor=pointer]: ✕
+    - generic [ref=e48]:
+      - generic [ref=e50]:
+        - generic [ref=e51]: Cole a URL de um repositório git (https ou ssh) — o kanban-ai clona e gerencia.
+        - button "➕ Novo projeto" [ref=e52] [cursor=pointer]
+      - generic [ref=e53]:
+        - generic [ref=e54]: Seus projetos
+        - generic [ref=e55]: Carregando projetos…

@@ -1,121 +1,245 @@
-import { useMemo, useState } from "react";
+import { useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 
-import type {
-  MemoryLockState,
-  MemoryNeuronSummary,
-  ProjectCloneState,
-} from "@kanban-ai/shared";
+import type { ProjectCloneState } from "@kanban-ai/shared";
 
+import { useBoard, usePrimaryBoardId } from "@/features/board";
+import type { Theme } from "@/shared/hooks/useTheme";
 import { showToast } from "@/shared/services/toastStore";
 
 import {
-  useProjectMemory,
-  useProjectNeuron,
   useProjectRepoInfo,
   useProjects,
   useSyncProject,
 } from "../hooks/useProjectExplorer";
-
-type Tab = "repo" | "memory";
+import { cloneStateBadge, modulesEmptyMessage } from "../lib/projectCard";
+import {
+  EXPLORER_AREAS,
+  resolveExplorerRoute,
+  switchAreaPath,
+  switchProjectPath,
+  type ExplorerArea,
+} from "../lib/explorerShell";
+import { ProjectGraphTab } from "./ProjectGraphTab";
+import { ProjectMemoryTab } from "./ProjectMemoryTab";
+import { ProjectWikiTab } from "./ProjectWikiTab";
+import { ProjectsPanel } from "./ProjectsManager";
 
 /**
- * US-PROJ7 — Project Explorer + Memory Viewer (SÓ leitura). A "tela de valor" do
- * EP-PROJECT: o usuário vê o repositório clonado (aba "Repositório") e navega
- * pelo que a AI já aprendeu (aba "O que a AI sabe" — os neurônios da colmeia).
+ * US-UX.1 — A MOLDURA: o Explorador deixa de ser modal de ~600px flutuando
+ * sobre o quadro e vira PÁGINA INTEIRA endereçável (`/explorer/:projectId/:area`),
+ * com um rail vertical persistente para as 4 áreas da camada de conhecimento:
+ * Projetos · O que a AI sabe · Grafo · Wiki.
  *
- * NÃO edita neurônios (escrita é do domínio do agent/loop). A lista de memória
- * NÃO edita neurônios (escrita é do domínio do agent/loop).
+ * O CONTEÚDO de cada área é o mesmo de antes (redesenhá-las é US-UX.2–UX.5):
+ * - "Projetos" absorve o antigo modal `/projects` (ProjectsPanel) E a antiga
+ *   aba "Repositório" (metadados do clone + Sync do projeto selecionado);
+ * - "O que a AI sabe", "Grafo" e "Wiki" são as abas de sempre (US-PROJ7,
+ *   US-F4.2/F4.3, US-F5.4), agora com espaço para respirar.
  *
- * **Dois escopos, não um.** O Explorador combina conteúdo de escopos diferentes,
- * então cada aba mostra SÓ o controle que de fato governa seu conteúdo (evita o
- * anti-padrão de "fake filter" — um seletor que não filtra nada):
- *  - Aba "Repositório": conteúdo é POR-PROJETO → mostra o seletor de projeto.
- *  - Aba "O que a AI sabe": a memória é a COLMEIA compartilhada por toda a frota
- *    (não muda com o projeto) → o seletor some e dá lugar a um cabeçalho de
- *    escopo "Colmeia". Vira por-Project quando US-PROJ4 namespacear o índice por
- *    `projectId`; aí o seletor volta a fazer sentido nesta aba.
+ * O projeto selecionado é CONTEXTO PERSISTENTE da área inteira: ele vive na
+ * URL — trocar de área mantém o projeto, trocar de projeto mantém a área
+ * (máquina pura em `../lib/explorerShell.ts`).
  */
-export function ProjectExplorer({ onClose }: { onClose: () => void }) {
+export function ExplorerPage({
+  theme,
+  setTheme,
+}: {
+  // US-UX.1 — o controle de tema vem do App (o MESMO useTheme() do header do
+  // quadro, via props): sem segunda instância de estado para dessincronizar.
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+}) {
+  const navigate = useNavigate();
+  // US-UX.5 — `slug` é o artigo da Wiki aberto (deep link); só a área wiki usa.
+  const params = useParams<{ projectId?: string; area?: string; slug?: string }>();
+
   const projectsQuery = useProjects();
   const projects = projectsQuery.data ?? [];
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Seleciona o primeiro Project assim que a lista chega (sem efeito: derivado).
-  const activeId = selectedId ?? projects[0]?.id ?? null;
-  const [tab, setTab] = useState<Tab>("repo");
+  // O projeto do quadro é o default sensato quando a URL não nomeia um.
+  // Espera o board resolver antes de escolher o default — senão a corrida
+  // entre as queries faria o redirect cair sempre no primeiro da lista.
+  const { boardId, isLoading: boardIdLoading } = usePrimaryBoardId();
+  const boardQuery = useBoard(boardId);
+  const boardProjectId = boardQuery.data?.projectId ?? null;
+  const boardSettled = !boardIdLoading && (!boardId || !boardQuery.isLoading);
+
+  const route = resolveExplorerRoute({
+    projectIdParam: params.projectId ?? null,
+    areaParam: params.area ?? null,
+    projectsLoaded: !projectsQuery.isLoading && boardSettled,
+    projectIds: projects.map((p) => p.id),
+    boardProjectId,
+  });
+
+  // URL incompleta/inválida → corrige (replace) para a forma canônica, de modo
+  // que F5 e copiar/colar o link levem SEMPRE ao mesmo lugar.
+  useEffect(() => {
+    if (route.kind === "redirect") navigate(route.path, { replace: true });
+  }, [route, navigate]);
+
+  const area = route.area;
+  const activeId = route.kind === "ready" || route.kind === "redirect" ? route.projectId : null;
 
   return (
-    <div
-      className="modal-layer"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="modal-panel" onClick={(event) => event.stopPropagation()}>
-        <div className="kb-modal">
-          <div className="modal-header">
-            <div className="modal-title-row">
-              <h2 style={{ margin: 0, fontSize: 16 }}>🗂️ Explorador</h2>
-              <button className="modal-close" onClick={onClose} aria-label="Fechar">
-                ✕
-              </button>
+    <div className="explorer-page" data-testid="explorer-page">
+      <aside className="explorer-rail" aria-label="Áreas do explorador">
+        {/* Voltar ao quadro — sempre visível, primeiro item do rail. */}
+        <button
+          type="button"
+          className="explorer-rail-btn explorer-rail-back"
+          data-testid="explorer-back-board"
+          title="Voltar ao quadro"
+          onClick={() => navigate("/")}
+        >
+          <span className="explorer-rail-icon" aria-hidden>
+            ←
+          </span>
+          <span className="explorer-rail-label">Voltar ao quadro</span>
+        </button>
+        <nav className="explorer-rail-nav" aria-label="Áreas">
+          {EXPLORER_AREAS.map((item) => (
+            <button
+              key={item}
+              type="button"
+              className="explorer-rail-btn"
+              aria-current={item === area ? "page" : undefined}
+              data-testid={`rail-${item}`}
+              title={AREA_META[item].label}
+              // Sem projeto (lista vazia) só a área Projetos é navegável.
+              disabled={!activeId && item !== "projects"}
+              onClick={() => {
+                if (activeId) navigate(switchAreaPath({ projectId: activeId }, item));
+              }}
+            >
+              <span className="explorer-rail-icon" aria-hidden>
+                {AREA_META[item].icon}
+              </span>
+              <span className="explorer-rail-label">{AREA_META[item].label}</span>
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      <div className="explorer-main">
+        <header className="explorer-topbar">
+          <h1 className="explorer-topbar-title">
+            <span aria-hidden>{AREA_META[area].icon}</span> {AREA_META[area].label}
+          </h1>
+          <span className="explorer-topbar-hint">{AREA_META[area].hint}</span>
+          {/* O seletor de projeto é o CABEÇALHO da área — governa todas as abas. */}
+          {projects.length > 0 ? (
+            <div className="explorer-topbar-project">
+              <span className="chip" style={{ flexShrink: 0 }}>
+                📁 Projeto
+              </span>
+              <select
+                className="card-desc-input"
+                data-testid="project-explorer-select"
+                aria-label="Projeto selecionado"
+                value={activeId ?? ""}
+                onChange={(event) =>
+                  navigate(switchProjectPath({ area }, event.target.value))
+                }
+                style={{ margin: 0 }}
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {p.repoUrl}
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
-          <div className="modal-body">
-            {projectsQuery.isLoading ? (
+          ) : null}
+          {/* US-UX.1 (auditoria) — o seletor de tema vivia no header do quadro,
+              que não renderiza aqui; sem ele a camada inteira ficava sem troca
+              de tema. Mesmo controle/acessibilidade do original. */}
+          <select
+            className="kb-btn kb-btn-ghost"
+            title={"Tema: " + theme}
+            aria-label="Selecionar tema"
+            data-testid="explorer-theme-select"
+            value={theme}
+            onChange={(event) => setTheme(event.target.value as Theme)}
+            style={projects.length > 0 ? { flexShrink: 0 } : { marginLeft: "auto" }}
+          >
+            <option value="light">🌞 Claro</option>
+            <option value="dark">🌙 Escuro</option>
+            <option value="high-contrast">◐ Alto contraste</option>
+          </select>
+        </header>
+
+        <main className="explorer-content">
+          <div className="explorer-content-inner">
+            {route.kind === "loading" ? (
               <div style={{ color: "var(--text-muted)" }}>Carregando projetos…</div>
-            ) : projects.length === 0 ? (
+            ) : area === "projects" ? (
+              <>
+                {/* A antiga aba "Repositório" (US-PROJ7): metadados do clone
+                    do projeto selecionado + "Sync agora". */}
+                {activeId ? (
+                  <section>
+                    <div className="modal-section-title">📁 Repositório do projeto selecionado</div>
+                    <RepoTab projectId={activeId} />
+                  </section>
+                ) : null}
+                <ProjectsPanel
+                  boardId={boardId}
+                  boardProjectId={boardProjectId}
+                  onOpenExplorer={(projectId) =>
+                    navigate(switchProjectPath({ area }, projectId))
+                  }
+                />
+              </>
+            ) : !activeId ? (
               <EmptyState
                 title="Nenhum projeto ainda"
-                hint="Associe um repositório git a um quadro para clonar e explorar aqui."
+                hint="Crie um projeto na área Projetos para explorar aqui."
+              />
+            ) : area === "graph" ? (
+              <ProjectGraphTab projectId={activeId} />
+            ) : area === "wiki" ? (
+              /* key: trocar de Project zera o artigo aberto (slug é por-wiki). */
+              <ProjectWikiTab
+                key={activeId}
+                projectId={activeId}
+                articleSlug={params.slug ?? null}
               />
             ) : (
-              <>
-                <div className="kb-tabs" role="tablist" style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                  <button
-                    role="tab"
-                    aria-selected={tab === "repo"}
-                    data-testid="tab-repo"
-                    className={"kb-btn " + (tab === "repo" ? "kb-btn-primary" : "kb-btn-ghost")}
-                    onClick={() => setTab("repo")}
-                  >
-                    📁 Repositório
-                  </button>
-                  <button
-                    role="tab"
-                    aria-selected={tab === "memory"}
-                    data-testid="tab-memory"
-                    className={"kb-btn " + (tab === "memory" ? "kb-btn-primary" : "kb-btn-ghost")}
-                    onClick={() => setTab("memory")}
-                  >
-                    🐝 O que a AI sabe
-                  </button>
-                </div>
-
-                {/* Cada aba mostra só o controle de escopo que governa seu conteúdo. */}
-                {tab === "repo" ? (
-                  <>
-                    <ProjectScopePicker
-                      projects={projects}
-                      activeId={activeId}
-                      onChange={setSelectedId}
-                    />
-                    <RepoTab projectId={activeId} />
-                  </>
-                ) : (
-                  <>
-                    <HiveScopeHeader />
-                    <MemoryTab projectId={activeId} />
-                  </>
-                )}
-              </>
+              /* US-UX.3 — o painel da memória (redesenho da MemoryTab). */
+              <ProjectMemoryTab projectId={activeId} />
             )}
           </div>
-        </div>
+        </main>
       </div>
     </div>
   );
 }
+
+/** US-UX.1 — identidade visual de cada área do rail (ícone + rótulo + lema). */
+const AREA_META: Record<ExplorerArea, { icon: string; label: string; hint: string }> = {
+  projects: {
+    icon: "🗄️",
+    label: "Projetos",
+    hint: "repositórios git clonados e gerenciados",
+  },
+  memory: {
+    icon: "🐝",
+    label: "O que a AI sabe",
+    hint: "os neurônios que a frota aprendeu",
+  },
+  graph: {
+    icon: "🕸️",
+    label: "Grafo",
+    hint: "o grafo de conhecimento do código",
+  },
+  wiki: {
+    icon: "📖",
+    label: "Wiki",
+    hint: "a base de conhecimento derivada do grafo",
+  },
+};
 
 // ── Aba Repositório ──────────────────────────────────────────────────────────
 
@@ -162,7 +286,13 @@ function RepoTab({ projectId }: { projectId: string | null }) {
           </MetaRow>
           <MetaRow label="Módulos detectados">
             {info.modules.length === 0 ? (
-              <span style={{ color: "var(--text-muted)" }}>nenhum (repo ainda não clonado?)</span>
+              /* US-UX.4 (BUG-UI2) — zero módulos com clone pronto é resultado
+                 legítimo; só sugerimos problema de clone quando o clone de
+                 fato não está `ready` (a mensagem antiga contradizia o HEAD
+                 exibido logo acima). */
+              <span style={{ color: "var(--text-muted)" }} data-testid="modules-empty">
+                {modulesEmptyMessage(info.cloneState)}
+              </span>
             ) : (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {info.modules.map((m) => (
@@ -179,174 +309,8 @@ function RepoTab({ projectId }: { projectId: string | null }) {
   );
 }
 
-// ── Aba "O que a AI sabe" (memória) ─────────────────────────────────────────
-
-function MemoryTab({ projectId }: { projectId: string | null }) {
-  const memoryQuery = useProjectMemory(projectId);
-  const neurons = memoryQuery.data ?? [];
-  const [search, setSearch] = useState("");
-  const [openPath, setOpenPath] = useState<string | null>(null);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return neurons;
-    return neurons.filter(
-      (n) =>
-        n.title.toLowerCase().includes(q) ||
-        n.path.toLowerCase().includes(q) ||
-        n.tags.some((t) => t.toLowerCase().includes(q)),
-    );
-  }, [neurons, search]);
-
-  return (
-    <div data-testid="memory-tab">
-      {memoryQuery.isLoading ? (
-        <div style={{ color: "var(--text-muted)" }}>Carregando memória…</div>
-      ) : neurons.length === 0 ? (
-        <EmptyState
-          title="A AI ainda não aprendeu nada"
-          hint="Quando os agents rodarem, os neurônios que eles aprenderem aparecem aqui."
-        />
-      ) : (
-        <>
-          <input
-            className="card-desc-input"
-            placeholder="Buscar por título, tag ou path…"
-            data-testid="memory-search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            style={{ marginBottom: 12 }}
-          />
-          {filtered.length === 0 ? (
-            <EmptyState title="Nenhum neurônio corresponde à busca" hint="Ajuste o termo." />
-          ) : (
-            <div style={{ display: "grid", gap: 8 }}>
-              {filtered.map((n) => (
-                <NeuronCard key={n.path} neuron={n} onOpen={() => setOpenPath(n.path)} />
-              ))}
-            </div>
-          )}
-        </>
-      )}
-
-      {openPath ? (
-        <NeuronDrawer
-          projectId={projectId}
-          path={openPath}
-          onClose={() => setOpenPath(null)}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function NeuronCard({
-  neuron,
-  onOpen,
-}: {
-  neuron: MemoryNeuronSummary;
-  onOpen: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="neuron-card"
-      data-testid="neuron-card"
-      onClick={onOpen}
-      style={{
-        textAlign: "left",
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        padding: 12,
-        background: "var(--surface, transparent)",
-        cursor: "pointer",
-        display: "grid",
-        gap: 6,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <strong>{neuron.title || neuron.path}</strong>
-        <LockStateBadge state={neuron.lockState} />
-        {neuron.stale ? <span className="chip chip-warn">stale</span> : null}
-        {neuron.archivedAt ? <span className="chip">arquivado</span> : null}
-      </div>
-      <code style={{ fontSize: 11, color: "var(--text-muted)" }}>{neuron.path}</code>
-      {neuron.summary ? <div style={{ fontSize: 13 }}>{neuron.summary}</div> : null}
-      {neuron.tags.length > 0 ? (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-          {neuron.tags.map((t) => (
-            <span key={t} className="chip">
-              {t}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </button>
-  );
-}
-
-function NeuronDrawer({
-  projectId,
-  path,
-  onClose,
-}: {
-  projectId: string | null;
-  path: string;
-  onClose: () => void;
-}) {
-  const detailQuery = useProjectNeuron(projectId, path);
-  const detail = detailQuery.data;
-
-  return (
-    <div
-      className="modal-layer"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="modal-panel" onClick={(event) => event.stopPropagation()} data-testid="neuron-drawer">
-        <div className="kb-modal">
-          <div className="modal-header">
-            <div className="modal-title-row">
-              <h2 style={{ margin: 0, fontSize: 15 }}>🧠 {detail?.title || path}</h2>
-              <button className="modal-close" onClick={onClose} aria-label="Fechar">
-                ✕
-              </button>
-            </div>
-          </div>
-          <div className="modal-body">
-            {detailQuery.isLoading ? (
-              <div style={{ color: "var(--text-muted)" }}>Carregando neurônio…</div>
-            ) : !detail ? (
-              <EmptyState title="Neurônio indisponível" hint="Ele pode ter sido arquivado." />
-            ) : (
-              <>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>
-                  <code>{detail.path}</code> · HEAD{" "}
-                  <code>{detail.headCommit ? detail.headCommit.slice(0, 12) : "—"}</code>
-                </div>
-                <pre
-                  style={{
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    fontSize: 12,
-                    background: "var(--code-bg, rgba(127,127,127,0.08))",
-                    padding: 12,
-                    borderRadius: 8,
-                    maxHeight: "60vh",
-                    overflow: "auto",
-                  }}
-                >
-                  {detail.content ?? "(neurônio vazio)"}
-                </pre>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// US-UX.3 — a antiga MemoryTab (lista plana + drawer) virou o painel da
+// memória em `./ProjectMemoryTab.tsx` (busca e leitura de neurônio preservadas).
 
 // ── Primitivos visuais leves (usam classes/vars já existentes no app) ────────
 
@@ -355,94 +319,6 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
       <span style={{ minWidth: 160, color: "var(--text-muted)", fontSize: 13 }}>{label}</span>
       <span>{children}</span>
-    </div>
-  );
-}
-
-// ── Cabeçalhos de escopo (deixam claro POR ESTRUTURA o que governa cada aba) ──
-
-/**
- * Seletor de projeto — só aparece na aba "Repositório", onde de fato filtra o
- * conteúdo. Fica ao lado de um rótulo de escopo "Projeto" para simetria com o
- * cabeçalho da colmeia.
- */
-function ProjectScopePicker({
-  projects,
-  activeId,
-  onChange,
-}: {
-  projects: { id: string; name: string; repoUrl: string }[];
-  activeId: string | null;
-  onChange: (id: string) => void;
-}) {
-  return (
-    <div
-      className="scope-bar"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "8px 12px",
-        marginBottom: 12,
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        background: "var(--surface, transparent)",
-      }}
-    >
-      <span
-        className="chip"
-        style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}
-      >
-        📁 Projeto
-      </span>
-      <select
-        className="card-desc-input"
-        data-testid="project-explorer-select"
-        value={activeId ?? ""}
-        onChange={(event) => onChange(event.target.value)}
-        style={{ flex: 1, margin: 0 }}
-      >
-        {projects.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name} — {p.repoUrl}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-/**
- * Cabeçalho da aba de memória. A colmeia é um escopo ÚNICO (toda a frota), então
- * NÃO há seletor de projeto aqui — o próprio cabeçalho comunica o escopo. Isso
- * evita o "fake filter" (um seletor que não muda o conteúdo) que confundia o
- * usuário ao trocar de projeto e ver o mesmo conhecimento.
- */
-function HiveScopeHeader() {
-  return (
-    <div
-      className="scope-bar"
-      data-testid="hive-scope-header"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "8px 12px",
-        marginBottom: 12,
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        background: "var(--surface, transparent)",
-      }}
-    >
-      <span
-        className="chip"
-        style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}
-      >
-        🐝 Colmeia
-      </span>
-      <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-        Memória compartilhada por toda a frota de agents — não é específica de um projeto.
-      </span>
     </div>
   );
 }
@@ -465,26 +341,8 @@ function EmptyState({ title, hint }: { title: string; hint?: string }) {
   );
 }
 
-const CLONE_STATE_LABEL: Record<ProjectCloneState, string> = {
-  pending: "pendente",
-  cloning: "clonando",
-  ready: "pronto",
-  failed: "falhou",
-};
-
+// US-UX.4 — rótulo/tom do badge vêm do helper puro compartilhado do card.
 function CloneStateBadge({ state }: { state: ProjectCloneState }) {
-  const tone =
-    state === "ready" ? "chip-ok" : state === "failed" ? "chip-danger" : "chip-warn";
-  return <span className={"chip " + tone}>{CLONE_STATE_LABEL[state]}</span>;
-}
-
-const LOCK_STATE_LABEL: Record<MemoryLockState, string> = {
-  FREE: "livre",
-  EDITING: "editando",
-  REVIEW: "em review",
-};
-
-function LockStateBadge({ state }: { state: MemoryLockState }) {
-  const tone = state === "FREE" ? "chip-ok" : state === "REVIEW" ? "chip-warn" : "chip";
-  return <span className={"chip " + tone}>{LOCK_STATE_LABEL[state]}</span>;
+  const badge = cloneStateBadge(state);
+  return <span className={"chip chip-" + badge.tone}>{badge.label}</span>;
 }

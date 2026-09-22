@@ -12,6 +12,7 @@ import { APP_CONFIG, type AppConfig } from '../../shared/config/config';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { ProjectCredentialsService, asAuthInput } from './project-credentials.service';
+import { ProjectGraphService } from './project-graph.service';
 
 const execFileAsync = promisify(execFile);
 
@@ -59,6 +60,11 @@ export class ProjectWorkspaceService {
     // US-PROJ3: resolvedor de credenciais git por Project (opcional para não
     // quebrar construções diretas em testes; injetado pelo ProjectsModule).
     @Optional() private readonly credentials: ProjectCredentialsService | null = null,
+    // US-F1.3: build do grafo de conhecimento disparado quando o clone fica
+    // ready (opcional para não quebrar construções diretas em testes).
+    // NOTA: parâmetro `?:` SEM união com null — `X | null` faz o TS emitir
+    // `Object` no design:paramtypes e o Nest injetaria undefined em silêncio.
+    @Optional() private readonly graph?: ProjectGraphService,
   ) {}
 
   /**
@@ -116,6 +122,18 @@ export class ProjectWorkspaceService {
     if (!project) throw new NotFoundException(`Project ${projectId} não encontrado`);
 
     const localPath = this.localPathFor(projectId);
+    // US-F2.3 — "ensure" DE VERDADE: clone `ready` que já existe no disco é
+    // REUSADO, nunca re-clonado. Antes, cada chamada fazia rm -rf + clone
+    // fresco — invisível enquanto a colmeia vivia no bare repo da memória
+    // (o materialize re-espelhava o .hive/ a cada build), mas FATAL desde que
+    // `<clone>/.hive/**.md` virou a fonte da verdade dos learnings: o
+    // re-clone apagaria a memória do Project a cada iteração. Também elimina
+    // um clone de rede por iteração. Estados não-`ready` (cloning pela
+    // metade, failed) seguem no caminho de clone limpo abaixo; refresh
+    // explícito é o `sync()`.
+    if (project.cloneState === 'ready' && fs.existsSync(path.join(localPath, '.git'))) {
+      return localPath;
+    }
     // Guard-rail: o clone jamais pode cair dentro do repo do kanban-ai.
     if (this.isInsideSelfRepo(localPath)) {
       const message =
@@ -178,6 +196,14 @@ export class ProjectWorkspaceService {
     });
     this.emit(projectId, 'ready');
     this.logger.log(`Project ${projectId} clonado em "${localPath}" (ready).`);
+    // US-F1.3: clone pronto → dispara o build do grafo em BACKGROUND
+    // (fire-and-forget). `build()` nunca lança; o catch é cinto-e-suspensório
+    // para que uma falha de grafo JAMAIS derrube o fluxo de clone/Project.
+    void this.graph?.build(projectId).catch((err) => {
+      this.logger.warn(
+        `build do grafo falhou para Project ${projectId}: ${(err as Error)?.message ?? err}`,
+      );
+    });
     return localPath;
   }
 

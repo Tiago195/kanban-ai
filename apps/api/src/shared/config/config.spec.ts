@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  DEFAULT_MEMORY_GIT_DIR,
   loadConfig,
-  resolveMemoryGitDir,
+  resetLegacyAgentRunnerKindWarningForTests,
+  resolveAgentAdapter,
+  warnLegacyAgentRunnerKindOnce,
 } from './config';
 
 // --- config-boot: guard-rail anti-alucinação do arquivo-fantasma ---
@@ -35,57 +36,6 @@ test('config-boot: apps/api/.env.example não existe (path-fantasma)', () => {
   );
 });
 
-// --- MEMORY_GIT_DIR: bare repo da memória (ADR-0027, Camada 1) ---
-
-test('resolveMemoryGitDir: ausente usa o default documentado', () => {
-  assert.equal(resolveMemoryGitDir(undefined), DEFAULT_MEMORY_GIT_DIR);
-});
-
-test('resolveMemoryGitDir: valor explícito é respeitado (com trim)', () => {
-  assert.equal(resolveMemoryGitDir('/srv/memory/git'), '/srv/memory/git');
-  assert.equal(resolveMemoryGitDir('  /srv/memory/git  '), '/srv/memory/git');
-});
-
-test('resolveMemoryGitDir: definido vazio/whitespace falha cedo com mensagem clara', () => {
-  assert.throws(() => resolveMemoryGitDir(''), /MEMORY_GIT_DIR/);
-  assert.throws(() => resolveMemoryGitDir('   '), /MEMORY_GIT_DIR/);
-});
-
-test('loadConfig: memory.gitDir usa default quando MEMORY_GIT_DIR ausente', () => {
-  const prev = process.env.MEMORY_GIT_DIR;
-  delete process.env.MEMORY_GIT_DIR;
-  try {
-    assert.equal(loadConfig().memory.gitDir, DEFAULT_MEMORY_GIT_DIR);
-  } finally {
-    if (prev === undefined) delete process.env.MEMORY_GIT_DIR;
-    else process.env.MEMORY_GIT_DIR = prev;
-  }
-});
-
-test('loadConfig: memory.gitDir respeita override via env', () => {
-  const prev = process.env.MEMORY_GIT_DIR;
-  process.env.MEMORY_GIT_DIR = '/var/lib/kanban-ai/memory';
-  try {
-    assert.equal(loadConfig().memory.gitDir, '/var/lib/kanban-ai/memory');
-  } finally {
-    if (prev === undefined) delete process.env.MEMORY_GIT_DIR;
-    else process.env.MEMORY_GIT_DIR = prev;
-  }
-});
-
-test('loadConfig: falha cedo quando MEMORY_GIT_DIR está vazio', () => {
-  const prev = process.env.MEMORY_GIT_DIR;
-  process.env.MEMORY_GIT_DIR = '   ';
-  try {
-    assert.throws(() => loadConfig(), /MEMORY_GIT_DIR/);
-  } finally {
-    if (prev === undefined) delete process.env.MEMORY_GIT_DIR;
-    else process.env.MEMORY_GIT_DIR = prev;
-  }
-});
-
-// --- EP-B: scheduler dos jobs de manutenção da memória (ADR-0027) ---
-
 function withEnv(key: string, value: string | undefined, fn: () => void): void {
   const prev = process.env[key];
   if (value === undefined) delete process.env[key];
@@ -97,45 +47,6 @@ function withEnv(key: string, value: string | undefined, fn: () => void): void {
     else process.env[key] = prev;
   }
 }
-
-test('loadConfig: scheduler da memória usa defaults quando envs ausentes', () => {
-  withEnv('MEMORY_SCHEDULER_ENABLED', undefined, () =>
-    withEnv('MEMORY_LOCK_SWEEP_INTERVAL_MS', undefined, () =>
-      withEnv('MEMORY_GC_INTERVAL_MS', undefined, () => {
-        const { memory } = loadConfig();
-        assert.equal(memory.schedulerEnabled, true);
-        assert.equal(memory.lockSweepIntervalMs, 30_000);
-        assert.equal(memory.gcIntervalMs, 3_600_000);
-      }),
-    ),
-  );
-});
-
-test('loadConfig: MEMORY_SCHEDULER_ENABLED=false desliga o scheduler', () => {
-  withEnv('MEMORY_SCHEDULER_ENABLED', 'false', () => {
-    assert.equal(loadConfig().memory.schedulerEnabled, false);
-  });
-});
-
-test('loadConfig: intervalos do scheduler respeitam override via env', () => {
-  withEnv('MEMORY_LOCK_SWEEP_INTERVAL_MS', '15000', () =>
-    withEnv('MEMORY_GC_INTERVAL_MS', '600000', () => {
-      const { memory } = loadConfig();
-      assert.equal(memory.lockSweepIntervalMs, 15_000);
-      assert.equal(memory.gcIntervalMs, 600_000);
-    }),
-  );
-});
-
-test('loadConfig: intervalos inválidos caem no default', () => {
-  withEnv('MEMORY_LOCK_SWEEP_INTERVAL_MS', 'abc', () =>
-    withEnv('MEMORY_GC_INTERVAL_MS', 'not-a-number', () => {
-      const { memory } = loadConfig();
-      assert.equal(memory.lockSweepIntervalMs, 30_000);
-      assert.equal(memory.gcIntervalMs, 3_600_000);
-    }),
-  );
-});
 
 // --- US-OBS2 (ADR-0035): flags do worktree isolado resiliente ---
 
@@ -178,4 +89,133 @@ test('loadConfig: MIRROR/INIT/PRESERVE desligam com o literal "false"', () => {
       }),
     ),
   );
+});
+
+// --- US-F2.10 (EP-F2): CUTOVER do recall/blast-radius por grafo ---
+// O default das duas envs do strangler-fig do EP-F2 virou LIGADO; `=false` é
+// o rollback documentado (restaura o caminho legado byte-idêntico, provado
+// pelas specs de paridade da F2.5/F2.7). Ver emenda US-F2.10 do ADR-0027.
+
+test('US-F2.10 cutover: GRAPHIFY_MEMORY_RECALL e GRAPHIFY_AFFECTED_FLOWS ausentes → LIGADOS por default', () => {
+  withEnv('GRAPHIFY_MEMORY_RECALL', undefined, () =>
+    withEnv('GRAPHIFY_AFFECTED_FLOWS', undefined, () => {
+      const { graphify } = loadConfig();
+      assert.equal(graphify.memoryRecallEnabled, true, 'recall por grafo é o default pós-cutover');
+      assert.equal(graphify.affectedFlowsEnabled, true, 'blast radius derivado é o default pós-cutover');
+    }),
+  );
+});
+
+test('US-F2.10 rollback: o literal "false" DESLIGA cada env (rede de segurança do épico)', () => {
+  withEnv('GRAPHIFY_MEMORY_RECALL', 'false', () =>
+    withEnv('GRAPHIFY_AFFECTED_FLOWS', 'false', () => {
+      const { graphify } = loadConfig();
+      assert.equal(graphify.memoryRecallEnabled, false, 'recall desligado (sem memória; o LIKE morreu na US-F2.3)');
+      assert.equal(graphify.affectedFlowsEnabled, false, 'rollback do derivado → só declarado');
+    }),
+  );
+});
+
+test('US-F2.10: "true" explícito (o opt-in antigo) continua ligando — .env pré-cutover não regride', () => {
+  withEnv('GRAPHIFY_MEMORY_RECALL', 'true', () =>
+    withEnv('GRAPHIFY_AFFECTED_FLOWS', 'true', () => {
+      const { graphify } = loadConfig();
+      assert.equal(graphify.memoryRecallEnabled, true);
+      assert.equal(graphify.affectedFlowsEnabled, true);
+    }),
+  );
+});
+
+// --- US-F3.1 (ADR-0036, emenda): AGENT_ADAPTER como única fonte de verdade ---
+// Matriz de precedência: AGENT_ADAPTER explícito vence; ausente, o alias
+// DEPRECADO AGENT_RUNNER_KIND é honrado; sem os dois, default copilot-cli.
+
+test('resolveAgentAdapter: só AGENT_ADAPTER → vence', () => {
+  assert.equal(resolveAgentAdapter('mock', undefined), 'mock');
+  assert.equal(resolveAgentAdapter('claude', undefined), 'claude');
+});
+
+test('resolveAgentAdapter: só AGENT_RUNNER_KIND legado → honrado', () => {
+  assert.equal(resolveAgentAdapter(undefined, 'mock'), 'mock');
+  assert.equal(resolveAgentAdapter(undefined, 'copilot-cli'), 'copilot-cli');
+  assert.equal(resolveAgentAdapter(undefined, ' MOCK '), 'mock', 'case/trim-insensitive');
+});
+
+test('resolveAgentAdapter: ambos setados → AGENT_ADAPTER vence', () => {
+  assert.equal(resolveAgentAdapter('copilot-cli', 'mock'), 'copilot-cli');
+  assert.equal(resolveAgentAdapter('mock', 'copilot-cli'), 'mock');
+});
+
+test('resolveAgentAdapter: nenhum dos dois → default do processo mock (ADR-0014)', () => {
+  assert.equal(resolveAgentAdapter(undefined, undefined), 'mock');
+});
+
+test('resolveAgentAdapter: AGENT_ADAPTER vazio/desconhecido e legado inválido', () => {
+  // Vazio conta como ausente → legado é honrado.
+  assert.equal(resolveAgentAdapter('   ', 'mock'), 'mock');
+  // Explícito desconhecido vence (e cai no default de CATÁLOGO) — legado NÃO
+  // reentra (comportamento pré-US-F3.1: AGENT_ADAPTER setado ia pro registry).
+  assert.equal(resolveAgentAdapter('nope', 'mock'), 'copilot-cli');
+  // Legado desconhecido → default do processo (pré-US-F3.1: runnerKind caía em mock).
+  assert.equal(resolveAgentAdapter(undefined, 'banana'), 'mock');
+});
+
+test('loadConfig: agent.runnerKind é DERIVADO de agentAdapter (não diverge)', () => {
+  withEnv('AGENT_ADAPTER', 'mock', () =>
+    withEnv('AGENT_RUNNER_KIND', undefined, () => {
+      const config = loadConfig();
+      assert.equal(config.agentAdapter, 'mock');
+      assert.equal(config.agent.runnerKind, 'mock');
+    }),
+  );
+  withEnv('AGENT_ADAPTER', undefined, () =>
+    withEnv('AGENT_RUNNER_KIND', 'mock', () => {
+      const config = loadConfig();
+      assert.equal(config.agentAdapter, 'mock', 'alias legado honrado');
+      assert.equal(config.agent.runnerKind, 'mock');
+    }),
+  );
+  withEnv('AGENT_ADAPTER', 'copilot-cli', () =>
+    withEnv('AGENT_RUNNER_KIND', 'mock', () => {
+      const config = loadConfig();
+      assert.equal(config.agentAdapter, 'copilot-cli', 'AGENT_ADAPTER vence o conflito');
+      assert.equal(config.agent.runnerKind, 'copilot-cli');
+    }),
+  );
+  withEnv('AGENT_ADAPTER', undefined, () =>
+    withEnv('AGENT_RUNNER_KIND', undefined, () => {
+      const config = loadConfig();
+      assert.equal(config.agentAdapter, 'mock', 'default do processo sem envs (ADR-0014)');
+      assert.equal(config.agent.runnerKind, 'mock');
+    }),
+  );
+});
+
+test('warnLegacyAgentRunnerKindOnce: avisa UMA vez quando só o legado decide', () => {
+  resetLegacyAgentRunnerKindWarningForTests();
+  const messages: string[] = [];
+  const env = { AGENT_RUNNER_KIND: 'mock' };
+  assert.equal(warnLegacyAgentRunnerKindOnce((m) => messages.push(m), env), true);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /AGENT_RUNNER_KIND/);
+  assert.match(messages[0], /DEPRECADO/);
+  assert.match(messages[0], /AGENT_ADAPTER=mock/, 'diz qual env usar no lugar');
+  // Segunda chamada no mesmo processo: NÃO repete o aviso.
+  assert.equal(warnLegacyAgentRunnerKindOnce((m) => messages.push(m), env), false);
+  assert.equal(messages.length, 1);
+});
+
+test('warnLegacyAgentRunnerKindOnce: silencioso com AGENT_ADAPTER setado ou sem legado', () => {
+  resetLegacyAgentRunnerKindWarningForTests();
+  const messages: string[] = [];
+  const push = (m: string): number => messages.push(m);
+  // AGENT_ADAPTER explícito → legado ignorado, sem aviso.
+  assert.equal(
+    warnLegacyAgentRunnerKindOnce(push, { AGENT_ADAPTER: 'copilot-cli', AGENT_RUNNER_KIND: 'mock' }),
+    false,
+  );
+  // Nenhuma env → sem aviso.
+  assert.equal(warnLegacyAgentRunnerKindOnce(push, {}), false);
+  assert.equal(messages.length, 0);
+  resetLegacyAgentRunnerKindWarningForTests();
 });

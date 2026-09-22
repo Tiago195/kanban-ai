@@ -26,6 +26,10 @@ projects/
 ├── project-credentials.service.spec.ts
 ├── project-explorer.service.ts    # US-PROJ7: leitura read-only do repo clonado + memória (hive)
 ├── project-explorer.service.spec.ts
+├── project-graph.service.ts       # US-F1.3: build do grafo de conhecimento (graphify) por Project
+├── project-graph.service.spec.ts
+├── project-graph-query.service.ts # US-F1.4: cliente MCP de LEITURA do grafo (tools tipadas, project_path por construção)
+├── project-graph-query.service.spec.ts
 ├── projects.controller.ts
 └── projects.module.ts
 ```
@@ -40,19 +44,30 @@ projects/
   observável via o evento WS `project.clone_state` e por `GET /projects/:id`.
 - `POST /projects/:id/sync` — US-PROJ2: `fetch` + checkout/fast-forward para a
   branch default; atualiza `lastSyncedAt`. Retorna o DTO atualizado.
-- `DELETE /projects/:id` — remove a linha e o **diretório gerenciado** do clone
-  (`ProjectWorkspaceService.remove`, best-effort).
+- `DELETE /projects/:id` — remove a linha, o **diretório gerenciado** do clone
+  (`ProjectWorkspaceService.remove`, best-effort) e o **diretório do grafo** no
+  volume do sidecar (`ProjectGraphService.remove` → `POST /remove` do wrapper,
+  best-effort — US-F1.3).
 - `GET /projects/:id/repo-info` — US-PROJ7: `ProjectRepoInfo` read-only
   (`cloneState`/`lastSyncedAt` da row + `defaultBranch`/`headCommit` via
   isomorphic-git no `localPath` + `modules` via `detectModules`). Trata
   "ainda não clonado" → nulls + `modules: []`.
-- `GET /projects/:id/memory` — US-PROJ7: `MemoryNeuronSummary[]` do índice de
-  memória (hive). **Global-first**: `MemoryIndex` ainda não tem `projectId`; o
-  filtro por projeto aperta quando US-PROJ4 aterrissar. NUNCA projeta campos de
-  coordenação interna (`leaseId`/`activeBranch`/`baseCommit`/`searchText`), só os
-  campos do summary. `tags` é desserializado de JSON string → `string[]`.
-- `GET /projects/:id/memory/read?path=` — US-PROJ7: `MemoryNeuronDetail` (summary
-  + `content` + `headCommit`), proxy tipado sobre `MemoryGitService.readNeuron`.
+- `GET /projects/:id/memory` — US-PROJ7/F2.3: `MemoryNeuronSummary[]` lido da
+  colmeia do clone (`<clone>/.hive/**.md`, via `ProjectHiveService`) —
+  per-Project por construção. US-F5.1: o neurônio é o memory doc CANÔNICO do
+  graphify — título = `question`, tag = `type`, `updatedAt` = `date` (markdown
+  sem frontmatter cai na heurística de corpo/linha `tags:` inline); sem campos
+  de coordenação (morreram na US-F2.3).
+- `GET /projects/:id/memory/read?path=` — US-PROJ7/F2.3: `MemoryNeuronDetail`
+  (summary + `content`) de `<clone>/.hive/<path>` (trust boundary no path);
+  inexistente → 404.
+- `GET /projects/:id/graph` — US-F4.1: `GraphProjectionResponse` — projeção do
+  grafo de conhecimento com o **corte no servidor** (rota `POST /projection` do
+  wrapper do sidecar, que lê o `graph.json` estruturado — sem regex sobre texto
+  MCP). Params: `focus` (BFS por nó, `depth` 1..3), `community`, `search`
+  (typeahead, sem arestas), `limit` (1..500, default 150; arestas ≤ 4×limit).
+  Project inexistente → 404; grafo não-`ready`/sidecar fora →
+  `{ok:false, graphState, error}` tipado (falha visível, nunca 500 opaco).
 
 ## `ProjectWorkspaceService` (US-PROJ2)
 
@@ -85,6 +100,62 @@ projects/
   `./.kanban-ai-projects`, resolvido absoluto), `PROJECTS_GIT_TIMEOUT_MS`
   (default `300000`), `PROJECTS_ALLOW_SSH` (default `false`, US-PROJ3).
 
+## `ProjectGraphService` (US-F1.3)
+
+- Cliente do **wrapper HTTP de build** do sidecar graphify
+  (`docker/graphify_build_server.py`, US-F1.6/ADR-0041). Quando o clone fica
+  `ready`, o `ProjectWorkspaceService` dispara `build()` em background
+  (fire-and-forget): `POST /build` síncrono → ciclo refletido em
+  `Project.graphState` (`building → ready|failed`), com `graphBuiltAt` ou
+  `graphLastError` e evento WS `project.graph_state`.
+- **Defensivo**: `build()` NUNCA lança (falha de grafo jamais derruba o fluxo de
+  Project); sem `GRAPHIFY_API_KEY` a integração fica desligada (skip,
+  `graphState` permanece `pending`); Project deletado DURANTE o build (~18s) →
+  nada é gravado/emitido e o grafo órfão recém-escrito é removido
+  (`POST /remove`).
+- **Config** (`config.graphify`, env): `GRAPHIFY_BUILD_PORT` (default 8130,
+  bind fixo 127.0.0.1), `GRAPHIFY_API_KEY` (a MESMA do sidecar; vazia =
+  desligado), `GRAPHIFY_BUILD_TIMEOUT_MS` (default 1830000 — MAIOR que o
+  timeout do sidecar).
+- **ARMADILHA de DI**: parâmetro opcional tipado `X | null` faz o TS emitir
+  `Object` no `design:paramtypes` e o Nest injeta `undefined` em silêncio. Use
+  `@Optional() param?: X` (sem união) — foi assim que o `graph` entrou no
+  `ProjectWorkspaceService`.
+- **US-F1.5 — rebuild incremental pós-iteração** (`rebuildFromIteration`):
+  disparado pelo orchestrator (fire-and-forget) quando uma iteração do loop
+  altera arquivos do repo-alvo. NUNCA entra no caminho crítico da iteração:
+  coalescing por Project (rajada de N pedidos = 1 build, união dos arquivos,
+  debounce de 500ms + acúmulo enquanto um build está em voo), contador por
+  Project que a cada `GRAPHIFY_INCREMENTAL_FORCE_EVERY` (default 10) builds
+  dispara um COMPLETO com `force: true` (o incremental é lossy), e skip quando
+  `graphState != ready`. Lista de arquivos via
+  `git diff --name-only -z --no-renames` (deletado = path na lista; rename =
+  delete+add; espaço sai literal). Desligado por default
+  (`GRAPHIFY_INCREMENTAL_REBUILD`). Specs: `project-graph-rebuild.spec.ts`.
+
+## `ProjectGraphQueryService` (US-F1.4)
+
+- Cliente **MCP Streamable HTTP** de LEITURA do grafo no sidecar
+  (`http://127.0.0.1:<GRAPHIFY_MCP_PORT>/mcp`, ADR-0041). Expõe as tools de
+  leitura como métodos tipados: `queryGraph`, `getNode`, `getNeighbors`,
+  `getCommunity`, `godNodes`, `graphStats`, `shortestPath` — TODOS exigem
+  `projectId`, do qual o `project_path`
+  (`/home/graphify/.graphify/projects/<projectId>`) é derivado internamente:
+  **isolamento entre Projects por construção**, nunca por disciplina do
+  chamador.
+- **Best-effort**: nenhum método lança — retorno `{ ok:true, text }` |
+  `{ ok:false, error }`. Cobre sidecar fora do ar, grafo inexistente
+  (`graphState != ready` — o serve responde erro como CONTEÚDO de tool) e
+  integração desligada (sem `GRAPHIFY_API_KEY`). Sessão MCP expirada/sidecar
+  reiniciado → re-handshake + UMA nova tentativa.
+- `token_budget` exposto em todas as tools que o aceitam; default
+  `DEFAULT_GRAPH_TOKEN_BUDGET = 2000` tokens (o default do próprio graphify;
+  substitui o corte fixo de 4000 chars do recall antigo).
+- **Config** (`config.graphify`): `mcpUrl` (de `GRAPHIFY_MCP_PORT`, default
+  8129) e `queryTimeoutMs` (`GRAPHIFY_QUERY_TIMEOUT_MS`, default 15000).
+- Exportado pelo módulo para os consumidores de contexto de grafo (EP-F2 —
+  o `buildContext` do orchestrator segue no recall antigo até lá).
+
 ## `ProjectCredentialsService` (US-PROJ3)
 
 - **@Injectable**, exportado pelo `ProjectsModule`. Injeta `APP_CONFIG`.
@@ -104,6 +175,9 @@ projects/
   `ServerEvent`): `{ type: 'project.clone_state'; projectId; state; error? }`.
   Emitido via `RealtimeService.broadcast` a cada transição de `cloneState`;
   `error` só presente em `failed` (mensagem legível).
+- `ProjectGraphStateEvent` (US-F1.3, mesmo padrão):
+  `{ type: 'project.graph_state'; projectId; state; error? }` a cada transição
+  de `graphState`.
 
 ## Invariantes (NUNCA violar)
 

@@ -1,0 +1,23 @@
+- generic [ref=f38e4]:
+  - complementary "Áreas do explorador" [ref=f38e5]:
+    - button "Voltar ao quadro" [ref=f38e6] [cursor=pointer]:
+      - generic [ref=f38e7]: ←
+    - navigation "Áreas" [ref=f38e9]:
+      - button "Projetos" [ref=f38e10] [cursor=pointer]:
+        - generic [ref=f38e11]: 🗄️
+      - button "O que a AI sabe" [disabled] [ref=f38e13]:
+        - generic [ref=f38e14]: 🐝
+      - button "Grafo" [disabled] [ref=f38e16]:
+        - generic [ref=f38e17]: 🕸️
+      - button "Wiki" [disabled] [ref=f38e19]:
+        - generic [ref=f38e20]: 📖
+  - generic [ref=f38e22]:
+    - banner [ref=f38e23]:
+      - heading "Projetos" [level=1] [ref=f38e24]: 🗄️ Projetos
+      - generic [ref=f38e25]: repositórios git clonados e gerenciados
+      - combobox "Selecionar tema" [ref=f38e26] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+    - main [ref=f38e27]:
+      - generic [ref=f38e28]: Carregando projetos…

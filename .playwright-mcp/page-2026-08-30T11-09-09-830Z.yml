@@ -1,0 +1,520 @@
+- generic [ref=f4e3]:
+  - banner [ref=f4e4]:
+    - heading "Sprint Board" [level=1] [ref=f4e5]
+    - generic [ref=f4e6]:
+      - searchbox "Buscar cards" [ref=f4e7]
+      - combobox "Filtrar por label" [ref=f4e8]:
+        - option "Todas as labels" [selected]
+        - option "Bug"
+        - option "Feature"
+        - option "Chore"
+        - option "Docs"
+        - option "Urgent"
+      - combobox "Filtrar por agente" [ref=f4e9]:
+        - option "Todos os agentes" [selected]
+        - option "Claude-Dev"
+        - option "GPT-Reviewer"
+        - option "Copilot-QA"
+      - button "✨ Criar backlog" [ref=f4e10] [cursor=pointer]
+      - button "🤖 Agentes" [ref=f4e11] [cursor=pointer]
+      - button "🗄️ Projetos" [ref=f4e12] [cursor=pointer]
+      - button "🗂️ Explorador" [ref=f4e13] [cursor=pointer]
+      - button "🔁 Loops" [ref=f4e14] [cursor=pointer]
+      - button "🔕 Review OFF" [ref=f4e15] [cursor=pointer]
+      - button "+ Coluna" [ref=f4e16] [cursor=pointer]
+      - button "⤓ Export" [ref=f4e17] [cursor=pointer]
+      - button "⤒ Import" [ref=f4e18] [cursor=pointer]
+      - combobox "Selecionar tema" [ref=f4e19] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+  - generic [ref=f4e20]:
+    - generic [ref=f4e21]:
+      - generic [ref=f4e22]: Épicos
+      - generic [ref=f4e23]: "2"
+    - generic [ref=f4e24]:
+      - generic [ref=f4e25]: Histórias
+      - generic [ref=f4e26]: "5"
+    - generic [ref=f4e27]:
+      - generic [ref=f4e28]: Tasks
+      - generic [ref=f4e29]: "6"
+    - generic [ref=f4e30]:
+      - generic [ref=f4e31]: Pontos concluídos
+      - generic [ref=f4e32]: "0"
+      - generic [ref=f4e33]: /
+      - generic [ref=f4e34]: "21"
+    - generic "Progresso da sprint (story points)" [ref=f4e35]
+    - generic [ref=f4e36]:
+      - generic [ref=f4e37]: Bloqueados
+      - generic [ref=f4e38]: "1"
+  - generic [ref=f4e39]:
+    - complementary [ref=f4e50]:
+      - generic [ref=f4e51]:
+        - generic [ref=f4e52]: ÉPICOS
+        - generic [ref=f4e53]: "2"
+        - button "+ Épico" [ref=f4e54] [cursor=pointer]
+      - generic [ref=f4e55]:
+        - generic [ref=f4e56] [cursor=pointer]:
+          - generic [ref=f4e57]:
+            - generic [ref=f4e58]: EP-1
+            - generic [ref=f4e59]: IN PROGRESS
+          - generic [ref=f4e60]: Onboarding de novos clientes
+          - generic [ref=f4e62]: 🧩 0/4 histórias
+        - generic [ref=f4e64] [cursor=pointer]:
+          - generic [ref=f4e65]:
+            - generic [ref=f4e66]: EP-19
+            - generic [ref=f4e67]: IN PROGRESS
+          - generic [ref=f4e68]: AUDIT-F2 epico
+          - generic [ref=f4e70]: 🧩 0/1 histórias
+    - generic [ref=f4e72]:
+      - generic [ref=f4e73]:
+        - generic [ref=f4e74]:
+          - generic [ref=f4e75]: Backlog
+          - generic [ref=f4e76]: "1"
+          - generic [ref=f4e77]: 5 pts
+        - button "STORY US-8 5 Auditoria de acesso EP-1 · Onboarding de novos clientes 📝" [ref=f4e79] [cursor=pointer]:
+          - generic [ref=f4e80]:
+            - generic [ref=f4e81]: STORY
+            - generic [ref=f4e82]: US-8
+            - generic [ref=f4e83]: "5"
+          - generic [ref=f4e84]: Auditoria de acesso
+          - generic "Onboarding de novos clientes" [ref=f4e85]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f4e86]: 📝
+        - button "+ Adicionar história" [ref=f4e88] [cursor=pointer]
+      - generic [ref=f4e89]:
+        - generic [ref=f4e90]:
+          - generic [ref=f4e91]: To Do
+          - generic [ref=f4e92]: "1"
+          - generic [ref=f4e93]: 3 pts
+          - generic [ref=f4e94]: 1/5
+        - button "STORY US-6 ⛔ 3 Recuperação de senha EP-1 · Onboarding de novos clientes 📝" [ref=f4e96] [cursor=pointer]:
+          - generic [ref=f4e97]:
+            - generic [ref=f4e98]: STORY
+            - generic [ref=f4e99]: US-6
+            - generic [ref=f4e100]: ⛔
+            - generic [ref=f4e101]: "3"
+          - generic [ref=f4e102]: Recuperação de senha
+          - generic "Onboarding de novos clientes" [ref=f4e103]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f4e104]: 📝
+        - button "+ Adicionar história" [ref=f4e106] [cursor=pointer]
+      - generic [ref=f4e107]:
+        - generic [ref=f4e108]:
+          - generic [ref=f4e109]: In Progress
+          - generic [ref=f4e110]: "2"
+          - generic [ref=f4e111]: 5 pts
+          - generic [ref=f4e112]: 2/3
+        - generic [ref=f4e113]:
+          - button "STORY US-20 🙋 task precisa de você Validar separador vazio no slugify EP-19 · AUDIT-F2 epico" [ref=f4e114] [cursor=pointer]:
+            - generic [ref=f4e115]:
+              - generic [ref=f4e116]: STORY
+              - generic [ref=f4e117]: US-20
+              - generic "Uma task desta história precisa de você — abra a história para responder no chat da task." [ref=f4e118]: 🙋 task precisa de você
+            - generic [ref=f4e119]: Validar separador vazio no slugify
+            - generic "AUDIT-F2 epico" [ref=f4e120]: EP-19 · AUDIT-F2 epico
+          - button "STORY US-2 5 🙋 task precisa de você Cadastro com e-mail e senha EP-1 · Onboarding de novos clientes 📝" [ref=f4e121] [cursor=pointer]:
+            - generic [ref=f4e122]:
+              - generic [ref=f4e123]: STORY
+              - generic [ref=f4e124]: US-2
+              - generic [ref=f4e125]: "5"
+              - generic "Uma task desta história precisa de você — abra a história para responder no chat da task." [ref=f4e126]: 🙋 task precisa de você
+            - generic [ref=f4e127]: Cadastro com e-mail e senha
+            - generic "Onboarding de novos clientes" [ref=f4e128]: EP-1 · Onboarding de novos clientes
+            - generic [ref=f4e129]: 📝
+      - generic [ref=f4e131]:
+        - generic [ref=f4e132]:
+          - generic [ref=f4e133]: Review
+          - generic [ref=f4e134]: "1"
+          - generic [ref=f4e135]: 8 pts
+          - generic [ref=f4e136]: 1/3
+        - button "STORY US-7 8 Dashboard inicial EP-1 · Onboarding de novos clientes 📝" [ref=f4e138] [cursor=pointer]:
+          - generic [ref=f4e139]:
+            - generic [ref=f4e140]: STORY
+            - generic [ref=f4e141]: US-7
+            - generic [ref=f4e142]: "8"
+          - generic [ref=f4e143]: Dashboard inicial
+          - generic "Onboarding de novos clientes" [ref=f4e144]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f4e145]: 📝
+      - generic [ref=f4e148]:
+        - generic [ref=f4e149]: Done
+        - generic [ref=f4e150]: "0"
+    - status [ref=f4e152]
+  - generic [ref=f4e43]:
+    - generic [ref=f4e45]:
+      - heading "🗂️ Explorador" [level=2] [ref=f4e46]
+      - button "Fechar" [ref=f4e47] [cursor=pointer]: ✕
+    - generic [ref=f4e48]:
+      - tablist [ref=f4e153]:
+        - tab "📁 Repositório" [ref=f4e154] [cursor=pointer]
+        - tab "🐝 O que a AI sabe" [ref=f4e155] [cursor=pointer]
+        - tab "🕸️ Grafo" [active] [selected] [ref=f4e156] [cursor=pointer]
+      - generic [ref=f4e157]:
+        - generic [ref=f4e158]: 📁 Projeto
+        - combobox [ref=f4e159]:
+          - option "array-move — https://github.com/sindresorhus/array-move" [selected]
+      - generic [ref=f4e181]:
+        - textbox "Buscar nó por nome ou arquivo…" [ref=f4e183]
+        - generic [ref=f4e184]: Exibindo 52 de 52 nós · 52 de 52 arestas · 9 comunidades
+        - generic [ref=f4e185]:
+          - generic [ref=f4e186]:
+            - generic [ref=f4e187]: Comunidades (maiores primeiro)
+            - generic [ref=f4e188]:
+              - button "package.json (13)" [ref=f4e189] [cursor=pointer]:
+                - text: package.json
+                - generic [ref=f4e190]: (13)
+              - button "array-move (10)" [ref=f4e191] [cursor=pointer]:
+                - text: array-move
+                - generic [ref=f4e192]: (10)
+              - button "devDependencies (7)" [ref=f4e193] [cursor=pointer]:
+                - text: devDependencies
+                - generic [ref=f4e194]: (7)
+              - button "index.js (6)" [ref=f4e195] [cursor=pointer]:
+                - text: index.js
+                - generic [ref=f4e196]: (6)
+              - button "keywords (6)" [ref=f4e197] [cursor=pointer]:
+                - text: keywords
+                - generic [ref=f4e198]: (6)
+              - button "author (4)" [ref=f4e199] [cursor=pointer]:
+                - text: author
+                - generic [ref=f4e200]: (4)
+              - button "files (3)" [ref=f4e201] [cursor=pointer]:
+                - text: files
+                - generic [ref=f4e202]: (3)
+              - button "security.md (2)" [ref=f4e203] [cursor=pointer]:
+                - text: security.md
+                - generic [ref=f4e204]: (2)
+              - button "index.d.ts (1)" [ref=f4e205] [cursor=pointer]:
+                - text: index.d.ts
+                - generic [ref=f4e206]: (1)
+          - generic [ref=f4e207]:
+            - generic [ref=f4e208]: Esqueleto do sistema — os 52 nós mais conectados
+            - generic [ref=f4e209]:
+              - generic [ref=f4e210]:
+                - generic [ref=f4e211]: package.json
+                - button "package.json code grau 14 package.json" [ref=f4e213] [cursor=pointer]:
+                  - generic [ref=f4e214]:
+                    - generic [ref=f4e216]: package.json
+                    - generic [ref=f4e217]: code
+                  - generic [ref=f4e218]: grau 14
+                  - code [ref=f4e222]: package.json
+                - button "engines code grau 2 package.json" [ref=f4e223] [cursor=pointer]:
+                  - generic [ref=f4e224]:
+                    - generic [ref=f4e226]: engines
+                    - generic [ref=f4e227]: code
+                  - generic [ref=f4e228]: grau 2
+                  - code [ref=f4e232]: package.json
+                - button "scripts code grau 2 package.json" [ref=f4e233] [cursor=pointer]:
+                  - generic [ref=f4e234]:
+                    - generic [ref=f4e236]: scripts
+                    - generic [ref=f4e237]: code
+                  - generic [ref=f4e238]: grau 2
+                  - code [ref=f4e242]: package.json
+                - button "description code grau 1 package.json" [ref=f4e243] [cursor=pointer]:
+                  - generic [ref=f4e244]:
+                    - generic [ref=f4e246]: description
+                    - generic [ref=f4e247]: code
+                  - generic [ref=f4e248]: grau 1
+                  - code [ref=f4e252]: package.json
+                - button "node code grau 1 package.json" [ref=f4e253] [cursor=pointer]:
+                  - generic [ref=f4e254]:
+                    - generic [ref=f4e256]: node
+                    - generic [ref=f4e257]: code
+                  - generic [ref=f4e258]: grau 1
+                  - code [ref=f4e262]: package.json
+                - button "exports code grau 1 package.json" [ref=f4e263] [cursor=pointer]:
+                  - generic [ref=f4e264]:
+                    - generic [ref=f4e266]: exports
+                    - generic [ref=f4e267]: code
+                  - generic [ref=f4e268]: grau 1
+                  - code [ref=f4e272]: package.json
+                - button "funding code grau 1 package.json" [ref=f4e273] [cursor=pointer]:
+                  - generic [ref=f4e274]:
+                    - generic [ref=f4e276]: funding
+                    - generic [ref=f4e277]: code
+                  - generic [ref=f4e278]: grau 1
+                  - code [ref=f4e282]: package.json
+                - button "license code grau 1 package.json" [ref=f4e283] [cursor=pointer]:
+                  - generic [ref=f4e284]:
+                    - generic [ref=f4e286]: license
+                    - generic [ref=f4e287]: code
+                  - generic [ref=f4e288]: grau 1
+                  - code [ref=f4e292]: package.json
+                - button "name code grau 1 package.json" [ref=f4e293] [cursor=pointer]:
+                  - generic [ref=f4e294]:
+                    - generic [ref=f4e296]: name
+                    - generic [ref=f4e297]: code
+                  - generic [ref=f4e298]: grau 1
+                  - code [ref=f4e302]: package.json
+                - button "repository code grau 1 package.json" [ref=f4e303] [cursor=pointer]:
+                  - generic [ref=f4e304]:
+                    - generic [ref=f4e306]: repository
+                    - generic [ref=f4e307]: code
+                  - generic [ref=f4e308]: grau 1
+                  - code [ref=f4e312]: package.json
+                - button "test code grau 1 package.json" [ref=f4e313] [cursor=pointer]:
+                  - generic [ref=f4e314]:
+                    - generic [ref=f4e316]: test
+                    - generic [ref=f4e317]: code
+                  - generic [ref=f4e318]: grau 1
+                  - code [ref=f4e322]: package.json
+                - button "type code grau 1 package.json" [ref=f4e323] [cursor=pointer]:
+                  - generic [ref=f4e324]:
+                    - generic [ref=f4e326]: type
+                    - generic [ref=f4e327]: code
+                  - generic [ref=f4e328]: grau 1
+                  - code [ref=f4e332]: package.json
+                - button "version code grau 1 package.json" [ref=f4e333] [cursor=pointer]:
+                  - generic [ref=f4e334]:
+                    - generic [ref=f4e336]: version
+                    - generic [ref=f4e337]: code
+                  - generic [ref=f4e338]: grau 1
+                  - code [ref=f4e342]: package.json
+              - generic [ref=f4e343]:
+                - generic [ref=f4e344]: keywords
+                - button "keywords code grau 6 package.json" [ref=f4e346] [cursor=pointer]:
+                  - generic [ref=f4e347]:
+                    - generic [ref=f4e349]: keywords
+                    - generic [ref=f4e350]: code
+                  - generic [ref=f4e351]: grau 6
+                  - code [ref=f4e355]: package.json
+                - button "array concept grau 1 package.json" [ref=f4e356] [cursor=pointer]:
+                  - generic [ref=f4e357]:
+                    - generic [ref=f4e359]: array
+                    - generic [ref=f4e360]: concept
+                  - generic [ref=f4e361]: grau 1
+                  - code [ref=f4e365]: package.json
+                - button "change concept grau 1 package.json" [ref=f4e366] [cursor=pointer]:
+                  - generic [ref=f4e367]:
+                    - generic [ref=f4e369]: change
+                    - generic [ref=f4e370]: concept
+                  - generic [ref=f4e371]: grau 1
+                  - code [ref=f4e375]: package.json
+                - button "index concept grau 1 package.json" [ref=f4e376] [cursor=pointer]:
+                  - generic [ref=f4e377]:
+                    - generic [ref=f4e379]: index
+                    - generic [ref=f4e380]: concept
+                  - generic [ref=f4e381]: grau 1
+                  - code [ref=f4e385]: package.json
+                - button "move concept grau 1 package.json" [ref=f4e386] [cursor=pointer]:
+                  - generic [ref=f4e387]:
+                    - generic [ref=f4e389]: move
+                    - generic [ref=f4e390]: concept
+                  - generic [ref=f4e391]: grau 1
+                  - code [ref=f4e395]: package.json
+                - button "position concept grau 1 package.json" [ref=f4e396] [cursor=pointer]:
+                  - generic [ref=f4e397]:
+                    - generic [ref=f4e399]: position
+                    - generic [ref=f4e400]: concept
+                  - generic [ref=f4e401]: grau 1
+                  - code [ref=f4e405]: package.json
+              - generic [ref=f4e406]:
+                - generic [ref=f4e407]: index.js
+                - button "index.js code grau 4 index.js" [ref=f4e409] [cursor=pointer]:
+                  - generic [ref=f4e410]:
+                    - generic [ref=f4e412]: index.js
+                    - generic [ref=f4e413]: code
+                  - generic [ref=f4e414]: grau 4
+                  - code [ref=f4e418]: index.js
+                - button "arrayMoveImmutable() code grau 4 index.js" [ref=f4e419] [cursor=pointer]:
+                  - generic [ref=f4e420]:
+                    - generic [ref=f4e422]: arrayMoveImmutable()
+                    - generic [ref=f4e423]: code
+                  - generic [ref=f4e424]: grau 4
+                  - code [ref=f4e428]: index.js
+                - button "arrayMoveMutable() code grau 4 index.js" [ref=f4e429] [cursor=pointer]:
+                  - generic [ref=f4e430]:
+                    - generic [ref=f4e432]: arrayMoveMutable()
+                    - generic [ref=f4e433]: code
+                  - generic [ref=f4e434]: grau 4
+                  - code [ref=f4e438]: index.js
+                - button "test.js code grau 4 test.js" [ref=f4e439] [cursor=pointer]:
+                  - generic [ref=f4e440]:
+                    - generic [ref=f4e442]: test.js
+                    - generic [ref=f4e443]: code
+                  - generic [ref=f4e444]: grau 4
+                  - code [ref=f4e448]: test.js
+                - button "index.test-d.ts code grau 3 index.test-d.ts" [ref=f4e449] [cursor=pointer]:
+                  - generic [ref=f4e450]:
+                    - generic [ref=f4e452]: index.test-d.ts
+                    - generic [ref=f4e453]: code
+                  - generic [ref=f4e454]: grau 3
+                  - code [ref=f4e458]: index.test-d.ts
+                - button "fixture code grau 1 test.js" [ref=f4e459] [cursor=pointer]:
+                  - generic [ref=f4e460]:
+                    - generic [ref=f4e462]: fixture
+                    - generic [ref=f4e463]: code
+                  - generic [ref=f4e464]: grau 1
+                  - code [ref=f4e468]: test.js
+              - generic [ref=f4e469]:
+                - generic [ref=f4e470]: author
+                - button "author code grau 4 package.json" [ref=f4e472] [cursor=pointer]:
+                  - generic [ref=f4e473]:
+                    - generic [ref=f4e475]: author
+                    - generic [ref=f4e476]: code
+                  - generic [ref=f4e477]: grau 4
+                  - code [ref=f4e481]: package.json
+                - button "email code grau 1 package.json" [ref=f4e482] [cursor=pointer]:
+                  - generic [ref=f4e483]:
+                    - generic [ref=f4e485]: email
+                    - generic [ref=f4e486]: code
+                  - generic [ref=f4e487]: grau 1
+                  - code [ref=f4e491]: package.json
+                - button "name code grau 1 package.json" [ref=f4e492] [cursor=pointer]:
+                  - generic [ref=f4e493]:
+                    - generic [ref=f4e495]: name
+                    - generic [ref=f4e496]: code
+                  - generic [ref=f4e497]: grau 1
+                  - code [ref=f4e501]: package.json
+                - button "url code grau 1 package.json" [ref=f4e502] [cursor=pointer]:
+                  - generic [ref=f4e503]:
+                    - generic [ref=f4e505]: url
+                    - generic [ref=f4e506]: code
+                  - generic [ref=f4e507]: grau 1
+                  - code [ref=f4e511]: package.json
+              - generic [ref=f4e512]:
+                - generic [ref=f4e513]: devDependencies
+                - button "devDependencies code grau 4 package.json" [ref=f4e515] [cursor=pointer]:
+                  - generic [ref=f4e516]:
+                    - generic [ref=f4e518]: devDependencies
+                    - generic [ref=f4e519]: code
+                  - generic [ref=f4e520]: grau 4
+                  - code [ref=f4e524]: package.json
+                - button "ava code grau 2 package.json" [ref=f4e525] [cursor=pointer]:
+                  - generic [ref=f4e526]:
+                    - generic [ref=f4e528]: ava
+                    - generic [ref=f4e529]: code
+                  - generic [ref=f4e530]: grau 2
+                  - code [ref=f4e534]: package.json
+                - button "tsd code grau 2 package.json" [ref=f4e535] [cursor=pointer]:
+                  - generic [ref=f4e536]:
+                    - generic [ref=f4e538]: tsd
+                    - generic [ref=f4e539]: code
+                  - generic [ref=f4e540]: grau 2
+                  - code [ref=f4e544]: package.json
+                - button "xo code grau 2 package.json" [ref=f4e545] [cursor=pointer]:
+                  - generic [ref=f4e546]:
+                    - generic [ref=f4e548]: xo
+                    - generic [ref=f4e549]: code
+                  - generic [ref=f4e550]: grau 2
+                  - code [ref=f4e554]: package.json
+                - button "ava concept grau 1 package.json" [ref=f4e555] [cursor=pointer]:
+                  - generic [ref=f4e556]:
+                    - generic [ref=f4e558]: ava
+                    - generic [ref=f4e559]: concept
+                  - generic [ref=f4e560]: grau 1
+                  - code [ref=f4e564]: package.json
+                - button "tsd concept grau 1 package.json" [ref=f4e565] [cursor=pointer]:
+                  - generic [ref=f4e566]:
+                    - generic [ref=f4e568]: tsd
+                    - generic [ref=f4e569]: concept
+                  - generic [ref=f4e570]: grau 1
+                  - code [ref=f4e574]: package.json
+                - button "xo concept grau 1 package.json" [ref=f4e575] [cursor=pointer]:
+                  - generic [ref=f4e576]:
+                    - generic [ref=f4e578]: xo
+                    - generic [ref=f4e579]: concept
+                  - generic [ref=f4e580]: grau 1
+                  - code [ref=f4e584]: package.json
+              - generic [ref=f4e585]:
+                - generic [ref=f4e586]: array-move
+                - button "array-move document grau 4 readme.md" [ref=f4e588] [cursor=pointer]:
+                  - generic [ref=f4e589]:
+                    - generic [ref=f4e591]: array-move
+                    - generic [ref=f4e592]: document
+                  - generic [ref=f4e593]: grau 4
+                  - code [ref=f4e597]: readme.md
+                - button "arrayMoveMutable(array, fromIndex, toIndex) document grau 4 readme.md" [ref=f4e598] [cursor=pointer]:
+                  - generic [ref=f4e599]:
+                    - generic [ref=f4e601]: arrayMoveMutable(array, fromIndex, toIndex)
+                    - generic [ref=f4e602]: document
+                  - generic [ref=f4e603]: grau 4
+                  - code [ref=f4e607]: readme.md
+                - button "API document grau 3 readme.md" [ref=f4e608] [cursor=pointer]:
+                  - generic [ref=f4e609]:
+                    - generic [ref=f4e611]: API
+                    - generic [ref=f4e612]: document
+                  - generic [ref=f4e613]: grau 3
+                  - code [ref=f4e617]: readme.md
+                - button "readme.md document grau 1 readme.md" [ref=f4e618] [cursor=pointer]:
+                  - generic [ref=f4e619]:
+                    - generic [ref=f4e621]: readme.md
+                    - generic [ref=f4e622]: document
+                  - generic [ref=f4e623]: grau 1
+                  - code [ref=f4e627]: readme.md
+                - button "array document grau 1 readme.md" [ref=f4e628] [cursor=pointer]:
+                  - generic [ref=f4e629]:
+                    - generic [ref=f4e631]: array
+                    - generic [ref=f4e632]: document
+                  - generic [ref=f4e633]: grau 1
+                  - code [ref=f4e637]: readme.md
+                - button "arrayMoveImmutable(array, fromIndex, toIndex) document grau 1 readme.md" [ref=f4e638] [cursor=pointer]:
+                  - generic [ref=f4e639]:
+                    - generic [ref=f4e641]: arrayMoveImmutable(array, fromIndex, toIndex)
+                    - generic [ref=f4e642]: document
+                  - generic [ref=f4e643]: grau 1
+                  - code [ref=f4e647]: readme.md
+                - button "fromIndex document grau 1 readme.md" [ref=f4e648] [cursor=pointer]:
+                  - generic [ref=f4e649]:
+                    - generic [ref=f4e651]: fromIndex
+                    - generic [ref=f4e652]: document
+                  - generic [ref=f4e653]: grau 1
+                  - code [ref=f4e657]: readme.md
+                - button "Install document grau 1 readme.md" [ref=f4e658] [cursor=pointer]:
+                  - generic [ref=f4e659]:
+                    - generic [ref=f4e661]: Install
+                    - generic [ref=f4e662]: document
+                  - generic [ref=f4e663]: grau 1
+                  - code [ref=f4e667]: readme.md
+                - button "toIndex document grau 1 readme.md" [ref=f4e668] [cursor=pointer]:
+                  - generic [ref=f4e669]:
+                    - generic [ref=f4e671]: toIndex
+                    - generic [ref=f4e672]: document
+                  - generic [ref=f4e673]: grau 1
+                  - code [ref=f4e677]: readme.md
+                - button "Usage document grau 1 readme.md" [ref=f4e678] [cursor=pointer]:
+                  - generic [ref=f4e679]:
+                    - generic [ref=f4e681]: Usage
+                    - generic [ref=f4e682]: document
+                  - generic [ref=f4e683]: grau 1
+                  - code [ref=f4e687]: readme.md
+              - generic [ref=f4e688]:
+                - generic [ref=f4e689]: files
+                - button "files code grau 3 package.json" [ref=f4e691] [cursor=pointer]:
+                  - generic [ref=f4e692]:
+                    - generic [ref=f4e694]: files
+                    - generic [ref=f4e695]: code
+                  - generic [ref=f4e696]: grau 3
+                  - code [ref=f4e700]: package.json
+                - button "index.d.ts concept grau 1 package.json" [ref=f4e701] [cursor=pointer]:
+                  - generic [ref=f4e702]:
+                    - generic [ref=f4e704]: index.d.ts
+                    - generic [ref=f4e705]: concept
+                  - generic [ref=f4e706]: grau 1
+                  - code [ref=f4e710]: package.json
+                - button "index.js concept grau 1 package.json" [ref=f4e711] [cursor=pointer]:
+                  - generic [ref=f4e712]:
+                    - generic [ref=f4e714]: index.js
+                    - generic [ref=f4e715]: concept
+                  - generic [ref=f4e716]: grau 1
+                  - code [ref=f4e720]: package.json
+              - generic [ref=f4e721]:
+                - generic [ref=f4e722]: security.md
+                - button "security.md document grau 1 .github/security.md" [ref=f4e724] [cursor=pointer]:
+                  - generic [ref=f4e725]:
+                    - generic [ref=f4e727]: security.md
+                    - generic [ref=f4e728]: document
+                  - generic [ref=f4e729]: grau 1
+                  - code [ref=f4e733]: .github/security.md
+                - button "Security Policy document grau 1 .github/security.md" [ref=f4e734] [cursor=pointer]:
+                  - generic [ref=f4e735]:
+                    - generic [ref=f4e737]: Security Policy
+                    - generic [ref=f4e738]: document
+                  - generic [ref=f4e739]: grau 1
+                  - code [ref=f4e743]: .github/security.md
+              - generic [ref=f4e744]:
+                - generic [ref=f4e745]: index.d.ts
+                - button "index.d.ts code grau 0 index.d.ts" [ref=f4e747] [cursor=pointer]:
+                  - generic [ref=f4e748]:
+                    - generic [ref=f4e750]: index.d.ts
+                    - generic [ref=f4e751]: code
+                  - generic [ref=f4e752]: grau 0
+                  - code [ref=f4e756]: index.d.ts

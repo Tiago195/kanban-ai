@@ -1,0 +1,45 @@
+- main [ref=f2e2]:
+  - generic [ref=f2e3]:
+    - generic [ref=f2e4]:
+      - link "Graphify home" [ref=f2e5] [cursor=pointer]:
+        - /url: https://graphify.com
+        - generic [ref=f2e6]: Graphify
+      - link "← Back to site" [ref=f2e9] [cursor=pointer]:
+        - /url: https://graphify.com
+    - region [ref=f2e11]:
+      - generic [ref=f2e12]:
+        - text: Graphify cloud
+        - heading "Log in to Graphify" [level=1] [ref=f2e13]
+        - paragraph [ref=f2e14]: Continue to your code intelligence workspace.
+      - generic "Social authentication options" [ref=f2e15]:
+        - link "Continue with Google" [ref=f2e16] [cursor=pointer]:
+          - /url: /auth/login?returnTo=%2Fdsa%2Fgraph&connection=google-oauth2
+        - link "Continue with GitHub" [ref=f2e22] [cursor=pointer]:
+          - /url: /auth/login?returnTo=%2Fdsa%2Fgraph&connection=github
+        - link "Continue with GitLab" [ref=f2e25] [cursor=pointer]:
+          - /url: /auth/login?returnTo=%2Fdsa%2Fgraph&connection=gitlab
+      - generic [ref=f2e34]: or
+      - generic [ref=f2e38]:
+        - generic [ref=f2e39]: Email
+        - textbox "Email" [ref=f2e40]:
+          - /placeholder: you@example.com
+        - button "Continue with email" [ref=f2e41]
+      - paragraph [ref=f2e42]:
+        - text: New to Graphify?
+        - link "Create an account" [ref=f2e43] [cursor=pointer]:
+          - /url: /signup
+      - paragraph [ref=f2e44]: Your password and identity credentials are handled by our authentication provider.
+    - generic [ref=f2e45]:
+      - generic [ref=f2e46]: © 2026 Graphify Labs
+      - link "Privacy" [ref=f2e47] [cursor=pointer]:
+        - /url: https://graphify.com/privacy
+      - link "Terms" [ref=f2e48] [cursor=pointer]:
+        - /url: https://graphify.com/terms
+      - link "Security" [ref=f2e49] [cursor=pointer]:
+        - /url: https://graphify.com/security
+  - complementary [ref=f2e50]:
+    - generic [ref=f2e51]:
+      - paragraph [ref=f2e52]: The Graphify graph
+      - paragraph [ref=f2e53]: Your codebase, mapped.
+      - paragraph [ref=f2e54]: Files, functions, classes, and the calls between them become one queryable graph, so your AI assistant answers from structure instead of guessing.
+      - paragraph [ref=f2e55]: Open source · Works in the AI assistants you already use

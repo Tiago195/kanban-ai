@@ -1,0 +1,332 @@
+- generic [ref=f4e3]:
+  - banner [ref=f4e4]:
+    - heading "Sprint Board" [level=1] [ref=f4e5]
+    - generic [ref=f4e6]:
+      - searchbox "Buscar cards" [ref=f4e7]
+      - combobox "Filtrar por label" [ref=f4e8]:
+        - option "Todas as labels" [selected]
+        - option "Bug"
+        - option "Feature"
+        - option "Chore"
+        - option "Docs"
+        - option "Urgent"
+      - combobox "Filtrar por agente" [ref=f4e9]:
+        - option "Todos os agentes" [selected]
+        - option "Claude-Dev"
+        - option "GPT-Reviewer"
+        - option "Copilot-QA"
+      - button "✨ Criar backlog" [ref=f4e10] [cursor=pointer]
+      - button "🤖 Agentes" [ref=f4e11] [cursor=pointer]
+      - button "🗄️ Projetos" [ref=f4e12] [cursor=pointer]
+      - button "🗂️ Explorador" [ref=f4e13] [cursor=pointer]
+      - button "🔁 Loops" [ref=f4e14] [cursor=pointer]
+      - button "🔕 Review OFF" [ref=f4e15] [cursor=pointer]
+      - button "+ Coluna" [ref=f4e16] [cursor=pointer]
+      - button "⤓ Export" [ref=f4e17] [cursor=pointer]
+      - button "⤒ Import" [ref=f4e18] [cursor=pointer]
+      - combobox "Selecionar tema" [ref=f4e19] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+  - generic [ref=f4e20]:
+    - generic [ref=f4e21]:
+      - generic [ref=f4e22]: Épicos
+      - generic [ref=f4e23]: "2"
+    - generic [ref=f4e24]:
+      - generic [ref=f4e25]: Histórias
+      - generic [ref=f4e26]: "5"
+    - generic [ref=f4e27]:
+      - generic [ref=f4e28]: Tasks
+      - generic [ref=f4e29]: "6"
+    - generic [ref=f4e30]:
+      - generic [ref=f4e31]: Pontos concluídos
+      - generic [ref=f4e32]: "0"
+      - generic [ref=f4e33]: /
+      - generic [ref=f4e34]: "21"
+    - generic "Progresso da sprint (story points)" [ref=f4e35]
+    - generic [ref=f4e36]:
+      - generic [ref=f4e37]: Bloqueados
+      - generic [ref=f4e38]: "1"
+  - generic [ref=f4e39]:
+    - complementary [ref=f4e50]:
+      - generic [ref=f4e51]:
+        - generic [ref=f4e52]: ÉPICOS
+        - generic [ref=f4e53]: "2"
+        - button "+ Épico" [ref=f4e54] [cursor=pointer]
+      - generic [ref=f4e55]:
+        - generic [ref=f4e56] [cursor=pointer]:
+          - generic [ref=f4e57]:
+            - generic [ref=f4e58]: EP-1
+            - generic [ref=f4e59]: IN PROGRESS
+          - generic [ref=f4e60]: Onboarding de novos clientes
+          - generic [ref=f4e62]: 🧩 0/4 histórias
+        - generic [ref=f4e64] [cursor=pointer]:
+          - generic [ref=f4e65]:
+            - generic [ref=f4e66]: EP-19
+            - generic [ref=f4e67]: IN PROGRESS
+          - generic [ref=f4e68]: AUDIT-F2 epico
+          - generic [ref=f4e70]: 🧩 0/1 histórias
+    - generic [ref=f4e72]:
+      - generic [ref=f4e73]:
+        - generic [ref=f4e74]:
+          - generic [ref=f4e75]: Backlog
+          - generic [ref=f4e76]: "1"
+          - generic [ref=f4e77]: 5 pts
+        - button "STORY US-8 5 Auditoria de acesso EP-1 · Onboarding de novos clientes 📝" [ref=f4e79] [cursor=pointer]:
+          - generic [ref=f4e80]:
+            - generic [ref=f4e81]: STORY
+            - generic [ref=f4e82]: US-8
+            - generic [ref=f4e83]: "5"
+          - generic [ref=f4e84]: Auditoria de acesso
+          - generic "Onboarding de novos clientes" [ref=f4e85]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f4e86]: 📝
+        - button "+ Adicionar história" [ref=f4e88] [cursor=pointer]
+      - generic [ref=f4e89]:
+        - generic [ref=f4e90]:
+          - generic [ref=f4e91]: To Do
+          - generic [ref=f4e92]: "1"
+          - generic [ref=f4e93]: 3 pts
+          - generic [ref=f4e94]: 1/5
+        - button "STORY US-6 ⛔ 3 Recuperação de senha EP-1 · Onboarding de novos clientes 📝" [ref=f4e96] [cursor=pointer]:
+          - generic [ref=f4e97]:
+            - generic [ref=f4e98]: STORY
+            - generic [ref=f4e99]: US-6
+            - generic [ref=f4e100]: ⛔
+            - generic [ref=f4e101]: "3"
+          - generic [ref=f4e102]: Recuperação de senha
+          - generic "Onboarding de novos clientes" [ref=f4e103]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f4e104]: 📝
+        - button "+ Adicionar história" [ref=f4e106] [cursor=pointer]
+      - generic [ref=f4e107]:
+        - generic [ref=f4e108]:
+          - generic [ref=f4e109]: In Progress
+          - generic [ref=f4e110]: "2"
+          - generic [ref=f4e111]: 5 pts
+          - generic [ref=f4e112]: 2/3
+        - generic [ref=f4e113]:
+          - button "STORY US-20 🙋 task precisa de você Validar separador vazio no slugify EP-19 · AUDIT-F2 epico" [ref=f4e114] [cursor=pointer]:
+            - generic [ref=f4e115]:
+              - generic [ref=f4e116]: STORY
+              - generic [ref=f4e117]: US-20
+              - generic "Uma task desta história precisa de você — abra a história para responder no chat da task." [ref=f4e118]: 🙋 task precisa de você
+            - generic [ref=f4e119]: Validar separador vazio no slugify
+            - generic "AUDIT-F2 epico" [ref=f4e120]: EP-19 · AUDIT-F2 epico
+          - button "STORY US-2 5 🙋 task precisa de você Cadastro com e-mail e senha EP-1 · Onboarding de novos clientes 📝" [ref=f4e121] [cursor=pointer]:
+            - generic [ref=f4e122]:
+              - generic [ref=f4e123]: STORY
+              - generic [ref=f4e124]: US-2
+              - generic [ref=f4e125]: "5"
+              - generic "Uma task desta história precisa de você — abra a história para responder no chat da task." [ref=f4e126]: 🙋 task precisa de você
+            - generic [ref=f4e127]: Cadastro com e-mail e senha
+            - generic "Onboarding de novos clientes" [ref=f4e128]: EP-1 · Onboarding de novos clientes
+            - generic [ref=f4e129]: 📝
+      - generic [ref=f4e131]:
+        - generic [ref=f4e132]:
+          - generic [ref=f4e133]: Review
+          - generic [ref=f4e134]: "1"
+          - generic [ref=f4e135]: 8 pts
+          - generic [ref=f4e136]: 1/3
+        - button "STORY US-7 8 Dashboard inicial EP-1 · Onboarding de novos clientes 📝" [ref=f4e138] [cursor=pointer]:
+          - generic [ref=f4e139]:
+            - generic [ref=f4e140]: STORY
+            - generic [ref=f4e141]: US-7
+            - generic [ref=f4e142]: "8"
+          - generic [ref=f4e143]: Dashboard inicial
+          - generic "Onboarding de novos clientes" [ref=f4e144]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f4e145]: 📝
+      - generic [ref=f4e148]:
+        - generic [ref=f4e149]: Done
+        - generic [ref=f4e150]: "0"
+    - status [ref=f4e152]
+    - generic [ref=f4e798]:
+      - generic [ref=f4e799]:
+        - generic [ref=f4e800]:
+          - generic [ref=f4e801]: STORY
+          - generic [ref=f4e802]: US-20
+        - generic [ref=f4e803]:
+          - textbox "Título da história" [ref=f4e804]: Validar separador vazio no slugify
+          - button "Fechar história" [ref=f4e805] [cursor=pointer]: ✕
+      - generic [ref=f4e806]:
+        - generic [ref=f4e808]:
+          - generic [ref=f4e809]:
+            - generic [ref=f4e810]: Story Points
+            - combobox [ref=f4e811]:
+              - option "—" [selected]
+              - option "1"
+              - option "2"
+              - option "3"
+              - option "5"
+              - option "8"
+              - option "13"
+          - generic [ref=f4e812]:
+            - generic [ref=f4e813]: Modo planejamento
+            - generic [ref=f4e814]:
+              - checkbox "Iniciar em modo planejamento" [ref=f4e815]
+              - text: Iniciar em modo planejamento
+        - generic [ref=f4e816]:
+          - generic [ref=f4e817]: Descrição
+          - textbox "Como um <usuário>, quero <objetivo>, para <benefício>…" [ref=f4e818]
+        - generic [ref=f4e819]:
+          - generic [ref=f4e820]: Projeto-alvo (repositório onde a AI trabalha)
+          - textbox "Deixe vazio para herdar do épico, ou informe /caminho/do/repo" [ref=f4e821]: /data/projects/df208dd9-dbd5-4911-b33d-84c9b44df10d
+          - generic [ref=f4e822]: A AI cria uma branch/worktree isolada nesse repositório. Se vazio, herda o projeto-alvo do épico pai.
+        - generic [ref=f4e823]:
+          - generic [ref=f4e824]: Notas para a AI (contexto/escopo)
+          - textbox "Instruções, restrições e escopo para o agent…" [ref=f4e825]
+        - generic [ref=f4e826]:
+          - generic [ref=f4e827]: Modelo de AI
+          - combobox [ref=f4e828]:
+            - option "Herdar (épico → quadro)" [selected]
+            - option "Claude Opus 4.8 BR"
+            - option "Claude Opus 4.6"
+            - option "Claude Sonnet 4.5"
+            - option "GPT-5.4"
+          - generic [ref=f4e829]:
+            - text: "Herdado:"
+            - strong [ref=f4e830]: Claude Opus 4.8 BR
+        - generic [ref=f4e831]:
+          - generic [ref=f4e832]: Labels
+          - generic [ref=f4e833]:
+            - generic [ref=f4e834] [cursor=pointer]:
+              - generic [ref=f4e836]: Bug
+              - button "🗑" [ref=f4e837]
+            - generic [ref=f4e838] [cursor=pointer]:
+              - generic [ref=f4e840]: Feature
+              - button "🗑" [ref=f4e841]
+            - generic [ref=f4e842] [cursor=pointer]:
+              - generic [ref=f4e844]: Chore
+              - button "🗑" [ref=f4e845]
+            - generic [ref=f4e846] [cursor=pointer]:
+              - generic [ref=f4e848]: Docs
+              - button "🗑" [ref=f4e849]
+            - generic [ref=f4e850] [cursor=pointer]:
+              - generic [ref=f4e852]: Urgent
+              - button "🗑" [ref=f4e853]
+            - button "+ Nova label" [ref=f4e854] [cursor=pointer]
+        - generic [ref=f4e855]:
+          - generic [ref=f4e856]: 🤖 Agentes responsáveis
+          - generic [ref=f4e857]:
+            - generic [ref=f4e858] [cursor=pointer]:
+              - generic [ref=f4e859]: C
+              - generic [ref=f4e860]: 🤖 Claude-Dev
+            - generic [ref=f4e861] [cursor=pointer]:
+              - generic [ref=f4e862]: G
+              - generic [ref=f4e863]: 🤖 GPT-Reviewer
+            - generic [ref=f4e864] [cursor=pointer]:
+              - generic [ref=f4e865]: C
+              - generic [ref=f4e866]: 🤖 Copilot-QA
+        - generic [ref=f4e867]:
+          - generic [ref=f4e868]:
+            - text: 🌊 Fluxos afetados
+            - generic [ref=f4e869]: (2)
+          - generic [ref=f4e870]:
+            - generic [ref=f4e871]:
+              - generic [ref=f4e872]:
+                - generic [ref=f4e873]: Tratar separador vazio
+                - button "🗑" [ref=f4e874] [cursor=pointer]
+              - generic [ref=f4e875]: Tratar separador vazio
+            - generic [ref=f4e876]:
+              - generic [ref=f4e877]:
+                - generic [ref=f4e878]: Movimentação de itens do array
+                - button "🗑" [ref=f4e879] [cursor=pointer]
+              - generic [ref=f4e880]: index.js, index.d.ts
+          - generic [ref=f4e881]:
+            - 'textbox "Nome do fluxo (ex.: Cadastro de caixa)…" [ref=f4e882]'
+            - button "+ Adicionar fluxo" [ref=f4e883] [cursor=pointer]
+        - generic [ref=f4e884]:
+          - generic [ref=f4e885]:
+            - text: Tasks
+            - generic [ref=f4e886]: 0/2
+            - button "+ Task" [ref=f4e887] [cursor=pointer]
+            - button "💬 Chat da história" [ref=f4e888] [cursor=pointer]
+          - generic [ref=f4e889]:
+            - generic [ref=f4e890]:
+              - generic [ref=f4e891]:
+                - generic [ref=f4e892]: To Do
+                - generic [ref=f4e893]: "0"
+              - button "+ Task" [ref=f4e895] [cursor=pointer]
+            - generic [ref=f4e896]:
+              - generic [ref=f4e897]:
+                - generic [ref=f4e898]: In Progress
+                - generic [ref=f4e899]: "2"
+              - generic [ref=f4e900]:
+                - 'button "TK-22 🙋 precisa de você Corrigir: Arquivo inexistente no fluxo \"Tratar separador vazio\"" [ref=f4e901]':
+                  - generic [ref=f4e902]:
+                    - generic [ref=f4e903]: TK-22
+                    - generic "Arquivo inexistente no fluxo \"Tratar separador vazio\"" [ref=f4e904]: 🙋 precisa de você
+                  - generic [ref=f4e905]: "Corrigir: Arquivo inexistente no fluxo \"Tratar separador vazio\""
+                - button "TK-21 Tratar separador vazio" [ref=f4e906]:
+                  - generic [ref=f4e907]: TK-21
+                  - generic [ref=f4e909]: Tratar separador vazio
+            - generic [ref=f4e911]:
+              - generic [ref=f4e912]: Review
+              - generic [ref=f4e913]: "0"
+            - generic [ref=f4e916]:
+              - generic [ref=f4e917]: Done
+              - generic [ref=f4e918]: "0"
+          - status [ref=f4e920]
+        - generic [ref=f4e921]:
+          - generic [ref=f4e922]: 📊 Custo & qualidade do loop
+          - generic [ref=f4e923]:
+            - generic [ref=f4e924]:
+              - generic [ref=f4e925]:
+                - generic [ref=f4e926]: "15.600"
+                - generic [ref=f4e927]: Tokens de entrada
+              - generic [ref=f4e928]:
+                - generic [ref=f4e929]: "3.900"
+                - generic [ref=f4e930]: Tokens de saída
+              - generic [ref=f4e931]:
+                - generic [ref=f4e932]: 616 ms
+                - generic [ref=f4e933]: Duração média / iteração
+              - generic [ref=f4e934]:
+                - generic [ref=f4e935]: "13"
+                - generic [ref=f4e936]: Iterações
+                - generic [ref=f4e937]: 2 tasks
+              - generic [ref=f4e938]:
+                - generic [ref=f4e939]: "6.5"
+                - generic [ref=f4e940]: Iterações / task
+              - generic [ref=f4e941]:
+                - generic [ref=f4e942]: 31%
+                - generic [ref=f4e943]: Taxa de derivação
+                - generic [ref=f4e944]: validação falhou
+              - generic [ref=f4e945]:
+                - generic [ref=f4e946]: 69%
+                - generic [ref=f4e947]: Taxa de OK
+                - generic [ref=f4e948]: desfecho ok
+            - table [ref=f4e949]:
+              - rowgroup [ref=f4e950]:
+                - row [ref=f4e951]:
+                  - columnheader "Task" [ref=f4e952]
+                  - columnheader "Título" [ref=f4e953]
+                  - columnheader "Estado" [ref=f4e954]
+                  - columnheader "Iterações" [ref=f4e955]
+              - rowgroup [ref=f4e956]:
+                - row [ref=f4e957]:
+                  - cell "TK-22" [ref=f4e958]
+                  - 'cell "Corrigir: Arquivo inexistente no fluxo \"Tratar separador vazio\"" [ref=f4e959]'
+                  - cell "blocked_dep" [ref=f4e960]
+                  - cell "8" [ref=f4e961]
+                - row [ref=f4e962]:
+                  - cell "TK-21" [ref=f4e963]
+                  - cell "Tratar separador vazio" [ref=f4e964]
+                  - cell "blocked_dep" [ref=f4e965]
+                  - cell "5" [ref=f4e966]
+        - generic [ref=f4e967]:
+          - generic [ref=f4e968]: Definition of Done (DOD)
+          - generic [ref=f4e969]:
+            - textbox "Critério de concluído…" [ref=f4e970]
+            - button "+ Adicionar" [ref=f4e971] [cursor=pointer]
+        - generic [ref=f4e972]: Comentários
+        - generic [ref=f4e974]:
+          - generic [ref=f4e975]: Atividade
+          - generic [ref=f4e976]:
+            - generic [ref=f4e977]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f4e978]: AI registrou fluxos afetados (Tratar separador vazio)30/08/2026
+            - generic [ref=f4e979]: AI registrou fluxos afetados (Tratar separador vazio)30/08/2026
+            - generic [ref=f4e980]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f4e981]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f4e982]: história em In Progress — motor de AI acordado30/08/2026
+        - generic [ref=f4e983]:
+          - generic [ref=f4e984]: Zona de perigo
+          - button "🗑 Excluir história" [ref=f4e985] [cursor=pointer]
+          - generic [ref=f4e986]: Remove 2 card(s) filho(s) em cascata.

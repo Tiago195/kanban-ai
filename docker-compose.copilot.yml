@@ -27,7 +27,7 @@
 services:
   api:
     environment:
-      AGENT_RUNNER_KIND: copilot-cli
+      AGENT_ADAPTER: copilot-cli # US-F3.1: chave unificada (ex-AGENT_RUNNER_KIND)
       AGENT_CLI_COMMAND: node
       AGENT_CLI_ARGS: /app/docker/copilot-cli-adapter.mjs {prompt}
       AGENT_CLI_PROMPT_MODE: arg

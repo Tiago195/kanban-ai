@@ -1,0 +1,23 @@
+- generic [ref=f29e4]:
+  - complementary "Áreas do explorador" [ref=f29e5]:
+    - button "Voltar ao quadro" [ref=f29e6] [cursor=pointer]:
+      - generic [ref=f29e7]: ←
+    - navigation "Áreas" [ref=f29e9]:
+      - button "Projetos" [ref=f29e10] [cursor=pointer]:
+        - generic [ref=f29e11]: 🗄️
+      - button "O que a AI sabe" [disabled] [ref=f29e13]:
+        - generic [ref=f29e14]: 🐝
+      - button "Grafo" [disabled] [ref=f29e16]:
+        - generic [ref=f29e17]: 🕸️
+      - button "Wiki" [disabled] [ref=f29e19]:
+        - generic [ref=f29e20]: 📖
+  - generic [ref=f29e22]:
+    - banner [ref=f29e23]:
+      - heading "O que a AI sabe" [level=1] [ref=f29e24]: 🐝 O que a AI sabe
+      - generic [ref=f29e25]: os neurônios que a frota aprendeu
+      - combobox "Selecionar tema" [ref=f29e26] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+    - main [ref=f29e27]:
+      - generic [ref=f29e28]: Carregando projetos…

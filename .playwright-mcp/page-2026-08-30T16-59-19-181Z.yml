@@ -1,0 +1,47 @@
+- generic [ref=f2e3]:
+  - banner [ref=f2e4]:
+    - heading "Sprint Board" [level=1] [ref=f2e5]
+    - generic [ref=f2e6]:
+      - searchbox "Buscar cards" [ref=f2e7]
+      - combobox "Filtrar por label" [ref=f2e8]:
+        - option "Todas as labels" [selected]
+      - combobox "Filtrar por agente" [ref=f2e9]:
+        - option "Todos os agentes" [selected]
+      - button "✨ Criar backlog" [ref=f2e10] [cursor=pointer]
+      - button "🤖 Agentes" [ref=f2e11] [cursor=pointer]
+      - button "🗄️ Projetos" [ref=f2e12] [cursor=pointer]
+      - button "🗂️ Explorador" [ref=f2e13] [cursor=pointer]
+      - button "🔁 Loops" [ref=f2e14] [cursor=pointer]
+      - button "🔕 Review OFF" [ref=f2e15] [cursor=pointer]
+      - button "+ Coluna" [ref=f2e16] [cursor=pointer]
+      - button "⤓ Export" [ref=f2e17] [cursor=pointer]
+      - button "⤒ Import" [ref=f2e18] [cursor=pointer]
+      - combobox "Selecionar tema" [ref=f2e19] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+  - generic [ref=f2e20]:
+    - generic [ref=f2e21]:
+      - generic [ref=f2e22]: Épicos
+      - generic [ref=f2e23]: "0"
+    - generic [ref=f2e24]:
+      - generic [ref=f2e25]: Histórias
+      - generic [ref=f2e26]: "0"
+    - generic [ref=f2e27]:
+      - generic [ref=f2e28]: Tasks
+      - generic [ref=f2e29]: "0"
+    - generic [ref=f2e30]:
+      - generic [ref=f2e31]: Pontos concluídos
+      - generic [ref=f2e32]: "0"
+      - generic [ref=f2e33]: /
+      - generic [ref=f2e34]: "0"
+    - generic "Progresso da sprint (story points)" [ref=f2e35]
+    - generic [ref=f2e36]:
+      - generic [ref=f2e37]: Bloqueados
+      - generic [ref=f2e38]: "0"
+  - generic [ref=f2e39]: Carregando board…
+  - generic [ref=f2e43]:
+    - generic [ref=f2e45]:
+      - heading "🗂️ Explorador" [level=2] [ref=f2e46]
+      - button "Fechar" [ref=f2e47] [cursor=pointer]: ✕
+    - generic [ref=f2e48]: Carregando projetos…

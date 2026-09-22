@@ -14,7 +14,6 @@ import type {
   ExecState,
   IterationPhase,
   LoopProfileId,
-  NeuronLockState,
   StoryPoints,
   ValidationStrategy,
 } from './enums';
@@ -144,7 +143,14 @@ export interface AgentModel {
  * usado em dev/testes. `claude`/`codex`/`gemini` são vendors futuros que reusam
  * o `CliAdapter` (comando/flags/parse próprios). Ver ADR-0036.
  */
-export type AgentAdapterKind = 'copilot-cli' | 'claude' | 'codex' | 'gemini' | 'mock';
+export type AgentAdapterKind =
+  | 'copilot-cli'
+  | 'claude'
+  | 'codex'
+  | 'gemini'
+  | 'mock'
+  // US-F3.4 — runner sobre @tanstack/ai (endpoint OpenAI-compatível).
+  | 'tanstack';
 
 /**
  * US-OBS4 — descritor de um adapter exposto em `GET /agents/adapters` para a UI
@@ -508,98 +514,6 @@ export interface FleetDashboard {
 
 // ─────────────────────────────────────────────────────────────
 
-/**
- * Identidade ESTÁVEL de um agent da colmeia, derivada da sessão + story em que
- * ele trabalha. É o handle que amarra tudo o que um agent faz na memória viva:
- * o `holder` de um lock de edição, o autor de uma mutação e o namespace do ramo
- * efêmero de escrita (`mem/ai/<sessao>/<path>`).
- *
- * Convenção de forma (ver ADR-0027): `ai:<sessao>` para agents autônomos. Como a
- * sessão é ancorada na story, dois passos do loop na MESMA story compartilham o
- * mesmo `AgentId` — é isso que torna a identidade "estável" entre iterações, e
- * não um id novo a cada `spawn`.
- *
- * É apenas o CONTRATO da identidade (uma string com convenção de prefixo); a
- * derivação real (sessão+story → id) e qualquer autorização vivem na Camada 2,
- * fora deste pacote.
- *
- * @example 'ai:sess_9f3a' // agent autônomo de uma sessão ligada a uma story
- */
-export type AgentId = string;
-
-/**
- * Dono (holder) de um lock de edição de neurônio na colmeia. Identifica QUEM
- * detém o lease `EDITING`/`REVIEW` — pode ser um agent de AI ou um humano.
- *
- * Convenção de forma (ver ADR-0027): `ai:<id>` para agents autônomos (o mesmo
- * handle estável do `AgentId`, derivado de sessão+story) e `human:<id>` para
- * pessoas. O prefixo distingue a natureza do dono sem exigir um campo extra.
- *
- * É apenas o CONTRATO do identificador (uma string com convenção de prefixo);
- * autenticação e autorização vivem na Camada 2, fora deste pacote. Nos eventos e
- * no índice, `null` significa que o neurônio está `FREE` (sem dono).
- *
- * @example 'ai:sess_9f3a'   // lock detido por um agent autônomo
- * @example 'human:u_1287'   // lock detido por um humano
- */
-export type Owner = string;
-
-/**
- * Neuron — unidade de memória versionada da colmeia (ver ADR-0027).
- *
- * Um neurônio é um documento markdown granular por assunto (feature, endpoint,
- * convenção aprendida, beco sem saída). A fonte da verdade do `content` é o git
- * da Camada 1; este shape é a projeção type-safe consumida por api+web+mcp
- * (Camada 2 — índice + locks). Sem lógica: só o contrato.
- */
-export interface Neuron {
-  /**
-   * Identidade LÓGICA e única do neurônio — o arquivo `.md` versionado, nomeado
-   * pelo assunto (ex.: 'apps/api/src/modules/cards', 'endpoints/cards.create').
-   * É a CHAVE fina de tudo: leitura, aquisição de lock e nome do ramo efêmero
-   * de escrita (`mem/ai/<sessao>/<path>`). Distingue-se de `module`: `path` é a
-   * identidade granular do documento; `module` é o agrupamento grosso a que ele
-   * pertence. (Ver ADR-0027.)
-   */
-  path: string;
-  /**
-   * Conteúdo do neurônio em markdown. É uma PROJEÇÃO (cache) do arquivo `.md` no
-   * `headCommit`; a fonte da verdade do texto é o git da Camada 1, não este campo.
-   */
-  content: string;
-  /**
-   * SHA do commit HEAD do neurônio no git da Camada 1 — a FONTE DA VERDADE da
-   * versão. Índice (Postgres) e eventos WS são projeções derivadas e
-   * reindexáveis do git; por isso o git nunca fica "atrás" (no pior caso, à
-   * frente). Comparar `headCommit` com o `baseCommit` que o holder leu é o que
-   * detecta escrita _stale_ no write. (Ver ADR-0027.)
-   */
-  headCommit: string;
-  /**
-   * Módulo/escopo GROSSO a que o neurônio pertence (ex.: 'cards', 'ai-engine').
-   * Ao contrário de `path` (identidade fina do documento), `module` agrupa
-   * neurônios para fins de escopo de edição e arbitragem — uma proposta "fora do
-   * escopo" do autor pode encaminhar o neurônio a REVIEW. (Ver ADR-0027.)
-   */
-  module: string;
-  /** Estado do lock de edição (ver `NeuronLockState`, US-114). */
-  lockState: NeuronLockState;
-  /** Dono atual do lock (AI-id ou humano-id; ver `Owner`); null quando FREE. */
-  owner: Owner | null;
-  /**
-   * `baseCommit` do lock ativo: o `headCommit` que o holder LEU no `acquire`;
-   * null quando FREE. É a âncora do COMPARE-AND-SWAP: o holder envia este SHA no
-   * `write` e o serviço compara com o `headCommit` ATUAL do path. Se forem iguais
-   * (não divergiu), o write procede; se o `headCommit` mudou (outro holder fechou
-   * uma mutação no meio), o `baseCommit` está _stale_ e o serviço responde 409
-   * anti-stale — quem protege contra _lost-update_ é este CAS, não o lock (que é
-   * advisory/presença). (Ver ADR-0027.)
-   */
-  baseCommit: string | null;
-  /** Epoch ms da última atualização do neurônio. */
-  updatedAt: number;
-}
-
 // ─────────────────────────────────────────────────────────────
 // US-OBS3 (ADR-0037) — Review inline por linha + auto-commit/PR opcional
 // ─────────────────────────────────────────────────────────────
@@ -696,6 +610,14 @@ export type ProjectAuthKind = 'none' | 'https' | 'ssh';
 export type ProjectCloneState = 'pending' | 'cloning' | 'ready' | 'failed';
 
 /**
+ * EP-F1 / US-F1.3 — Estado do build do grafo de conhecimento (graphify) do
+ * Project. Espelha o ciclo do `cloneState`: `pending` (ainda não construído) →
+ * `building` (POST /build em andamento no sidecar) → `ready` (graph.json no
+ * lugar, `graphBuiltAt` gravado) | `failed` (ver `graphLastError`).
+ */
+export type ProjectGraphState = 'pending' | 'building' | 'ready' | 'failed';
+
+/**
  * DTO público de leitura de um Project. Ortogonal à hierarquia Epic→Story→Task
  * (associado ao Board, raiz da cascata de repo-alvo).
  *
@@ -711,6 +633,10 @@ export interface Project {
   cloneState: ProjectCloneState;
   lastError: string | null;
   lastSyncedAt: string | null; // ISO
+  // US-F1.3 — estado do build do grafo de conhecimento (graphify) do Project.
+  graphState: ProjectGraphState;
+  graphBuiltAt: string | null; // ISO; null = grafo nunca construído
+  graphLastError: string | null; // legível; só preenchido em graphState='failed'
   tenantId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -731,34 +657,28 @@ export interface CreateProjectInput {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Estado do lock advisory de um neurônio — reexportado de `enums.ts`
- * (`MemoryLockState = 'FREE' | 'EDITING' | 'REVIEW'`) para as projeções do
- * Project Explorer. NÃO redefinir aqui (evita ambiguidade no `export *`).
- */
-import type { MemoryLockState } from './enums';
-
-/**
- * Projeção de LEITURA de um neurônio da colmeia (espelha `MemoryIndex`), SEM os
- * campos internos de coordenação (`leaseId`/`activeBranch`/`baseCommit`/…). É o
- * "mapa do que a AI sabe" exibido no Project Explorer. `tags` já vem
- * desserializado do JSON persistido.
+ * Projeção de LEITURA de um neurônio da colmeia do Project
+ * (`<clone>/.hive/**.md` — a fonte da verdade desde a US-F2.3). É o "mapa do
+ * que a AI sabe" exibido no Project Explorer.
+ *
+ * US-F2.3 — os campos de coordenação do substrato git
+ * (`lockState`/`holder`/`stale`/`archivedAt`) saíram do contrato: arquivo
+ * simples não tem lease nem arquivamento (ADR-0027, emenda US-F2.10).
  */
 export interface MemoryNeuronSummary {
-  path: string; // ex.: 'modules/cards.md'
+  path: string; // ex.: 'modules/cards.md' (relativo ao .hive/)
   title: string;
-  tags: string[]; // já desserializado do JSON
+  tags: string[]; // do frontmatter v2 (ou da linha `tags:` no legado v1)
   summary: string;
-  lockState: MemoryLockState;
-  holder: string | null;
-  stale: boolean;
-  archivedAt: string | null; // ISO
-  updatedAt: string; // ISO
+  updatedAt: string; // ISO (frontmatter `updated`, senão mtime do arquivo)
 }
 
-/** Detalhe de um neurônio: summary + o markdown completo (de GET /memory/read). */
+/**
+ * Detalhe de um neurônio: summary + o markdown completo. US-F2.3 — sem
+ * `headCommit`: arquivo simples não tem git.
+ */
 export interface MemoryNeuronDetail extends MemoryNeuronSummary {
-  content: string | null; // markdown completo
-  headCommit: string; // SHA de origem do conteúdo
+  content: string; // markdown completo
 }
 
 /**
@@ -794,4 +714,267 @@ export interface CompletionMetadata {
   retry_notes?: string;
   /** Risco residual conhecido deixado para o próximo. */
   residual_risk?: string;
+}
+
+// ─────────────────────────────────────────────────────────────
+// EP-F4 / US-F4.1 — Projeção do grafo de conhecimento por Project
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * US-F4.1 — modo da projeção devolvida por `GET /projects/:id/graph`. O CORTE
+ * é decidido no SERVIDOR (o grafo real tem ~3500 nós / ~6300 arestas — cru no
+ * browser é inútil e pesado):
+ *  - `overview` (default, sem params): os N nós mais conectados (god nodes) +
+ *    as arestas ENTRE eles — o esqueleto do sistema;
+ *  - `focus` (`?focus=<id|label>`): vizinhança BFS do nó (profundidade
+ *    `depth`, 1..3) — é assim que o usuário navega/expande;
+ *  - `community` (`?community=<id>`): os nós de UMA comunidade;
+ *  - `search` (`?search=<termo>`): nós cujo label/arquivo casa com o termo
+ *    (sem arestas — alimenta typeahead/busca, o resultado vira um `focus`).
+ */
+export type GraphProjectionMode = 'overview' | 'focus' | 'community' | 'search';
+
+/** US-F4.1 — nó da projeção. `id` é ESTÁVEL entre respostas (é o id do
+ * graph.json) — a US-F4.2 usa como chave de layout e a US-F4.3 liga
+ * `sourceFile` → arquivo → card. */
+export interface GraphProjectionNode {
+  id: string;
+  label: string;
+  /** `file_type` do graphify: 'code' | 'document' | 'concept' | ... */
+  type: string;
+  /** Path repo-relativo do arquivo de origem (US-F4.3: nó → arquivo → card). */
+  sourceFile: string | null;
+  community: number | null;
+  communityName: string | null;
+  /** Grau no grafo COMPLETO (não no subgrafo) — dimensiona o nó na UI. */
+  degree: number;
+}
+
+/** US-F4.1 — aresta da projeção (só entre nós presentes em `nodes`). */
+export interface GraphProjectionEdge {
+  source: string;
+  target: string;
+  /** Tipo de relação do graphify: 'calls' | 'imports' | 'describes' | ... */
+  relation: string;
+}
+
+/** US-F4.1 — resumo de UMA comunidade do grafo COMPLETO (drill-down da UI). */
+export interface GraphCommunitySummary {
+  id: number;
+  name: string | null;
+  size: number;
+}
+
+/** US-F4.1 — projeção do grafo com o corte já aplicado no servidor. */
+export interface GraphProjection {
+  ok: true;
+  mode: GraphProjectionMode;
+  /** Id resolvido do nó focado (modo `focus`); null = seed não resolveu. */
+  focus: string | null;
+  nodes: GraphProjectionNode[];
+  edges: GraphProjectionEdge[];
+  /** Todas as comunidades do grafo COMPLETO, maiores primeiro. */
+  communities: GraphCommunitySummary[];
+  /** Tamanho do grafo COMPLETO — a UI mostra "exibindo X de Y". */
+  totalNodes: number;
+  totalEdges: number;
+  /** true = o corte estourou o teto de nós/arestas e a resposta foi truncada. */
+  truncated: boolean;
+}
+
+/**
+ * US-F4.1 — falha VISÍVEL (mesma filosofia das US-F2.5/F2.10: nunca mascarar):
+ * grafo não-`ready`, sidecar fora do ar ou integração desligada viram
+ * `{ok:false}` tipado com o estado e um erro legível — nunca um 500 opaco.
+ */
+export interface GraphProjectionUnavailable {
+  ok: false;
+  graphState: ProjectGraphState;
+  error: string;
+}
+
+/** US-F4.1 — resposta de `GET /projects/:id/graph`. */
+export type GraphProjectionResponse = GraphProjection | GraphProjectionUnavailable;
+
+/**
+ * US-F4.3 — como o vínculo arquivo → card foi estabelecido:
+ *  - `affected-flow`: um `AffectedFlow` do card (declarado pela IA ou derivado
+ *    do blast radius, US-F2.7) cita o arquivo em `files[]`;
+ *  - `iteration`: uma iteração do card entregou o arquivo em `handoffFiles`.
+ */
+export type GraphFileCardVia = 'affected-flow' | 'iteration';
+
+/** US-F4.3 — card do board que tocou um arquivo do grafo (nó → arquivo → card). */
+export interface GraphFileCard {
+  id: string;
+  boardId: string;
+  key: string;
+  type: CardType;
+  title: string;
+  /** Story pai quando o card é uma task (a UI abre a story junto). */
+  parentId: string | null;
+  /** Vias (dedupadas) pelas quais o vínculo existe. */
+  via: GraphFileCardVia[];
+  /** Nomes dos fluxos afetados que citam o arquivo (via `affected-flow`). */
+  flowNames: string[];
+}
+
+/**
+ * US-F4.3 — resposta de `GET /projects/:id/graph/file-cards?file=...`.
+ * `cards: []` é resultado VÁLIDO e esperado (o board pode nunca ter tocado o
+ * arquivo) — a UI mostra estado vazio honesto, nunca esconde o painel.
+ */
+export interface GraphFileCardsResponse {
+  file: string;
+  cards: GraphFileCard[];
+}
+
+/**
+ * US-F5.4 — Wiki do graphify (base de conhecimento navegável derivada do
+ * grafo): `index.md` + um artigo por comunidade + artigos de god node,
+ * gerados no sidecar (`POST /wiki` do wrapper) após cada build do grafo.
+ */
+export interface ProjectWikiArticleSummary {
+  /** Nome do arquivo sem `.md` — a chave de leitura (`?slug=`). */
+  slug: string;
+  /** Primeiro heading nível 1 do artigo (fallback: o slug). */
+  title: string;
+}
+
+/** US-F5.4 — resposta de `GET /projects/:id/wiki` (índice da wiki). */
+export interface ProjectWikiIndex {
+  ok: true;
+  /** false = wiki ainda não gerada (grafo não pronto / geração pendente). */
+  generated: boolean;
+  generatedAt: string | null;
+  articles: ProjectWikiArticleSummary[];
+}
+
+/** US-F5.4 — resposta de `GET /projects/:id/wiki/article?slug=...`. */
+export interface ProjectWikiArticle {
+  ok: true;
+  slug: string;
+  title: string;
+  /** Markdown completo do artigo (renderizado com o markdown lite da F4.2). */
+  content: string;
+}
+
+/**
+ * US-F5.4 — falha VISÍVEL (mesma filosofia da US-F4.1): sidecar fora,
+ * integração desligada ou artigo inexistente viram `{ok:false}` com erro
+ * legível — nunca 500 opaco nem tela vazia muda.
+ */
+export interface ProjectWikiUnavailable {
+  ok: false;
+  error: string;
+}
+
+export type ProjectWikiIndexResponse = ProjectWikiIndex | ProjectWikiUnavailable;
+export type ProjectWikiArticleResponse = ProjectWikiArticle | ProjectWikiUnavailable;
+
+// ─────────────────────────────────────────────────────────────
+// EP-UX / US-UX.3 — Painel da memória (o que o reflect aprendeu)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * US-UX.3 — veredito de um nó no overlay `.graphify_learning.json` do
+ * `graphify reflect` (US-F5.2): `preferred` (corroborado por ≥2 resultados
+ * úteis), `tentative` (útil 1×, ainda não corroborado), `contested` (sinais
+ * em conflito — a recência decide o `verdict`).
+ */
+export type ProjectLearningStatus = 'preferred' | 'tentative' | 'contested';
+
+/** US-UX.3 — um sinal da trilha de proveniência de um nó aprendido. */
+export interface ProjectLearningProvenance {
+  /** A pergunta original que citou o nó. */
+  q: string;
+  date: string; // ISO
+  /** 'useful' | 'corrected' (só esses entram na trilha do reflect). */
+  outcome: string;
+}
+
+/** US-UX.3 — um nó do código com veredito de aprendizado. */
+export interface ProjectLearningNode {
+  id: string;
+  status: ProjectLearningStatus;
+  /** Veredito do contested ('useful' | 'dead end' | 'even'); null nos demais. */
+  verdict: string | null;
+  /** Score assinado com decaimento temporal (meia-vida 30d). */
+  score: number;
+  /** Nº de sinais positivos (o "N× útil" do placar). */
+  uses: number;
+  /** Nº de sinais negativos (só > 0 em contested). */
+  neg: number;
+  /** Data ISO do sinal mais recente. */
+  last: string;
+  label: string;
+  /** Path repo-relativo do código que o aprendizado descreve. */
+  sourceFile: string | null;
+  /** true = o código MUDOU desde o aprendizado (code_fingerprint divergiu) —
+   * suspeito, não falso; recomputado a cada leitura no sidecar. */
+  stale: boolean;
+  provenance: ProjectLearningProvenance[];
+}
+
+/** US-UX.3 — beco sem saída: "já tentamos, não levou a nada, não re-deduzir". */
+export interface ProjectLearningDeadEnd {
+  question: string;
+  /** Nós citados pela tentativa (ids/labels crus do memory doc). */
+  nodes: string[];
+  date: string;
+}
+
+/** US-UX.3 — correção: resposta que o humano corrigiu, e qual era a certa. */
+export interface ProjectLearningCorrection {
+  question: string;
+  correction: string;
+  date: string;
+}
+
+/** US-UX.3 — resposta de `GET /projects/:id/learning`. */
+export interface ProjectLearning {
+  ok: true;
+  /** false = reflect nunca rodou E não há memory docs (estado vazio honesto). */
+  generated: boolean;
+  generatedAt: string | null;
+  /** Nº de memory docs em `<clone>/.hive/memory/`. */
+  docs: number;
+  nodes: ProjectLearningNode[];
+  deadEnds: ProjectLearningDeadEnd[];
+  corrections: ProjectLearningCorrection[];
+}
+
+/** US-UX.3 — falha VISÍVEL (mesma filosofia da wiki/grafo): nunca 500 opaco. */
+export interface ProjectLearningUnavailable {
+  ok: false;
+  error: string;
+}
+
+export type ProjectLearningResponse = ProjectLearning | ProjectLearningUnavailable;
+
+// ─────────────────────────────────────────────────────────────
+// EP-UX / US-UX.4 — Estado do conhecimento por Project (card da lista)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * US-UX.4 — resumo agregado do que a AI sabe de UM Project, devolvido em lote
+ * por `GET /projects/summary` (uma tacada para a lista inteira — nunca N×4
+ * requisições do browser). Cada faceta segue o padrão da casa (US-F4.1):
+ * falha tipada `{ok:false, error}` visível, nunca 500 nem sumiço.
+ */
+export interface ProjectKnowledgeSummary {
+  projectId: string;
+  /** Grafo: contagens do grafo COMPLETO quando `ready`; senão o erro legível
+   * (inclui "grafo ainda não construído" / "build falhou: …"). */
+  graph:
+    | { ok: true; nodes: number; edges: number }
+    | { ok: false; graphState: ProjectGraphState; error: string };
+  /** Wiki: `generated:false` = ainda não gerada (estado vazio honesto). */
+  wiki:
+    | { ok: true; generated: boolean; articles: number }
+    | { ok: false; error: string };
+  /** Memória: aprendizados = nós com veredito; `contested` destacado. */
+  memory:
+    | { ok: true; generated: boolean; docs: number; learnings: number; contested: number }
+    | { ok: false; error: string };
 }

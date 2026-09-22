@@ -24,22 +24,36 @@ import { RealtimeService } from '../../realtime/realtime.service';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
 import { WorkspaceService, TargetProjectError } from './workspaces/workspace.service';
 import { ProjectWorkspaceService } from '../projects/project-workspace.service';
+import { ProjectGraphService, collectChangedFiles } from '../projects/project-graph.service';
+import {
+  ProjectGraphQueryService,
+  GRAPHIFY_PROJECTS_HOME,
+} from '../projects/project-graph-query.service';
+import { ProjectHiveService } from '../projects/project-hive.service';
 import { AGENT_RUNNER, type AgentRunner, type AgentRunResult } from './runners/agent-runner.interface';
 import { ValidationRunner } from './validators/validation.runner';
 import { resolveLoopProfile, type LoopProfileDef } from './loop-profiles/loop-profiles';
 import { mapIteration, type PrismaIterationRow } from '../cards/iteration.mapper';
 import { deriveEpicStatus, type ColumnLike } from '../cards/cards.epic-status';
-import { MemoryIndexService } from '../memory/memory-index.service';
-import { MemoryGitService } from '../memory/memory-git.service';
-import { MemoryBootstrapService, withNamespace } from '../memory/memory-bootstrap.service';
+import {
+  HIVE_MEMORY_SUBDIR,
+  fileNodeId,
+  memoryDocFilename,
+  serializeMemoryDoc,
+  type MemoryOutcome,
+} from '../../shared/neuron-format';
 import { WakeupQueueService } from './wakeup-queue.service';
 import { decideStuck } from './stuck-sla';
 import { detectNoCommentStreak } from './no-comment-streak';
 import { ReviewActionService } from '../review/review-action.service';
 import {
+  resolveDispatchAdapter,
   resolveDispatchModel,
   recoveryGuardLines,
 } from './recovery-lane';
+import { AgentAdapterRegistry } from './runners/agent-adapter.registry';
+import { AGENT_ADAPTER_KINDS } from '../../shared/config/config';
+import type { AgentAdapterKind } from '@kanban-ai/shared';
 import {
   allTasksDone,
   dodAllDone,
@@ -75,6 +89,165 @@ export type { LoopMetrics } from '@kanban-ai/shared';
  * Runner ativo é escolhido por config (mock nesta fatia). Validação sempre passa
  * no mock; `createDerivedTask` está implementado mas só é exercitado pela AI real.
  */
+/**
+ * US-F2.5 — teto de neurônios cujo CORPO é anexado ao recall por grafo.
+ * Paridade com o limite 5 do recall LIKE antigo, mas a seleção é por
+ * relevância de travessia/aresta `describes` — não por recência de indexação.
+ */
+const GRAPH_RECALL_MAX_NEURONS = 5;
+
+/**
+ * US-F5.3 — teto de tokens do vocabulário selecionados por consulta ("Step 0 —
+ * Constrained query expansion" do query.md do graphify: "select up to 12
+ * tokens from this exact list").
+ */
+const GRAPH_QUERY_MAX_TOKENS = 12;
+
+/** US-F5.3 — remove diacríticos preservando a CAIXA (o split de camelCase precisa dela). */
+function deaccent(text: string): string {
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
+ * US-F5.3 — tokenização da receita do Step 0 do query.md: palavras unicode,
+ * split de camelCase/PascalCase, minúsculo, comprimento 3..30. Acentos são
+ * removidos ANTES ("conversão" → "conversao") para a pergunta em português e
+ * os labels casarem na mesma forma; como o mesmo tokenizador roda nos DOIS
+ * lados, o token emitido é sempre derivado de um label real do grafo.
+ * ponytail: um label ACENTUADO emitiria token sem acento que o matcher
+ * literal do binário não casa — labels aqui são identificadores ASCII de
+ * código; se um dia doer, emita a forma original do label.
+ */
+function graphVocabTokens(text: string): string[] {
+  const out: string[] = [];
+  for (const chunk of deaccent(text).match(/[^\W\d_]+/gu) ?? []) {
+    const parts = chunk.match(/[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+/g) ?? [chunk];
+    for (const p of parts) {
+      if (p.length >= 3 && p.length <= 30) out.push(p.toLowerCase());
+    }
+  }
+  return out;
+}
+
+/** US-F2.6 — teto de arquivos da iteração que entram no `files:` do neurônio. */
+const LEARNING_FILES_MAX = 10;
+
+/**
+ * US-F2.6 — corte da lista de arquivos tocados pela iteração antes de entrar
+ * no frontmatter `files:` do neurônio (canal da aresta `describes`, F2.4).
+ * Uma iteração pode tocar dezenas de arquivos; sem corte o neurônio
+ * "descreveria" o repo inteiro e viraria hub de ruído no recall (F2.5).
+ * Filtra o que não descreve nada (lockfiles e a própria colmeia materializada
+ * em `.hive/`) e corta em `LEARNING_FILES_MAX`, na ordem do `git diff`
+ * (determinística, ordenada por path). Pura; exportada para as specs.
+ */
+export function cutLearningFiles(files: string[]): string[] {
+  return files
+    .filter(
+      (f) =>
+        !f.startsWith('.hive/') &&
+        !/(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(f),
+    )
+    .slice(0, LEARNING_FILES_MAX);
+}
+
+/**
+ * US-F5.2 — sinais que o loop JÁ TEM ao fim de uma iteração, para derivar o
+ * `outcome` do memory doc (o agent não sabe se o que aprendeu deu certo; o
+ * loop sabe). Duas formas, uma por call site:
+ *  - `iteration`  — fases reproduce/analysis/implementation (bloco de
+ *    learnings do fluxo normal): `canFinish` = a task pôde concluir (done
+ *    crível: DOD todo fechado ou diff real); `phantomClaim` = o guard
+ *    anti-progresso-fantasma REJEITOU a reivindicação da iteração
+ *    (affectedFlows sem diff — "fluxo inválido") e exigiu nova rodada.
+ *  - `validation` — fase de validação: `passed` = gate de done satisfeito
+ *    (`effectivePassed`, task fecha Done); `escalated` = o loop desistiu de
+ *    derivar e escalou a humano (sem saída).
+ */
+export type LearningSignal =
+  | { kind: 'iteration'; canFinish: boolean; phantomClaim: boolean }
+  | { kind: 'validation'; passed: boolean; escalated: boolean };
+
+/**
+ * US-F5.2 — mapeia o sinal real do loop para o vocabulário de outcome do
+ * graphify (`useful` = +1, `dead_end`/`corrected` = −1 no `graphify reflect`):
+ *  - `useful`    — a iteração fechou com o DOD satisfeito / a validação
+ *    passou e a task pôde concluir;
+ *  - `corrected` — o loop exigiu nova rodada: validação reprovou (task
+ *    derivada de correção / dedup de derivação) ou a reivindicação da
+ *    iteração era fantasma (fluxo declarado sem diff);
+ *  - `dead_end`  — a validação reprovou E o loop escalou a humano sem saída
+ *    (cap de falhas/profundidade/derivações);
+ *  - `undefined` — iteração intermediária SEM sinal conclusivo: o doc sai sem
+ *    `outcome` (bucket `unmarked` do reflect, peso 0). Melhor ausência de
+ *    sinal do que rótulo chutado — um outcome errado envenena o overlay.
+ * Pura; exportada para as specs.
+ */
+export function deriveLearningOutcome(signal: LearningSignal): MemoryOutcome | undefined {
+  if (signal.kind === 'validation') {
+    if (signal.passed) return 'useful';
+    return signal.escalated ? 'dead_end' : 'corrected';
+  }
+  if (signal.canFinish) return 'useful';
+  return signal.phantomClaim ? 'corrected' : undefined;
+}
+
+/**
+ * US-F2.7 — profundidade da travessia do blast radius (`POST /affected`).
+ * MEDIDO no grafo real do kanban-ai (3484 nós / 6295 arestas): por seed,
+ * depth 1→2 quase dobra os hits (validation.runner 16→29; config.ts 71→109;
+ * realtime 45→67) e os hits extras são dependentes INDIRETOS — arquivos cuja
+ * ligação com a mudança passa por um arquivo que NÃO mudou; os specs deles
+ * raramente exercitam o diff. Depth 1 = importadores/chamadores diretos, que
+ * é exatamente o que a validação por fluxo consegue exercitar.
+ */
+const AFFECTED_FLOW_DEPTH = 1;
+
+/**
+ * US-F2.7 — teto de arquivos no fluxo derivado. Iterações reais medidas dão
+ * 1–19 arquivos em depth 1 (o pior caso é seed em hub, ex.: orchestrator.ts);
+ * o ranking por nº de hits mantém os dependentes mais acoplados e o teto 10
+ * (paridade com LEARNING_FILES_MAX) segura o hub sem virar ruído — 167 hits
+ * num fluxo não ajudam a validação a exercitar nada.
+ */
+const AFFECTED_FLOW_MAX_FILES = 10;
+
+/** US-F2.7 — nome estável do fluxo derivado (merge por nome acumula entre iterações). */
+export const AFFECTED_FLOW_DERIVED_NAME = 'blast radius (grafo)';
+
+/**
+ * US-F2.7 — o CORTE do blast radius: agrega hits por ARQUIVO (a validação por
+ * fluxo opera em arquivos, não em nós) e ranqueia por proximidade (depth asc),
+ * acoplamento (nº de hits desc — quantos nós do arquivo dependem da mudança)
+ * e path (desempate determinístico). Exclui o que não é "afetado":
+ *  - os próprios arquivos tocados (são a mudança, não o raio);
+ *  - `.hive/` (neurônios são "aprendizado relacionado", não código afetado —
+ *    mesma razão pela qual `describes` fica FORA das relações da travessia);
+ *  - hits sem arquivo (nós externos/sintéticos).
+ * Pura; exportada para as specs. O teto é aplicado pelo chamador DEPOIS do
+ * filtro de existência no worktree.
+ */
+export function rankAffectedFiles(
+  changed: readonly string[],
+  hits: readonly { file: string | null; depth: number }[],
+): { file: string; hits: number; depth: number }[] {
+  const changedSet = new Set(changed);
+  const agg = new Map<string, { file: string; hits: number; depth: number }>();
+  for (const h of hits) {
+    if (!h.file || changedSet.has(h.file) || h.file.startsWith('.hive/')) continue;
+    const cur = agg.get(h.file);
+    if (cur) {
+      cur.hits += 1;
+      cur.depth = Math.min(cur.depth, h.depth);
+    } else {
+      agg.set(h.file, { file: h.file, hits: 1, depth: h.depth });
+    }
+  }
+  return [...agg.values()].sort(
+    (a, b) => a.depth - b.depth || b.hits - a.hits || a.file.localeCompare(b.file),
+  );
+}
+
 @Injectable()
 export class Orchestrator implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(Orchestrator.name);
@@ -101,9 +274,6 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     private readonly realtime: RealtimeService,
     @Inject(AGENT_RUNNER) private readonly runner: AgentRunner,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
-    private readonly memoryIndex: MemoryIndexService,
-    private readonly memoryGit: MemoryGitService,
-    private readonly memoryBootstrap: MemoryBootstrapService,
     // US-COLAB3 — wakeup queue durável (opcional para não quebrar as specs que
     // instanciam o Orchestrator com os 10 params anteriores). Usado apenas
     // quando `config.agent.wakeupQueueEnabled` está ON, sempre com try/catch
@@ -118,6 +288,28 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // (no-comment streak). Opcional/por último para não quebrar as specs que
     // instanciam o Orchestrator posicionalmente; o scan é no-op quando ausente.
     @Optional() private readonly reviewActions?: ReviewActionService,
+    // US-F1.5 — rebuild incremental do grafo (graphify) ao fim da iteração.
+    // `@Optional() x?: T` (NUNCA `x: T | null = null` — armadilha de DI
+    // documentada em projects/AGENTS.md); no-op quando ausente ou com a env
+    // GRAPHIFY_INCREMENTAL_REBUILD desligada (default).
+    @Optional() private readonly projectGraph?: ProjectGraphService,
+    // US-F3.10 — cascata de adapter: o runner passa a ser resolvido POR CARD a
+    // partir do adapter efetivo (task → story → epic → board.defaultAdapter →
+    // global). `@Optional() x?: T` (armadilha de DI, projects/AGENTS.md); quando
+    // ausente (specs que instanciam posicionalmente), o dispatch cai no runner
+    // do token `AGENT_RUNNER` (o global do boot) — comportamento pré-F3.10.
+    @Optional() private readonly adapterRegistry?: AgentAdapterRegistry,
+    // US-F2.5 — recall de memória por TRAVESSIA DE GRAFO (leitura via MCP do
+    // sidecar graphify). `@Optional() x?: T` (armadilha de DI, projects/
+    // AGENTS.md); no-op quando ausente ou com GRAPHIFY_MEMORY_RECALL desligada
+    // — desde a US-F2.3 a iteração então roda SEM memória (o LIKE morreu).
+    @Optional() private readonly graphQuery?: ProjectGraphQueryService,
+    // US-F2.3 — a colmeia vive no clone (`<clone>/.hive/**.md`, fonte da
+    // verdade desde a deleção do git da memória): `persistLearning` escreve e
+    // `appendNeuronBodies` lê via este serviço. `@Optional() x?: T` (armadilha
+    // de DI, projects/AGENTS.md); ausente nas specs posicionais → a escrita de
+    // learning vira perda VISÍVEL (Activity), nunca exceção.
+    @Optional() private readonly projectHive?: ProjectHiveService,
   ) {}
 
   /** US-COLAB3 — a fila só age quando o flag está ON e o serviço foi injetado. */
@@ -600,16 +792,17 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // US-A5 (EP-A/ADR-0027) — bootstrap on-ramp + arranque do auto-play.
+    // US-A5 (EP-A/ADR-0027) / US-F2.9 — preparação do repo-alvo + arranque do
+    // auto-play (a semeadura de neurônios que vivia aqui morreu na US-F2.9).
     //
-    // IMPORTANTE (fix boot-hang): o bootstrap resolve o repo-alvo via
+    // IMPORTANTE (fix boot-hang): a cauda resolve o repo-alvo via
     // `resolveStoryTargetRepo`, que para Boards com Project dispara
     // `ensureCloned` — um `git clone` que pode ser LENTO (repo grande) ou até
     // travar (auth/rede). Se aguardássemos isso aqui, e como `onStoryEnterInProgress`
     // é AWAITED por `reconcileOnBoot` (que por sua vez é awaited no
     // `onModuleInit`), o clone BLOQUEARIA o boot inteiro do Nest — o servidor
     // HTTP nunca começaria a ouvir e `GET /health` recusaria conexão até o clone
-    // terminar. Por isso a cauda lenta (bootstrap de memória + `startAuto`) roda
+    // terminar. Por isso a cauda lenta (clone + `startAuto`) roda
     // em BACKGROUND: a sessão/watchdog já foram criados de forma síncrona acima,
     // então o estado observável (registry, WS) fica consistente imediatamente e o
     // loop arranca assim que o clone concluir.
@@ -617,35 +810,28 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Cauda NÃO-BLOQUEANTE de `onStoryEnterInProgress`: semeia a memória em colmeia
-   * a partir do repo-alvo (idempotente e defensivo) e então arranca o auto-play.
-   * Roda em background porque `resolveStoryTargetRepo` pode fazer um `git clone`
-   * lento; ver a nota em `onStoryEnterInProgress`.
+   * Cauda NÃO-BLOQUEANTE de `onStoryEnterInProgress`: garante o clone do
+   * repo-alvo e então arranca o auto-play. Roda em background porque
+   * `resolveStoryTargetRepo` pode fazer um `git clone` lento; ver a nota em
+   * `onStoryEnterInProgress`.
    *
-   * US-PROJ4: o `repoPath` vem do clone gerenciado quando o Board tem Project
-   * (senão do `aiProject` legado). A colmeia é NAMESPACEADA por `projectId`
-   * (§1.2/decisão #6) para que projetos distintos não colidam.
+   * US-F2.9 — a SEMEADURA de 1 neurônio vazio por módulo (US-213,
+   * `bootstrapFromRepo`) saiu daqui: com o recall por grafo (cutover na
+   * US-F2.10), o grafo do código já dá o mapa do repo ao agent — colmeia
+   * nascer vazia deixou de ser "começar cego". O neurônio nasce LAZY na
+   * primeira escrita real de learning (memory doc canônico da US-F5.1 em
+   * `persistLearning`); semear boilerplate só materializava páginas-ruído em
+   * `.hive/` → grafo → prompt do recall.
    */
   private async bootstrapAndStartAuto(storyId: string): Promise<void> {
     try {
-      const repoPath = await this.resolveStoryTargetRepo(storyId);
-      const namespace = await this.resolveMemoryNamespace(storyId);
-      if (repoPath) {
-        const created = await this.memoryBootstrap.bootstrapFromRepo({
-          repoPath,
-          sessionId: storyId,
-          namespace,
-        });
-        if (created.length) {
-          await this.log(
-            storyId,
-            `memória: bootstrap criou ${created.length} neurônio(s) inicial(is) do repo-alvo`,
-          );
-        }
-      }
+      // O resolve FICA mesmo sem bootstrap: é ele que dispara `ensureCloned`
+      // (clone gerenciado do Project) antes do startAuto — o motivo original
+      // desta cauda rodar em background.
+      await this.resolveStoryTargetRepo(storyId);
     } catch (err) {
       this.logger.warn(
-        `Falha no bootstrap de memória para story=${storyId}: ${(err as Error).message}`,
+        `Falha ao preparar o repo-alvo para story=${storyId}: ${(err as Error).message}`,
       );
     }
 
@@ -770,15 +956,422 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * US-PROJ4 / §1.2 (decisão #6) — namespace da colmeia de memória por
-   * `projectId`. Retorna `projects/<projectId>` quando o Board tem Project (a
-   * colmeia daquele projeto vive sob esse subdir no bare repo da memória),
-   * ou `undefined` no legado (comportamento GLOBAL de hoje: `modules/<x>.md`).
-   * Garante que colmeias de projetos distintos NÃO colidam.
+   * US-F2.6 → US-F2.3 (EP-F2) — persiste UM learning na colmeia do CLONE, sem
+   * descarte silencioso.
+   *
+   * O substrato mudou na US-F2.3 (deleção do git da memória, emenda da
+   * US-F2.10 no ADR-0027): o neurônio é um arquivo simples em
+   * `<clone>/.hive/<learning.path>` e a escrita é o `mutateHiveFile` do
+   * `ProjectHiveService` — read-modify-write SÍNCRONO (sem lost-update
+   * in-process, ver doc daquele serviço) com rename atômico. O aparato antigo
+   * (CAS por baseCommit, ramo efêmero, merge 3-way, retry de
+   * `MemoryWriteConflictError`) protegia escritores CONCORRENTES EXTERNOS,
+   * que deixaram de existir com o control plane (decisão do dono, F2.8 §2.1):
+   * a API é a única escritora, serializada pelo próprio loop.
+   *
+   * US-F5.1 (EP-F5) — o formato mudou para o memory doc CANÔNICO do graphify
+   * (`save_query_result`/`parse_memory_doc`): cada learning vira UM doc em
+   * `<clone>/.hive/memory/` (plano — o `reflect` faz glob não-recursivo), com
+   * `question` = título da task (o que se estava tentando fazer), `answer` =
+   * resumo do agent e `source_nodes` = IDs DE NÓ dos arquivos tocados
+   * (receita `fileNodeId`, a mesma do `_file_node_id` do graphify). A antiga
+   * aresta sintética `describes` morreu junto (não existe no vocabulário do
+   * graphify): a ligação neurônio→código agora é `source_nodes`, agregada
+   * nativamente pelo `graphify reflect` (chamada dele é a US-F5.2).
+   * `learning.path` reportado pela IA deixou de determinar o local do arquivo
+   * (o nome nasce de `memoryDocFilename`, interno e seguro).
+   *
+   * O que fica da US-F2.6 (o ponto da história era a VISIBILIDADE):
+   *  - perda DEFINITIVA (Board sem Project, clone ausente ou I/O falhou)
+   *    vira **Activity no card** — o operador vê o resumo perdido
+   *    e pode regravar; NUNCA lança (memória jamais derruba o loop);
+   *  - sucesso agenda o rebuild incremental do grafo com o `.hive/…` escrito
+   *    (o substituto do `syncHive` da US-F2.4: quem escreve avisa o grafo).
+   *
+   * Board legado sem Project: com o git da memória deletado não existe mais
+   * colmeia global — o learning é registrado como perda visível no card
+   * (mesmo canal), com o resumo completo. Perda consciente: o recall desses
+   * boards também não existe mais (o grafo exige Project).
    */
-  private async resolveMemoryNamespace(storyId: string): Promise<string | undefined> {
-    const projectId = await this.resolveStoryProjectId(storyId);
-    return projectId ? `projects/${projectId}` : undefined;
+  private async persistLearning(
+    taskId: string,
+    learning: { path: string; summary: string; scope?: string },
+    projectId: string | null,
+    files: string[],
+    // US-F5.2 — o sinal REAL do loop (ver `deriveLearningOutcome`): `useful`
+    // quando a iteração fechou/validou, `corrected` quando o loop exigiu nova
+    // rodada, `dead_end` quando escalou sem saída. `undefined` = sem sinal
+    // conclusivo → o doc sai SEM `outcome` (bucket `unmarked` do reflect,
+    // peso 0) — ausência é melhor que rótulo invertido.
+    outcome: MemoryOutcome | undefined,
+  ): Promise<boolean> {
+    let reason = 'erro desconhecido';
+    try {
+      if (projectId && this.projectHive) {
+        // question = o que se estava tentando fazer — título da task, na
+        // prática (contrato do memory doc, US-F5.1). Fallback: o id.
+        const card = await this.prisma.card
+          .findUnique({ where: { id: taskId }, select: { title: true } })
+          .catch(() => null);
+        const now = new Date();
+        const doc = serializeMemoryDoc({
+          type: 'learning',
+          date: now.toISOString(),
+          question: card?.title ?? taskId,
+          // `scope` (módulo, quando a IA o reporta) vai no corpo — o reflect
+          // só agrega o frontmatter, mas o corpo round-tripa no grafo.
+          answer: learning.scope
+            ? `${learning.summary.trim()}\n\n(módulo: ${learning.scope})`
+            : learning.summary.trim(),
+          contributor: 'kanban-ai',
+          outcome,
+          // Ancoragem em ARQUIVO (id sem símbolo): não sabemos o símbolo aqui.
+          sourceNodes: files.map((f) => fileNodeId(f)),
+        });
+        const rel = `${HIVE_MEMORY_SUBDIR}/${memoryDocFilename(learning.summary, now)}`;
+        const written = this.projectHive.mutateHiveFile(projectId, rel, () => doc);
+        if (written) {
+          // O grafo é reconstruído a partir do arquivo escrito — canal do
+          // recall (F2.5). Best-effort: agendamento nunca bloqueia nem lança.
+          if (this.projectGraph?.incrementalEnabled) {
+            void this.projectGraph.scheduleRebuild(projectId, [written]);
+          }
+          return true;
+        }
+        reason = `clone do Project ${projectId} indisponível`;
+      } else {
+        reason = projectId
+          ? 'escrita na colmeia indisponível (ProjectHiveService ausente)'
+          : 'Board sem Project — a colmeia vive no clone do Project (US-F2.3)';
+      }
+    } catch (err) {
+      reason = (err as Error)?.message ?? String(err);
+    }
+    // Perda definitiva: visível no card, não só no log. O próprio registro é
+    // best-effort (Activity falhar não pode derrubar o loop).
+    this.logger.warn(`US-F2.6: learning PERDIDO (task ${taskId}): ${reason}`);
+    await this.log(
+      taskId,
+      `aprendizado PERDIDO — a memória não aceitou a escrita ` +
+        `(${reason}). O agent reportou: ` +
+        `"${learning.summary.slice(0, 200)}". Se for durável, regrave manualmente na memória.`,
+    ).catch((err) =>
+      this.logger.warn(`US-F2.6: falha ao registrar a perda no card: ${(err as Error).message}`),
+    );
+    return false;
+  }
+
+  /**
+   * US-F5.2 — persiste os learnings de UMA iteração (um doc por learning,
+   * todos com o MESMO `outcome` — o sinal é da iteração, não do learning) e,
+   * se ao menos um doc aterrissou, dispara o `graphify reflect` do Project em
+   * fire-and-forget: LESSONS.md e o overlay `.graphify_learning.json` são
+   * derivados dos memory docs, então quem escreve avisa (mesmo espírito do
+   * `scheduleRebuild` da F1.5). Best-effort ABSOLUTO: nada aqui lança nem
+   * entra no caminho crítico do loop (postura estabelecida em
+   * `persistLearning` — memória jamais derruba o loop).
+   */
+  private async persistIterationLearnings(
+    taskId: string,
+    storyId: string,
+    cwd: string,
+    diffBaseline: string | null,
+    learnings: { path: string; summary: string; scope?: string }[],
+    outcome: MemoryOutcome | undefined,
+  ): Promise<void> {
+    const projectId = await this.resolveStoryProjectId(storyId).catch(() => null);
+    const files = cutLearningFiles(
+      await collectChangedFiles(cwd, diffBaseline).catch(() => []),
+    );
+    let wrote = false;
+    for (const learning of learnings) {
+      if (await this.persistLearning(taskId, learning, projectId, files, outcome)) {
+        wrote = true;
+      }
+    }
+    if (wrote && projectId && this.projectGraph) {
+      // Promise.resolve().then(...) blinda também contra throw SÍNCRONO do
+      // serviço (o `reflect` real é throwless, mas a postura é defensiva).
+      void Promise.resolve()
+        .then(() => this.projectGraph?.reflect(projectId))
+        .catch((err) =>
+          this.logger.warn(
+            `US-F5.2: disparo do reflect falhou (project=${projectId}): ${(err as Error).message}`,
+          ),
+        );
+    }
+  }
+
+  /**
+   * US-F2.5 (EP-F2) — recall de memória por TRAVESSIA DE GRAFO (graphify).
+   *
+   * Substitui o casamento literal `LIKE '%título flows%'` (que o oráculo da
+   * US-F2.1 provou quase nunca casar) por uma consulta ao grafo do Project: o
+   * `query_graph` TOKENIZA a pergunta e semeia a travessia por termo — título,
+   * nomes de flows e ARQUIVOS afetados viram seeds independentes (não uma
+   * frase). Os arquivos são os seeds mais fortes: a aresta `describes`
+   * (US-F2.4) liga o nó do arquivo de código ao neurônio que o descreve, então
+   * a BFS alcança a memória relevante em 1 hop a partir do código que a task
+   * vai tocar. O `token_budget` (default do `ProjectGraphQueryService`, 2000
+   * tokens ≈ 2× o corte cego de 4000 chars do recall antigo) substitui o
+   * truncamento sem marcador.
+   *
+   * US-F5.3 — a pergunta NÃO vai mais crua: passa pelo "Step 0 — Constrained
+   * query expansion" do query.md (só tokens que existem no vocabulário dos
+   * labels do grafo, teto de 12; arquivos afetados seguem como seeds fortes;
+   * interseção vazia sem arquivos = memória vazia EXPLÍCITA com
+   * `noVocabMatch`, nunca busca fabricada). O resultado é ordenado/anotado
+   * pelo overlay do reflect (US-F5.2) quando ele existe.
+   *
+   * Retornos:
+   *  - `null`     → recall por grafo NÃO se aplica (env `GRAPHIFY_MEMORY_RECALL`
+   *    off, serviço ausente, task sem story ou Board legado sem Project) — o
+   *    chamador usa o caminho LIKE antigo, intacto (strangler-fig; cutover na
+   *    US-F2.10);
+   *  - `ok:true`  → texto da travessia (vazio = memória VAZIA de verdade);
+   *  - `ok:false` → memória FALHOU (grafo `building`/`failed`/inexistente ou
+   *    sidecar fora). DELIBERADAMENTE sem fallback para o LIKE: mascarar a
+   *    falha era exatamente o defeito do recall antigo — aqui ela vira log
+   *    distinto E aviso explícito no prompt (`buildPrompt`).
+   *
+   * NUNCA lança — memória jamais derruba o loop (mesma postura do caminho
+   * antigo, mas sem silêncio).
+   */
+  private async recallFromGraph(
+    storyId: string | null,
+    taskTitle: string,
+    flows: AffectedFlow[],
+  ): Promise<
+    { ok: true; text: string; noVocabMatch?: true } | { ok: false; error: string } | null
+  > {
+    if (!this.config.graphify?.memoryRecallEnabled || !this.graphQuery || !storyId) return null;
+    try {
+      const projectId = await this.resolveStoryProjectId(storyId);
+      if (!projectId) return null; // Board legado sem Project → não há grafo
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { graphState: true, graphBuiltAt: true },
+      });
+      const graphState = String(project?.graphState ?? 'inexistente');
+      if (graphState !== 'ready') {
+        // "Memória falhou" ≠ "memória vazia": log E prompt distinguem.
+        this.logger.warn(
+          `US-F2.5: recall por grafo indisponível para project=${projectId} (graphState=${graphState})`,
+        );
+        return { ok: false, error: `grafo do projeto indisponível (graphState=${graphState})` };
+      }
+      // US-F5.3 — "Step 0 — Constrained query expansion" (query.md do
+      // graphify): o matcher do binário é substring case-folded, SEM stemming,
+      // sinônimo ou tradução — e aqui o caso NORMAL é título em português
+      // ("Validar separador vazio") contra labels em inglês
+      // (`arrayMoveImmutable()`). Mandar a pergunta crua vira ruído. A
+      // expansão seleciona só tokens que EXISTEM no vocabulário dos labels
+      // (interseção determinística — não há LLM neste ponto; a seleção
+      // "semântica" que a skill descreve é a porta de um agente, a nossa porta
+      // honesta é interseção + normalização). Caminhos de arquivo continuam
+      // como seeds fortes (o canal que já funcionava), em minúsculo (o matcher
+      // case-folda de qualquer forma).
+      const filePaths = [...new Set(flows.flatMap((f) => f.files))]
+        .filter(Boolean)
+        .map((p) => p.toLowerCase());
+      const vocab = await this.graphVocabulary(projectId, project?.graphBuiltAt ?? null);
+      let question: string;
+      let noVocabMatch = false;
+      if (vocab) {
+        const candidates = graphVocabTokens([taskTitle, ...flows.map((f) => f.name)].join(' '));
+        const selected: string[] = [];
+        for (const c of candidates) {
+          if (vocab.has(c) && !selected.includes(c)) selected.push(c);
+          if (selected.length >= GRAPH_QUERY_MAX_TOKENS) break;
+        }
+        // Auditabilidade exigida pelo query.md ("print the selection
+        // explicitly … so the expansion is auditable").
+        this.logger.log(
+          `US-F5.3: expansão de consulta (project=${projectId}, vocab=${vocab.size} tokens): ` +
+            `selecionados [${selected.join(', ')}] de candidatos [${candidates.join(', ')}]`,
+        );
+        noVocabMatch = selected.length === 0 && candidates.length > 0;
+        question = [...selected, ...filePaths].join(' ').trim();
+        if (noVocabMatch && filePaths.length === 0) {
+          // Hard constraint do Step 0: "if NO vocab tokens match … output an
+          // empty list and tell the user the corpus has no relevant
+          // vocabulary; do not fabricate a search". Sem arquivos para semear,
+          // NÃO consultamos — memória vazia EXPLÍCITA, distinta de "não há
+          // memória" (o buildPrompt avisa a IA da não-interseção).
+          return { ok: true, text: '', noVocabMatch: true };
+        }
+      } else {
+        // Vocabulário indisponível (projeção/serviço fora) — degrada para a
+        // pergunta crua pré-F5.3: pior recall é melhor que nenhum, e os
+        // arquivos continuam carregando a consulta.
+        question = [taskTitle, ...flows.map((f) => f.name), ...filePaths]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+      }
+      if (!question) {
+        // Sem NENHUM sinal da task não há o que perguntar. O modo antigo aqui
+        // devolvia "os 5 indexados mais recentemente" (arbitrários, oráculo
+        // F2.1); memória vazia explícita é estritamente melhor.
+        return { ok: true, text: '' };
+      }
+      const res = await this.graphQuery.queryGraph(projectId, { question, mode: 'bfs' });
+      if (!res.ok) {
+        this.logger.warn(`US-F2.5: query_graph falhou para project=${projectId}: ${res.error}`);
+        return res;
+      }
+      // Neurônios tocados pela travessia lexical (nós com src=.hive/…).
+      const hivePaths = new Set<string>();
+      for (const m of res.text.matchAll(/src=(\.hive\/[^\s\]]+)/g)) {
+        if (hivePaths.size >= GRAPH_RECALL_MAX_NEURONS) break;
+        hivePaths.add(m[1]);
+      }
+      // A aresta `describes` (US-F2.4) é neurônio→código, e a BFS do
+      // query_graph é DIRECIONADA: a partir do arquivo ela não chega ao
+      // neurônio (verificado empiricamente). Buscamos os vizinhos REVERSOS
+      // dos arquivos afetados explicitamente — é o canal que recupera memória
+      // porque a task toca o arquivo, mesmo sem NENHUMA palavra em comum.
+      for (const file of [...new Set(flows.flatMap((f) => f.files))].slice(0, 5)) {
+        if (hivePaths.size >= GRAPH_RECALL_MAX_NEURONS) break;
+        const nb = await this.graphQuery.getNeighbors(projectId, {
+          label: file,
+          relationFilter: 'describes',
+        });
+        if (!nb.ok) continue; // arquivo fora do grafo — segue o baile
+        for (const m of nb.text.matchAll(/<--\s+(\S+)\s+\[describes\]/g)) {
+          if (hivePaths.size >= GRAPH_RECALL_MAX_NEURONS) break;
+          const node = await this.graphQuery.getNode(projectId, m[1]);
+          const src = node.ok ? /Source:\s+(\.hive\/\S+)/.exec(node.text)?.[1] : undefined;
+          if (src) hivePaths.add(src);
+        }
+      }
+      // A travessia devolve o MAPA (nós/arestas), não o corpo dos neurônios.
+      // O grafo SELECIONA a memória; o conteúdo vem da fonte da verdade (bare
+      // repo) — anexado abaixo do mapa, com corte MARCADO (o recall antigo
+      // cortava em 4000 chars sem nenhum aviso à IA).
+      // US-F5.3 — antes de anexar, ordena/anota pelo overlay do reflect
+      // (US-F5.2), quando o sidecar anotou `learning=` nos nós.
+      const ranked = this.rankByLearningOverlay(res.text);
+      return { ok: true, text: this.appendNeuronBodies(projectId, ranked, hivePaths) };
+    } catch (err) {
+      const error = (err as Error)?.message ?? String(err);
+      this.logger.warn(`US-F2.5: recall por grafo falhou: ${error}`);
+      return { ok: false, error };
+    }
+  }
+
+  /**
+   * US-F2.5 → US-F2.3 — anexa ao texto da travessia o CORPO dos neurônios
+   * selecionados pelo grafo (paths `.hive/<rel>`), lidos DIRETO da colmeia do
+   * clone (`ProjectHiveService.readHiveFile` — a fonte da verdade desde a
+   * deleção do git da memória). Até 5 neurônios (paridade com o limite do
+   * recall antigo — mas escolhidos por RELEVÂNCIA de travessia/aresta
+   * `describes`, não por recência de indexação); corte por neurônio com
+   * marcador explícito. Falha de leitura de um neurônio é pulada: o mapa da
+   * travessia ainda o nomeia para a IA ler do worktree se precisar.
+   */
+  private appendNeuronBodies(
+    projectId: string,
+    traversal: string,
+    hivePaths: ReadonlySet<string>,
+  ): string {
+    const MAX_CHARS = 4000;
+    let text = traversal;
+    for (const hivePath of hivePaths) {
+      const rel = hivePath.slice('.hive/'.length);
+      const raw = this.projectHive?.readHiveFile(projectId, rel)?.content ?? null;
+      if (raw === null) continue;
+      const body =
+        raw.length > MAX_CHARS
+          ? `${raw.slice(0, MAX_CHARS)}\n[… truncado — leia ${hivePath} completo se precisar]`
+          : raw;
+      text += `\n\n### neurônio: ${hivePath}\n${body.trim()}`;
+    }
+    return text;
+  }
+
+  /**
+   * US-F5.3 — cache do vocabulário por Project. Chave de invalidação:
+   * `graphBuiltAt` (o vocabulário só muda quando o grafo é reconstruído).
+   * ponytail: Map sem teto — o processo atende poucos Projects; LRU se doer.
+   */
+  private readonly graphVocabCache = new Map<string, { builtAt: string; vocab: Set<string> }>();
+
+  /**
+   * US-F5.3 — vocabulário REAL dos labels do grafo do Project (Step 0 do
+   * query.md). Fonte: a projeção da US-F4.1 (`ProjectGraphService.projection`,
+   * modo overview, limit 500 = teto do wrapper), REUSADA em vez de rota nova
+   * no sidecar: ela já devolve `label` de todos os nós dos grafos reais
+   * (52/84 nós) e, num grafo maior que 500, os 500 nós mais conectados são
+   * exatamente o vocabulário que vale semear (hubs primeiro). Tokens já
+   * normalizados (minúsculo, sem acento, split de camelCase, 3..30 chars).
+   * `null` = vocabulário indisponível (serviço ausente/projeção falhou) — o
+   * chamador degrada para a pergunta crua pré-F5.3. Throwless.
+   */
+  private async graphVocabulary(
+    projectId: string,
+    builtAt: Date | null,
+  ): Promise<Set<string> | null> {
+    if (!this.projectGraph) return null;
+    const key = builtAt?.toISOString() ?? 'sem-builtAt';
+    const cached = this.graphVocabCache.get(projectId);
+    if (cached && cached.builtAt === key) return cached.vocab;
+    try {
+      const proj = await this.projectGraph.projection(projectId, { limit: 500 });
+      if (!proj.ok) return null;
+      const vocab = new Set<string>();
+      for (const n of proj.nodes) for (const t of graphVocabTokens(n.label)) vocab.add(t);
+      this.graphVocabCache.set(projectId, { builtAt: key, vocab });
+      return vocab;
+    } catch (err) {
+      this.logger.warn(
+        `US-F5.3: vocabulário do grafo indisponível (project=${projectId}): ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * US-F5.3 — ranking pelo overlay do reflect (US-F5.2). O serve do graphify
+   * anexa `learning=preferred|tentative|contested[:stale]` às linhas NODE
+   * quando `.graphify_learning.json` existe ao lado do graph.json. Aqui só
+   * REORDENAMOS o bloco contíguo de NODEs (preferred sobe, contested desce,
+   * ordem relativa estável — os EDGEs ficam onde estão) e anexamos uma
+   * legenda para a IA. `dead_end` não entra no overlay na versão atual do
+   * graphify (fica query-scoped no reflect), mas a legenda/ranking já o
+   * tratam caso apareça. Sem NENHUMA anotação (overlay ausente — o caso
+   * normal até a frota rodar reflect) o texto sai byte-idêntico: degradação
+   * silenciosa.
+   */
+  private rankByLearningOverlay(traversal: string): string {
+    if (!traversal.includes(' learning=')) return traversal;
+    const lines = traversal.split('\n');
+    const rank = (l: string): number => {
+      const status = /\slearning=([a-z_]+)/.exec(l)?.[1];
+      if (status === 'preferred') return 0;
+      if (status === 'contested') return 2;
+      if (status === 'dead_end') return 3;
+      return 1; // sem anotação ou tentative — mantém o meio
+    };
+    const first = lines.findIndex((l) => l.startsWith('NODE '));
+    if (first >= 0) {
+      let last = first;
+      while (last + 1 < lines.length && lines[last + 1].startsWith('NODE ')) last++;
+      const block = lines
+        .slice(first, last + 1)
+        .map((l, i) => [rank(l), i, l] as const)
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1])
+        .map(([, , l]) => l);
+      lines.splice(first, block.length, ...block);
+    }
+    lines.push(
+      '',
+      'Aprendizado do projeto (reflect — US-F5.2/US-F5.3): nós `learning=preferred` já provaram ' +
+        'valor em iterações passadas — comece por eles; `learning=contested` têm sinais ' +
+        'conflitantes — confirme antes de confiar; `learning=dead_end` já foi tentado e não levou ' +
+        'a nada — não re-derive.',
+    );
+    return lines.join('\n');
   }
 
   /**
@@ -843,6 +1436,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
         title: true,
         loopType: true,
         model: true,
+        adapter: true, // US-F3.10 — adapter por card (cascata)
         parentId: true,
         boardId: true,
         assignees: { select: { assigneeId: true } },
@@ -890,6 +1484,27 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       this.config.agent.cheapModelId,
       recovery,
     );
+
+    // US-F3.10 — adapter resolvido em cascata: task → parents →
+    // board.defaultAdapter → global (config.agentAdapter, que já embute
+    // AGENT_ADAPTER → default do processo). Na RECOVERY a lane vence e usa o
+    // adapter GLOBAL (ver resolveDispatchAdapter: o cheapModelId vive no
+    // namespace do adapter global; recuperação nunca fica mais cara). O runner
+    // passa a ser POR CARD; sem registry (specs posicionais), cai no runner do
+    // token AGENT_RUNNER — comportamento pré-F3.10.
+    const resolvedAdapter = await this.resolveCardAdapter(
+      raw?.adapter ?? null,
+      raw?.parentId ?? null,
+      raw?.boardId ?? null,
+    );
+    const dispatchAdapter = resolveDispatchAdapter(
+      resolvedAdapter,
+      this.config.agentAdapter,
+      recovery,
+    );
+    const runner = this.adapterRegistry
+      ? this.adapterRegistry.resolve(dispatchAdapter)
+      : this.runner;
 
     // b6: contexto do runner (só os campos do AgentRunContext; os demais são
     // usados apenas para montar o prompt da CLI real).
@@ -978,7 +1593,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       });
     };
 
-    const runResult = await this.runner.run({
+    const runResult = await runner.run({
       cwd,
       model: dispatchModel,
       phase,
@@ -986,7 +1601,19 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       // one-shot e torna o HITL resiliente a restart: o turno que retoma após a
       // resposta humana resume a MESMA sessão do Copilot. Ver ADR-0022.
       cliSessionId: taskId,
-      prompt: this.buildPrompt(phase, profile, context, agent?.instructions ?? '', cwd, recovery),
+      prompt: this.buildPrompt(
+        phase,
+        profile,
+        context,
+        agent?.instructions ?? '',
+        cwd,
+        recovery,
+        // US-F3.5 — runner com outputSchema não recebe instruções de marcador.
+        runner.structuredOutput === true,
+      ),
+      // US-F3.5 — mesma condição do buildPrompt para pedir proposedDod (R3):
+      // o runner com schema inclui o campo SÓ na análise de task sem DOD.
+      proposeDod: context.dodItems.length === 0 && phase === 'analysis',
       context: runnerContext,
       signal,
       // b6: repassa cada chunk de streaming para o WS (buffer reativo no front)
@@ -1067,6 +1694,26 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // (snapshot do início) garante que seja o DELTA desta iteração, não o
     // acumulado. Reutilizado em ambos os call sites de appendIteration abaixo.
     const iterationDiff = await this.captureDiff(cwd, diffBaseline);
+
+    // US-F1.5 — a iteração mexeu no repo-alvo? Dispara o rebuild INCREMENTAL do
+    // grafo do Project em fire-and-forget (mesmo espírito best-effort da escrita
+    // de learnings abaixo): coalescing por Project, contador de force periódico
+    // e extração de arquivos vivem no ProjectGraphService; NADA disso entra no
+    // caminho crítico da iteração — falha/lentidão/sidecar fora viram warn e o
+    // loop segue. Desligado por default (GRAPHIFY_INCREMENTAL_REBUILD).
+    if (this.projectGraph?.incrementalEnabled && iterationDiff.trim().length > 0) {
+      void this.resolveStoryProjectId(storyId)
+        .then((projectId) =>
+          projectId
+            ? this.projectGraph?.rebuildFromIteration(projectId, cwd, diffBaseline)
+            : undefined,
+        )
+        .catch((err) =>
+          this.logger.warn(
+            `US-F1.5: disparo do rebuild incremental do grafo falhou: ${(err as Error).message}`,
+          ),
+        );
+    }
 
     // US-ROB2 — acumula tokens da iteração no estado durável da story (por
     // session, chaveado por storyId). Defensivo: só quando há tokens; o próprio
@@ -1223,6 +1870,9 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
         outcome: effectivePassed ? 'ok' : 'derived',
       });
 
+      // US-F5.2 — o loop desistiu e escalou a humano nesta iteração de
+      // validação? Alimenta o `outcome` dos learnings (dead_end) abaixo.
+      let validationEscalated = false;
       if (effectivePassed) {
         await this.setExecState(taskId, 'done');
         await this.log(taskId, 'validação final concluída — task Done');
@@ -1288,6 +1938,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
           // O cap de falhas de validação usa `problem.title` como reason (o
           // problema concreto); o cap de profundidade tem reason próprio.
           const reason = decision.reasonKind === 'depth' ? decision.reason : problem.title;
+          validationEscalated = true;
           await this.escalateToHuman(taskId, storyId, reason, decision.log);
         } else {
           // Dedup + cap AGREGADO por problema (fecha o loop de derivações
@@ -1304,6 +1955,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
           const maxPerProblem = this.config.agent.maxDerivedPerProblem;
           if (maxPerProblem > 0 && openDerived >= maxPerProblem) {
             const reason = `derivações repetidas para o mesmo problema atingiram o limite (${openDerived} ≥ ${maxPerProblem}): ${problem.title}`;
+            validationEscalated = true;
             await this.escalateToHuman(
               taskId,
               storyId,
@@ -1321,6 +1973,27 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
             await this.createDerivedTask(taskId, problem);
           }
         }
+      }
+      // US-F5.2 — learnings da fase de VALIDAÇÃO. Antes eram DESCARTADOS (o
+      // `return true` abaixo nunca alcançava o bloco de learnings do fluxo
+      // normal); e é justamente aqui que vive o sinal mais forte do loop:
+      // `useful` quando o gate passou (task fecha Done), `corrected` quando a
+      // validação reprovou e exigiu nova rodada (task derivada/dedup),
+      // `dead_end` quando o loop escalou a humano sem saída. Best-effort — o
+      // helper nunca lança.
+      if (runResult.learnings?.length) {
+        await this.persistIterationLearnings(
+          taskId,
+          storyId,
+          cwd,
+          diffBaseline ?? null,
+          runResult.learnings,
+          deriveLearningOutcome({
+            kind: 'validation',
+            passed: effectivePassed,
+            escalated: validationEscalated,
+          }),
+        );
       }
       return true;
     }
@@ -1375,7 +2048,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // `canFinish` adiante) e não deve alarmar.
     const claimsNewCodeWithoutDiff =
       profile.toolset !== 'board-only' &&
-      this.runner.id !== 'mock' &&
+      runner.id !== 'mock' &&
       phase === 'implementation' &&
       iterationDiff.trim().length === 0 &&
       (runResult.affectedFlows?.length ?? 0) > 0;
@@ -1435,7 +2108,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
         );
       }
       touched = toMark;
-    } else if (this.runner.id === 'mock' && phase === 'implementation') {
+    } else if (runner.id === 'mock' && phase === 'implementation') {
       const pend = await this.prisma.dodItem.findFirst({
         where: { cardId: taskId, done: false },
         orderBy: { position: 'asc' },
@@ -1460,36 +2133,23 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       await this.persistAffectedFlows(context.storyId, runResult.affectedFlows);
     }
 
-    // US-A3 (EP-A/ADR-0027) — persiste os aprendizados reportados pelo agent
-    // na memória em colmeia. Usa `commitAndReindex` (Camada 2), que respeita a
-    // ordem de escrita invariante git → índice. Totalmente DEFENSIVO: a memória
-    // NUNCA pode derrubar o loop; cada falha vira warning e segue.
-    //
-    // US-PROJ4 (§1.2 / decisão #6) — quando a story pertence a um Board com
-    // Project, o `learning.path` reportado pela AI (ex.: `modules/x.md`) é
-    // prefixado com o namespace do Project antes de gravar, mantendo a colmeia
-    // isolada. Sem Project, grava no path global legado.
-    if (runResult.learnings?.length) {
-      const namespace = await this.resolveMemoryNamespace(storyId);
-      for (const learning of runResult.learnings) {
-        try {
-          const neuronPath = withNamespace(learning.path, namespace);
-          const prev = await this.memoryGit.readNeuron(neuronPath);
-          const stamp = new Date().toISOString();
-          const entry = `\n- (${stamp}, task ${taskId}) ${learning.summary.trim()}`;
-          const base = prev ?? `# ${neuronPath}\n\ntags: memory\n\nAprendizados:`;
-          await this.memoryIndex.commitAndReindex({
-            path: neuronPath,
-            content: base + entry,
-            sessionId: taskId,
-            message: `learn(${taskId}): ${learning.summary.slice(0, 60)}`,
-          });
-        } catch (err) {
-          this.logger.warn(
-            `Falha ao gravar learning em ${learning.path}: ${(err as Error).message}`,
-          );
-        }
-      }
+    // US-F2.7 — blast radius DERIVADO do grafo: a IA continua declarando (acima),
+    // mas deixa de ser a única fonte. Os arquivos do diff viram seeds do
+    // `/affected` (US-F1.6) e o corte vira o fluxo `blast radius (grafo)` na
+    // story — a validação passa a exercitar os dependentes diretos do que a
+    // mudança realmente tocou. Roda mesmo sem declaração da IA (o caso
+    // "declarou de menos"); com diff vazio é no-op (ancorado na realidade, o
+    // derivado não tem como ser fantasma). Env off (default) = byte-idêntico.
+    if (context.storyId && cwd) {
+      await this.maybeDeriveAffectedFlows({
+        taskId,
+        storyId: context.storyId,
+        cwd,
+        diffBaseline: diffBaseline ?? null,
+        // Fluxos fantasma (declarados sem diff) não contam como "declarado" na
+        // conferência — eles nem foram persistidos (guard acima).
+        declared: claimsNewCodeWithoutDiff ? [] : (runResult.affectedFlows ?? []),
+      });
     }
 
     // A task pode ir a `done` quando a AI declara `done` E isso é crível. Com
@@ -1507,8 +2167,36 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     }
     const canFinish =
       runResult.done &&
-      (dodAllDone || iterationDiff.trim().length > 0 || this.runner.id === 'mock');
+      (dodAllDone || iterationDiff.trim().length > 0 || runner.id === 'mock');
     const handoffState = canFinish ? 'done' : execStateAfterPhase(phase);
+
+    // US-A3 (EP-A/ADR-0027) → US-F2.3 — persiste os aprendizados reportados
+    // pelo agent na colmeia do CLONE (`<clone>/.hive/memory/*.md`, a fonte da
+    // verdade desde a deleção do git da memória). Totalmente DEFENSIVO: a
+    // memória NUNCA pode derrubar o loop (US-F2.6 — a perda definitiva vira
+    // Activity no card, tudo dentro de `persistLearning`, que nunca lança).
+    //
+    // US-F5.2 — o bloco MUDOU DE LUGAR (agora roda depois de `canFinish`)
+    // para o `outcome` do memory doc nascer do sinal real do loop: `useful`
+    // quando a task pôde concluir, `corrected` quando o guard anti-fantasma
+    // rejeitou a reivindicação da iteração, e SEM outcome (unmarked) nas
+    // iterações intermediárias. Depois da escrita, o helper dispara o
+    // `graphify reflect` (fire-and-forget) para agregar os docs no LESSONS.md
+    // e no overlay `.graphify_learning.json`.
+    if (runResult.learnings?.length) {
+      await this.persistIterationLearnings(
+        taskId,
+        storyId,
+        cwd,
+        diffBaseline ?? null,
+        runResult.learnings,
+        deriveLearningOutcome({
+          kind: 'iteration',
+          canFinish,
+          phantomClaim: claimsNewCodeWithoutDiff,
+        }),
+      );
+    }
     // #6: se houve HITL nesta iteração, anexa a pergunta+resposta ao nextStep
     // para reinjeção no lastro da próxima iteração (modelo one-shot).
     const nextStep = hitlExchange
@@ -1566,6 +2254,13 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
    * partir do liveness classificado. Persiste `continuationAttempt`/
    * `livenessReason` em AgentRuntimeState (durável, cross-run). Feature toggle:
    * `agent.continuationCap === 0` desliga (só limpa estado residual).
+   *
+   * US-F3.11 — AUDITADA e MANTIDA após o outputSchema (US-F3.5): o schema
+   * garante FORMA, não TRABALHO. Um payload que casa o schema pode ser
+   * exatamente um plan_only (summary+nextStep válidos, diff vazio), e a
+   * PRÓPRIA rejeição de schema produz um resultado plan_only-shaped cujo
+   * re-empurrão de retry é esta política. Não remover enquanto qualquer
+   * runner puder devolver um run sem progresso — ou seja, sempre.
    */
   private async applyContinuationPolicy(
     storyId: string,
@@ -1712,6 +2407,12 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
    * categorias de {@link RunLivenessState}, para decidir se vale uma
    * CONTINUAÇÃO direcionada (plan_only/empty_response) ou se cede ao fluxo
    * normal (auto-step/anti-thrash). Função PURA (sem I/O).
+   *
+   * US-F3.11 — AUDITADA e MANTIDA após o outputSchema (US-F3.5), inclusive
+   * `empty_response`: o schema torna summary vazio impossível SÓ no caminho
+   * estruturado do TanStack; o CopilotCliRunner (produção) segue no marcador,
+   * onde o CliAdapter coage summary/nextStep mal-tipados para '' (oráculo
+   * cli-contract da US-F3.2) — o run "vazio" continua alcançável lá.
    */
   private classifyRunLiveness(
     runResult: AgentRunResult,
@@ -3938,6 +4639,131 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * US-F2.7 — deriva o blast radius da iteração e o persiste como o fluxo
+   * `AFFECTED_FLOW_DERIVED_NAME` na story. SEMÂNTICA: **complementa e confere**
+   * o declarado pela IA — nunca substitui. O `ValidationRunner` consome os
+   * fluxos da story por igual (`verifyFlowFiles` + `runFlowTargetedTests`),
+   * então o fluxo derivado faz a validação exercitar os DEPENDENTES DIRETOS
+   * da mudança (specs co-located dos importadores/chamadores) mesmo quando a
+   * IA declara de menos; a divergência declarado×derivado vira Activity no
+   * card (o "confere"). Substituir apagaria os nomes/notas semânticos da IA e
+   * esvaziaria o `verifyFlowFiles` (arquivos do grafo existem por construção);
+   * só complementar sem conferir deixaria a subdeclaração invisível.
+   *
+   * Gate: env `GRAPHIFY_AFFECTED_FLOWS` (default OFF — com ela off este método
+   * nem é chamado e o comportamento é byte-idêntico ao anterior; cutover na
+   * US-F2.10). NUNCA lança; falha não é silenciosa (Activity + warn) nem fatal
+   * (o loop segue com o declarado da IA) — mesma filosofia das F2.5/F2.6.
+   */
+  private async maybeDeriveAffectedFlows(input: {
+    taskId: string;
+    storyId: string;
+    cwd: string;
+    diffBaseline: string | null;
+    declared: { name: string; files: string[] }[];
+  }): Promise<void> {
+    if (!this.config.graphify?.affectedFlowsEnabled || !this.projectGraph) return;
+    try {
+      // Seeds = arquivos que a iteração REALMENTE tocou (git diff, não a
+      // declaração da IA). Mesmo corte da US-F2.6: sem lockfiles/.hive, teto 10.
+      const changed = cutLearningFiles(
+        await collectChangedFiles(input.cwd, input.diffBaseline).catch(() => []),
+      );
+      if (changed.length === 0) return; // sem diff não há raio (e não há fantasma)
+      const derived = await this.deriveAffectedFlow({ ...input, changed });
+      if (derived) await this.persistAffectedFlows(input.storyId, [derived]);
+    } catch (err) {
+      this.logger.warn(
+        `US-F2.7: derivação do blast radius falhou: ${(err as Error)?.message ?? err}`,
+      );
+    }
+  }
+
+  /**
+   * US-F2.7 — o miolo da derivação: seeds → `POST /affected` (depth
+   * `AFFECTED_FLOW_DEPTH`) → corte (`rankAffectedFiles` + existência no
+   * worktree + teto) → fluxo derivado. Retorna `null` quando não se aplica
+   * (Board legado sem Project) ou quando falhou (já sinalizado ao operador).
+   */
+  private async deriveAffectedFlow(input: {
+    taskId: string;
+    storyId: string;
+    cwd: string;
+    changed: string[];
+    declared: { name: string; files: string[] }[];
+  }): Promise<{ name: string; files: string[]; note: string } | null> {
+    const { taskId, storyId, cwd, changed, declared } = input;
+    const projectId = await this.resolveStoryProjectId(storyId);
+    if (!projectId) return null; // Board legado sem Project → não há grafo (não é falha)
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { graphState: true },
+    });
+    const graphState = String(project?.graphState ?? 'inexistente');
+    if (graphState !== 'ready') {
+      this.logger.warn(
+        `US-F2.7: blast radius indisponível para project=${projectId} (graphState=${graphState})`,
+      );
+      await this.log(
+        taskId,
+        `US-F2.7: blast radius indisponível (grafo do projeto ${graphState}) — a validação segue apenas com os fluxos declarados pela IA.`,
+      );
+      return null;
+    }
+
+    const hits: { file: string | null; depth: number }[] = [];
+    let failures = 0;
+    let firstError = '';
+    for (const seed of changed) {
+      const res = await this.projectGraph!.affected(projectId, seed, AFFECTED_FLOW_DEPTH);
+      if (!res.ok) {
+        failures += 1;
+        firstError ||= res.error;
+        continue;
+      }
+      hits.push(...res.hits);
+    }
+    if (failures === changed.length) {
+      // Sidecar fora / erro sistêmico: TODOS os seeds falharam. O loop segue
+      // com o declarado, mas o operador fica sabendo (não-silencioso).
+      this.logger.warn(`US-F2.7: /affected falhou para todos os seeds: ${firstError}`);
+      await this.log(
+        taskId,
+        `US-F2.7: blast radius falhou (${firstError}) — a validação segue apenas com os fluxos declarados pela IA.`,
+      );
+      return null;
+    }
+
+    // O CORTE: ranking (depth/hits/path) → só arquivos que EXISTEM no worktree
+    // (grafo pode estar defasado; um arquivo fantasma aqui viraria um problema
+    // falso de "alucinação" no verifyFlowFiles) → teto.
+    const files: string[] = [];
+    for (const r of rankAffectedFiles(changed, hits)) {
+      if (files.length >= AFFECTED_FLOW_MAX_FILES) break;
+      if (await this.workspaces.fileExistsInWorktree(cwd, r.file)) files.push(r.file);
+    }
+    if (files.length === 0) return null; // nada afetado além da própria mudança
+
+    // O "confere": arquivos afetados que NENHUM fluxo declarado menciona.
+    const declaredFiles = new Set(declared.flatMap((f) => f.files));
+    const undeclared = files.filter((f) => !declaredFiles.has(f));
+    if (undeclared.length > 0) {
+      await this.log(
+        taskId,
+        `US-F2.7: blast radius do grafo encontrou ${undeclared.length} arquivo(s) afetado(s) que a IA não declarou: ${undeclared.join(', ')}.`,
+      );
+    }
+
+    return {
+      name: AFFECTED_FLOW_DERIVED_NAME,
+      files,
+      note:
+        `US-F2.7 — derivado do grafo (depth ${AFFECTED_FLOW_DEPTH}) a partir de ` +
+        `${changed.length} arquivo(s) tocado(s) pela iteração; teto ${AFFECTED_FLOW_MAX_FILES}.`,
+    };
+  }
+
+  /**
    * Resolve o modelo de AI de um card via herança em cascata:
    * `own ?? parent.model (recursivo) ?? board.defaultModel ?? config default`.
    */
@@ -3974,6 +4800,53 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     }
 
     return this.config.agent.defaultModel;
+  }
+
+  /**
+   * US-F3.10 — Resolve o adapter de AI de um card via herança em cascata,
+   * espelhando `resolveCardModel`:
+   * `own ?? parent.adapter (recursivo) ?? board.defaultAdapter ?? global`.
+   *
+   * O "global" é `config.agentAdapter`, que já embute a precedência
+   * `AGENT_ADAPTER` → default do processo (`mock`) — ADR-0036, emenda US-F3.1.
+   * Valores desconhecidos vindos do banco (coluna String) são IGNORADOS e a
+   * cascata continua — a validação forte de escrita fica no schema da API.
+   */
+  private async resolveCardAdapter(
+    ownAdapter: string | null,
+    parentId: string | null,
+    boardId: string | null,
+  ): Promise<AgentAdapterKind> {
+    const known = (value: string | null | undefined): AgentAdapterKind | null =>
+      AGENT_ADAPTER_KINDS.find((k) => k === value) ?? null;
+
+    const own = known(ownAdapter);
+    if (own) return own;
+
+    let currentParentId = parentId;
+    const seen = new Set<string>();
+    while (currentParentId && !seen.has(currentParentId)) {
+      seen.add(currentParentId);
+      const parent = await this.prisma.card.findUnique({
+        where: { id: currentParentId },
+        select: { adapter: true, parentId: true },
+      });
+      if (!parent) break;
+      const inherited = known(parent.adapter);
+      if (inherited) return inherited;
+      currentParentId = parent.parentId;
+    }
+
+    if (boardId) {
+      const board = await this.prisma.board.findUnique({
+        where: { id: boardId },
+        select: { defaultAdapter: true },
+      });
+      const fromBoard = known(board?.defaultAdapter);
+      if (fromBoard) return fromBoard;
+    }
+
+    return this.config.agentAdapter;
   }
 
   private async buildContext(
@@ -4017,12 +4890,30 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     storyContext: { title: string; description: string } | null;
     epicContext: { title: string; description: string } | null;
     /**
-     * US-A1 (EP-A/ADR-0027) — neurônios relevantes da memória em colmeia,
-     * recuperados do índice pelo título/flows da task. Injetados no prompt para
-     * a AI não começar "amnésica". Vazio quando não há memória ou em falha
-     * (defensivo: a memória NUNCA derruba o loop).
+     * US-F2.5 (EP-F2/ADR-0041) — memória recuperada por TRAVESSIA DE GRAFO
+     * (graphify), quando `GRAPHIFY_MEMORY_RECALL` está ON e o Board tem
+     * Project com grafo `ready`. É o ÚNICO recall desde a US-F2.3 (o LIKE
+     * legado morreu com o módulo `memory/`). Estados:
+     *  - `null`  → recall NÃO se aplica (env off / Board legado): iteração
+     *    segue sem memória, sem seção no prompt;
+     *  - `ok:true` → texto da travessia (vazio = memória VAZIA de verdade;
+     *    US-F5.3: `noVocabMatch` = a consulta NÃO rodou porque nenhum termo
+     *    da task existe no vocabulário do grafo — o prompt distingue);
+     *  - `ok:false` → memória FALHOU (sidecar fora, grafo building/failed) —
+     *    distinto de vazia; o prompt avisa a IA explicitamente.
      */
-    memoryNeurons: { path: string; title: string; content: string }[];
+    memoryGraph:
+      | { ok: true; text: string; noVocabMatch?: true }
+      | { ok: false; error: string }
+      | null;
+    /**
+     * US-F5.5 (EP-F5) — id do Project quando o grafo está `ready`
+     * (`memoryGraph.ok` — reuso do estado que o recall da US-F2.5 já
+     * resolveu). Habilita a seção "Grafo de conhecimento" do prompt (tools
+     * MCP + Wiki). `null` ⇒ seção omitida (Board legado sem Project, grafo
+     * não-`ready`, integração desligada).
+     */
+    graphProjectId: string | null;
     /**
      * US-CTX1 (EP-CTX/ADR-0040) — snapshot da TENTATIVA ANTERIOR desta story,
      * quando este é um re-dispatch (reclaim pós-crash M4 ou continuação M3).
@@ -4050,6 +4941,16 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
      * Defensivo: default false quando a story não é encontrada.
      */
     startInPlanMode: boolean;
+    /**
+     * US-F3.6 (ADR-0042) — retomada HITL pós-restart, runner-agnóstica. Par
+     * pergunta+resposta cuja resposta humana ainda NÃO foi consumida por
+     * nenhuma iteração (ela chegou pelo caminho de resiliência do ADR-0022,
+     * após um restart matar a promise de `waitForAnswer`). Injetado no prompt
+     * para runners SEM sessão em disco (ex.: tanstack) retomarem do ponto da
+     * decisão — no fluxo sem restart o par vira `handoffNextStep` da iteração
+     * e este campo é `null`. Defensivo: falha de leitura => `null`.
+     */
+    hitlResume: { prompt: string; answer: string } | null;
   }> {
     const task = await this.prisma.card.findUnique({
       where: { id: taskId },
@@ -4177,36 +5078,35 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       epicNotes.push(...plain.slice(-5));
     }
 
-    // US-A1 (EP-A/ADR-0027) — recupera neurônios relevantes da colmeia para
-    // injetar no prompt. Totalmente defensivo: qualquer falha da memória cai
-    // para lista vazia e NUNCA interrompe o loop.
-    //
-    // US-PROJ4 (§1.2 / decisão #6) — quando a story pertence a um Board com
-    // Project, a busca é RESTRITA ao namespace daquele Project (não vaza memória
-    // de outros projetos nem da colmeia global legada). Sem Project, busca global.
-    let memoryNeurons: { path: string; title: string; content: string }[] = [];
-    try {
-      const term = [taskTitle, ...flows.map((f) => f.name)]
-        .filter(Boolean)
-        .join(' ')
-        .trim();
-      const namespace = task?.parentId
-        ? await this.resolveMemoryNamespace(task.parentId)
-        : undefined;
-      const hits = await this.memoryIndex.query(term || undefined, 5, namespace).catch(() => []);
-      const neurons: { path: string; title: string; content: string }[] = [];
-      for (const hit of hits.slice(0, 5)) {
-        const raw = await this.memoryGit.readNeuron(hit.path).catch(() => null);
-        neurons.push({
-          path: hit.path,
-          title: hit.title ?? '',
-          content: (raw ?? hit.summary ?? '').slice(0, 4000),
-        });
-      }
-      memoryNeurons = neurons;
-    } catch (err) {
-      this.logger.warn(`Falha ao recuperar memória em buildContext: ${(err as Error).message}`);
-      memoryNeurons = [];
+    // US-F2.5/F2.10 → US-F2.3 (EP-F2) — recall de memória por GRAFO, o único
+    // caminho: o recall LIKE legado (US-A1) morreu com o módulo `memory/` (a
+    // emenda da US-F2.10 no ADR-0027 previa: "a partir da F2.3 o rollback
+    // deixa de existir"). `null` = recall não se aplica (env off, Board legado
+    // sem Project, task sem story) → a iteração segue SEM memória, sem seção
+    // no prompt. Falha (`ok:false`) é DISTINTA de vazio e vira aviso explícito
+    // no prompt + Activity no card.
+    const memoryGraph = await this.recallFromGraph(task?.parentId ?? null, taskTitle, flows);
+    // US-F5.5 — Project do Board para a seção "Grafo de conhecimento" do
+    // prompt. Só resolve quando o recall PROVOU grafo `ready` (`memoryGraph.ok`)
+    // — nada de re-checar `graphState` aqui. Defensivo: falha ⇒ null (sem seção).
+    let graphProjectId: string | null = null;
+    if (memoryGraph?.ok && task?.parentId) {
+      graphProjectId = await this.resolveStoryProjectId(task.parentId).catch(() => null);
+    }
+    if (memoryGraph && !memoryGraph.ok) {
+      // US-F2.10 (cutover) — com o recall por grafo como DEFAULT, "grafo
+      // indisponível" deixou de ser exceção de opt-in: o operador precisa ver
+      // no CARD (Activity), não só no warn do servidor, que a IA trabalhou sem
+      // memória — mesmo padrão da US-F2.7. Sem fallback (reavaliado no
+      // cutover: o oráculo da F2.1 provou que o LIKE devolvia [] nos mesmos
+      // cenários — o fallback só re-mascararia a falha).
+      await this
+        .log(
+          taskId,
+          `US-F2.10: memória do projeto INDISPONÍVEL nesta iteração (${memoryGraph.error}) — ` +
+            'a IA foi avisada no prompt e segue sem memória; sem fallback para o recall legado.',
+        )
+        .catch(() => undefined);
     }
 
     // ── US-CTX1/CTX3 (EP-CTX/ADR-0040) — snapshot do AgentRuntimeState desta
@@ -4290,12 +5190,63 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       taskDescription: task?.description ?? '',
       storyContext: story ? { title: story.title ?? '', description: story.description ?? '' } : null,
       epicContext: epic ? { title: epic.title ?? '', description: epic.description ?? '' } : null,
-      memoryNeurons,
+      memoryGraph,
+      graphProjectId,
       priorAttempt,
       parentHandoffs,
       continuationReason,
       startInPlanMode: story?.startInPlanMode ?? false,
+      hitlResume: await this.loadHitlResume(taskId),
     };
+  }
+
+  /**
+   * US-F3.6 (ADR-0042) — localiza uma troca HITL (pergunta role=ai + resposta
+   * role=user, mesmo `questionId`) cuja resposta ainda não foi consumida por
+   * nenhuma iteração — i.e. respondida DEPOIS da última `Iteration` persistida
+   * da task. Isso só acontece no caminho de resiliência do ADR-0022 (restart
+   * matou a promise de `waitForAnswer`; no fluxo normal o par vira o
+   * `handoffNextStep` da iteração que pausou, persistida após a resposta).
+   *
+   * O Copilot recupera a pergunta via sessão em disco (`--session-id`), mas a
+   * RESPOSTA só existe no banco; runners sem sessão em disco (tanstack) não
+   * recuperam nada. Reinjetar o par no prompt fecha a lacuna para TODOS os
+   * runners (para o Copilot é redundância inofensiva — o mesmo espírito do
+   * "prompt auto-suficiente como fallback" do ADR-0022).
+   *
+   * Defensivo: qualquer falha => `null` (a retomada degrada para o prompt
+   * reconstruído sem o par, como antes — nunca derruba o loop).
+   */
+  private async loadHitlResume(
+    taskId: string,
+  ): Promise<{ prompt: string; answer: string } | null> {
+    try {
+      const answer = await this.prisma.agentMessage.findFirst({
+        where: { cardId: taskId, role: 'user', questionId: { not: null } },
+        orderBy: { ts: 'desc' },
+        select: { ts: true, text: true, questionId: true },
+      });
+      if (!answer?.questionId) return null;
+      const lastIteration = await this.prisma.iteration.findFirst({
+        where: { cardId: taskId },
+        orderBy: { ts: 'desc' },
+        select: { ts: true },
+      });
+      // Resposta anterior à última iteração = já consumida (virou handoff).
+      if (lastIteration && answer.ts <= lastIteration.ts) return null;
+      const question = await this.prisma.agentMessage.findFirst({
+        where: { cardId: taskId, role: 'ai', questionId: answer.questionId },
+        orderBy: { ts: 'desc' },
+        select: { text: true },
+      });
+      if (!question) return null;
+      return { prompt: question.text, answer: answer.text };
+    } catch (err) {
+      this.logger.warn(
+        `Falha ao ler retomada HITL em buildContext: ${(err as Error).message}`,
+      );
+      return null;
+    }
   }
 
   /**
@@ -4311,6 +5262,12 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     agentInstructions = '',
     workdir = '',
     recovery = false,
+    // US-F3.5 — true quando o runner ativo consome `outputSchema`: as seções
+    // de FORMATO (bloco <<<KANBAN_RESULT>>>/<<<KANBAN_QUESTION>>>) saem do
+    // prompt (o schema as substitui, com as regras nos `.describe()`); TODO o
+    // resto (comportamento, contexto, guardas) permanece. Default false =
+    // caminho Copilot/marcador intacto.
+    structuredOutput = false,
   ): string {
     const lines: string[] = [];
 
@@ -4501,7 +5458,12 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
         lines.push('');
         lines.push(
           '⚠️ Esta task ainda NÃO tem DOD. Como estamos na fase de ANÁLISE, é VOCÊ quem ' +
-            'deve DEFINIR o Definition of Done: emita no `KANBAN_RESULT` o campo ' +
+            'deve DEFINIR o Definition of Done: ' +
+            // US-F3.5 — no runner com schema o campo vive no resultado
+            // estruturado, não num bloco de marcador.
+            (structuredOutput
+              ? 'preencha no seu resultado estruturado o campo '
+              : 'emita no `KANBAN_RESULT` o campo ') +
             '`proposedDod` — uma lista de strings curtas e objetivas (3 a 7 itens), cada uma ' +
             'um critério verificável de conclusão desta task. Não invente ids; apenas ' +
             'proponha os textos. O sistema criará os itens e nas próximas iterações você os ' +
@@ -4528,21 +5490,77 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     // #3: histórico COMPLETO das iterações anteriores desta task, para a AI não
     // repetir erros de tentativas passadas. A última iteração entra com o
     // `detail` completo; as anteriores são resumidas para não estourar o prompt.
-    // US-A1 (EP-A/ADR-0027) — injeta a MEMÓRIA VIVA do projeto (neurônios da
-    // colmeia recuperados em buildContext) ANTES do histórico. É o que impede
-    // o agent de começar "amnésico".
-    if (context.memoryNeurons?.length) {
+    // US-F2.5 (EP-F2) — memória recuperada por TRAVESSIA DE GRAFO. Três
+    // estados DISTINGUÍVEIS (o recall antigo colapsava todos em "nada"):
+    //  - ok com texto  → seção de memória (grafo);
+    //  - ok sem texto  → memória VAZIA de verdade: sem seção (como hoje);
+    //  - falha         → aviso EXPLÍCITO — uma IA que sabe que a memória está
+    //    indisponível age diferente de uma que acha que não há memória.
+    if (context.memoryGraph?.ok && context.memoryGraph.text.trim()) {
       lines.push('');
-      lines.push('## Memória do projeto (colmeia — ADR-0027) — leia antes de agir:');
+      lines.push('## Memória do projeto (grafo de conhecimento — ADR-0041) — leia antes de agir:');
       lines.push(
-        'Aprendizados acumulados por agents anteriores (decisões, convenções, armadilhas). ' +
-          'Use como contexto de trabalho; não repita erros já registrados aqui.',
+        'Contexto recuperado por travessia do grafo do projeto (código + neurônios da colmeia ' +
+          'ligados aos arquivos desta task). Use como contexto de trabalho; não repita erros já registrados.',
       );
-      for (const n of context.memoryNeurons) {
-        lines.push('');
-        lines.push(`### neurônio: ${n.path}${n.title ? ` — ${n.title}` : ''}`);
-        lines.push(n.content.trim());
-      }
+      lines.push(context.memoryGraph.text.trim());
+    } else if (context.memoryGraph?.ok && context.memoryGraph.noVocabMatch) {
+      // US-F5.3 — quarto estado: a consulta NÃO rodou porque o vocabulário da
+      // task (título/flows em português) não tem NENHUMA interseção com os
+      // labels do grafo (identificadores em inglês) e não havia arquivos para
+      // semear. Distinto de "não há memória" E de "memória falhou" — a skill
+      // do graphify manda dizer isso e PARAR, não fabricar busca.
+      lines.push('');
+      lines.push('## Memória do projeto: vocabulário da task não casa com o do grafo');
+      lines.push(
+        'A consulta à memória NÃO foi executada: nenhum termo do título/flows desta task existe ' +
+          'no vocabulário dos labels do grafo do projeto, e não há arquivos afetados para semear ' +
+          'a busca (US-F5.3 — a busca não é fabricada com termos que o grafo não tem). Isso NÃO ' +
+          'significa que não existem aprendizados: eles podem estar registrados sob outros termos. ' +
+          'Se precisar de histórico, consulte o grafo usando identificadores REAIS do código ' +
+          '(nomes de símbolos e arquivos).',
+      );
+    } else if (context.memoryGraph && !context.memoryGraph.ok) {
+      lines.push('');
+      lines.push('## ⚠️ Memória do projeto INDISPONÍVEL nesta iteração');
+      lines.push(
+        `A consulta à memória falhou (${context.memoryGraph.error}). ` +
+          'NÃO conclua que não existem aprendizados anteriores — eles podem existir e estar ' +
+          'inacessíveis agora. Prossiga com cautela redobrada em decisões que dependeriam de histórico.',
+      );
+    }
+
+    // US-F5.5 (EP-F5) — regras canônicas do graphify (always_on/claude-md.md)
+    // TRADUZIDAS para a superfície REAL destes agents: tools MCP + Wiki via
+    // API. NUNCA os comandos de CLI do texto original (`graphify query/path/
+    // explain/update`) — o agent não os tem; instrução que falha queima
+    // iteração. Condição = `memoryGraph.ok` (grafo `ready`, resolvido pelo
+    // recall da US-F2.5) + projectId: Board legado, grafo indisponível ou
+    // integração desligada ⇒ seção OMITIDA (não prometer grafo que não existe).
+    if (context.memoryGraph?.ok && context.graphProjectId) {
+      const wikiUrl = `http://127.0.0.1:${this.config.apiPort}/projects/${context.graphProjectId}/wiki`;
+      lines.push('');
+      lines.push('## Grafo de conhecimento do projeto (consulte ANTES de varrer arquivos)');
+      lines.push(
+        '- Para pergunta sobre o código ("quem chama X?", "o que depende de Y?"), consulte o ' +
+          'grafo pelas tools MCP do graphify (`query_graph`, `get_node`, `get_neighbors`, ' +
+          '`shortest_path`, `god_nodes`) ANTES de varrer arquivo por arquivo com grep. Grafo ' +
+          `DESTE projeto: \`project_path: "${GRAPHIFY_PROJECTS_HOME}/${context.graphProjectId}"\`.`,
+      );
+      lines.push(
+        '- A busca casa IDENTIFICADORES REAIS do código (nome de símbolo, caminho de arquivo), ' +
+          'por substring — prosa em português NÃO encontra nada. Monte a consulta com nomes que ' +
+          'existem no código.',
+      );
+      lines.push(
+        `- Para orientação ampla ("como isso se encaixa"), leia a Wiki do projeto: \`curl ${wikiUrl}\` ` +
+          `(índice por comunidade e god nodes) e \`curl '${wikiUrl}/article?slug=<slug>'\` para um ` +
+          'artigo — prefira-a a ler fonte crua quando a dúvida é estrutural.',
+      );
+      lines.push(
+        '- NÃO tente atualizar o grafo após editar código: o loop o reconstrói automaticamente ' +
+          'ao fim da iteração.',
+      );
     }
 
     // US-CTX3 (EP-CTX/ADR-0040) — continuação DIRECIONADA. Quando o run anterior
@@ -4626,6 +5644,23 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
       lines.push(`- Primeiro passo do profile: ${profile.firstStep}`);
     }
 
+    // US-F3.6 (ADR-0042) — retomada HITL pós-restart. Presente APENAS quando a
+    // resposta humana chegou pelo caminho de resiliência do ADR-0022 (restart)
+    // e nenhuma iteração a consumiu ainda. Vem DEPOIS do histórico: é a palavra
+    // mais recente, o mesmo papel do "Decisão humana (HITL)" que o fluxo sem
+    // restart injeta via handoffNextStep.
+    if (context.hitlResume) {
+      lines.push('');
+      lines.push('## 🙋 Decisão humana recebida (HITL) — retome a partir dela');
+      lines.push(
+        'A iteração anterior pausou aguardando resposta humana e foi interrompida ' +
+          'antes de consumi-la. A troca abaixo é a informação mais recente desta task — ' +
+          'NÃO repita a pergunta; continue o trabalho a partir da resposta.',
+      );
+      lines.push(`- Pergunta: ${context.hitlResume.prompt}`);
+      lines.push(`- Resposta do humano: ${context.hitlResume.answer}`);
+    }
+
     // #2: contexto REAL — diff acumulado do worktree (o que JÁ foi mudado nas
     // iterações anteriores desta task). Dá à AI o estado concreto do código, não
     // só o histórico textual. Truncado no prompt para não estourar o contexto.
@@ -4683,7 +5718,23 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     );
 
     // Contrato de SAÍDA — obrigatório. É assim que a AI reporta progresso.
+    // US-F3.5 — quando o runner ativo usa `outputSchema`, o FORMATO sai do
+    // prompt: as linhas do bloco de marcador e as "Regras do bloco" vivem no
+    // schema (constraints + `.describe()`). Tudo que NÃO é formato (verificação
+    // antes do done, granularidade, guardas, contexto) permanece nas seções
+    // vizinhas, iguais para os dois caminhos.
     lines.push('');
+    if (structuredOutput) {
+      lines.push('## OBRIGATÓRIO — resultado estruturado da iteração');
+      lines.push(
+        'Faça o trabalho da fase atual (leia/edite arquivos no diretório atual conforme necessário). ' +
+          'Sua resposta final é um OBJETO ESTRUTURADO validado por schema — NÃO emita blocos ' +
+          '`<<<KANBAN_RESULT>>>`/`<<<KANBAN_QUESTION>>>` nem texto fora do objeto. ' +
+          'As regras de cada campo estão nas descrições do próprio schema; siga-as. ' +
+          'Emita EXATAMENTE UMA variante: `result` (progresso desta iteração) OU ' +
+          '`question` (decisão humana necessária).',
+      );
+    } else {
     lines.push('## OBRIGATÓRIO — formato da sua resposta');
     lines.push(
       'Faça o trabalho da fase atual (leia/edite arquivos no diretório atual conforme necessário). ' +
@@ -4727,6 +5778,7 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
         'é assim que o projeto deixa de recomeçar amnésico. NÃO invente; só registre o que for verdadeiro e útil. Omita se não houver nada durável.',
     );
     lines.push('- `evidence`: obrigatório quando `done: true` — resuma a verificação que você fez (ver seção abaixo).');
+    } // fim do formato de marcador (US-F3.5: ausente no runner com schema)
 
     // #6: exigir que a AI verifique o próprio trabalho ANTES de marcar done.
     lines.push('');
@@ -4751,8 +5803,21 @@ export class Orchestrator implements OnModuleInit, OnModuleDestroy {
     lines.push('- Se o projeto NÃO tiver como verificar (sem testes/scripts), diga isso explicitamente em `evidence` (ex.: "sem suíte de testes no projeto — verificação manual da lógica").');
 
     // #6: canal ESTRUTURADO de pergunta (HITL). Substitui a instrução vaga.
+    // US-F3.5 — no runner com schema o canal é a variante `question` da união
+    // (emitir os dois é impossível por construção — R12); as regras de forma
+    // (UMA pergunta, 2–4 options) vivem nos `.describe()` do schema.
     lines.push('');
     lines.push('## Quando precisar de decisão humana (HITL)');
+    if (structuredOutput) {
+      lines.push(
+        'Se você precisar de uma decisão do humano para continuar, responda com a variante ' +
+          '`question` do resultado estruturado (em vez de `result`): UMA pergunta objetiva, ' +
+          'com 2 a 4 `options` curtas quando houver alternativas (o humano pode sempre ' +
+          'responder livremente). A task fica aguardando; a resposta chega no handoff da ' +
+          'próxima iteração.',
+      );
+      return lines.join('\n');
+    }
     lines.push(
       'Se você precisar de uma decisão do humano para continuar, NÃO emita `KANBAN_RESULT` ' +
         'nesta resposta. Em vez disso, emita — como ÚLTIMA coisa — um bloco EXATAMENTE assim:',

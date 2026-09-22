@@ -219,9 +219,6 @@ function makeOrchestratorWithQueue(queue: FakeWakeupQueue) {
   const workspaces = {} as any;
   const realtime = { broadcast: noop } as any;
   const runner = {} as any;
-  const memoryIndex = {} as any;
-  const memoryGit = {} as any;
-  const memoryBootstrap = {} as any;
   const orch = new Orchestrator(
     prisma,
     sessions,
@@ -230,9 +227,6 @@ function makeOrchestratorWithQueue(queue: FakeWakeupQueue) {
     realtime,
     runner,
     config,
-    memoryIndex,
-    memoryGit,
-    memoryBootstrap,
     queue as any,
   );
   const wakes: string[] = [];

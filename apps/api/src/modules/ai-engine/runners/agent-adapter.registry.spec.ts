@@ -86,10 +86,14 @@ test('resolve("mock") → MockAgentRunner', () => {
   assert.equal(resolved.id, 'mock');
 });
 
-test('resolve de kind não-wired (claude) cai no default copilot-cli', () => {
+test('US-F3.9: claude/codex/gemini têm runner dedicado (não caem mais no default)', () => {
+  // Substitui o caso pré-F3.9 "kind não-wired cai no default": os três vendors
+  // agora resolvem para o TanStackRunner com o adapter oficial de cada um.
   const { registry, cli } = makeRegistry('copilot-cli');
   for (const kind of ['claude', 'codex', 'gemini'] as AgentAdapterKind[]) {
-    assert.equal(registry.resolve(kind), cli, `kind ${kind} deve cair no default`);
+    const runner = registry.resolve(kind);
+    assert.notEqual(runner, cli, `kind ${kind} não deve cair no default`);
+    assert.equal(runner.id, kind);
   }
 });
 

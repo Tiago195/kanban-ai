@@ -1,0 +1,140 @@
+- generic [ref=f10e3]:
+  - banner [ref=f10e936]:
+    - heading "Sprint Board" [level=1] [ref=f10e937]
+    - generic [ref=f10e938]:
+      - searchbox "Buscar cards" [ref=f10e939]
+      - combobox "Filtrar por label" [ref=f10e940]:
+        - option "Todas as labels" [selected]
+        - option "Bug"
+        - option "Feature"
+        - option "Chore"
+        - option "Docs"
+        - option "Urgent"
+      - combobox "Filtrar por agente" [ref=f10e941]:
+        - option "Todos os agentes" [selected]
+        - option "Claude-Dev"
+        - option "GPT-Reviewer"
+        - option "Copilot-QA"
+      - button "✨ Criar backlog" [ref=f10e942] [cursor=pointer]
+      - button "🤖 Agentes" [ref=f10e943] [cursor=pointer]
+      - button "🗄️ Projetos" [ref=f10e944] [cursor=pointer]
+      - button "🗂️ Explorador" [ref=f10e945] [cursor=pointer]
+      - button "🔁 Loops" [ref=f10e946] [cursor=pointer]
+      - button "🔕 Review OFF" [ref=f10e947] [cursor=pointer]
+      - button "+ Coluna" [ref=f10e948] [cursor=pointer]
+      - button "⤓ Export" [ref=f10e949] [cursor=pointer]
+      - button "⤒ Import" [ref=f10e950] [cursor=pointer]
+      - combobox "Selecionar tema" [ref=f10e951] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+  - generic [ref=f10e952]:
+    - generic [ref=f10e953]:
+      - generic [ref=f10e954]: Épicos
+      - generic [ref=f10e955]: "2"
+    - generic [ref=f10e956]:
+      - generic [ref=f10e957]: Histórias
+      - generic [ref=f10e958]: "5"
+    - generic [ref=f10e959]:
+      - generic [ref=f10e960]: Tasks
+      - generic [ref=f10e961]: "6"
+    - generic [ref=f10e962]:
+      - generic [ref=f10e963]: Pontos concluídos
+      - generic [ref=f10e964]: "0"
+      - generic [ref=f10e965]: /
+      - generic [ref=f10e966]: "21"
+    - generic "Progresso da sprint (story points)" [ref=f10e967]
+    - generic [ref=f10e968]:
+      - generic [ref=f10e969]: Bloqueados
+      - generic [ref=f10e970]: "1"
+  - generic [ref=f10e971]:
+    - complementary [ref=f10e972]:
+      - generic [ref=f10e973]:
+        - generic [ref=f10e974]: ÉPICOS
+        - generic [ref=f10e975]: "2"
+        - button "+ Épico" [ref=f10e976] [cursor=pointer]
+      - generic [ref=f10e977]:
+        - generic [ref=f10e978] [cursor=pointer]:
+          - generic [ref=f10e979]:
+            - generic [ref=f10e980]: EP-1
+            - generic [ref=f10e981]: IN PROGRESS
+          - generic [ref=f10e982]: Onboarding de novos clientes
+          - generic [ref=f10e984]: 🧩 0/4 histórias
+        - generic [ref=f10e986] [cursor=pointer]:
+          - generic [ref=f10e987]:
+            - generic [ref=f10e988]: EP-19
+            - generic [ref=f10e989]: IN PROGRESS
+          - generic [ref=f10e990]: AUDIT-F2 epico
+          - generic [ref=f10e992]: 🧩 0/1 histórias
+    - generic [ref=f10e994]:
+      - generic [ref=f10e995]:
+        - generic [ref=f10e996]:
+          - generic [ref=f10e997]: Backlog
+          - generic [ref=f10e998]: "1"
+          - generic [ref=f10e999]: 5 pts
+        - button "STORY US-8 5 Auditoria de acesso EP-1 · Onboarding de novos clientes 📝" [ref=f10e1001] [cursor=pointer]:
+          - generic [ref=f10e1002]:
+            - generic [ref=f10e1003]: STORY
+            - generic [ref=f10e1004]: US-8
+            - generic [ref=f10e1005]: "5"
+          - generic [ref=f10e1006]: Auditoria de acesso
+          - generic "Onboarding de novos clientes" [ref=f10e1007]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f10e1008]: 📝
+        - button "+ Adicionar história" [ref=f10e1010] [cursor=pointer]
+      - generic [ref=f10e1011]:
+        - generic [ref=f10e1012]:
+          - generic [ref=f10e1013]: To Do
+          - generic [ref=f10e1014]: "1"
+          - generic [ref=f10e1015]: 3 pts
+          - generic [ref=f10e1016]: 1/5
+        - button "STORY US-6 ⛔ 3 Recuperação de senha EP-1 · Onboarding de novos clientes 📝" [ref=f10e1018] [cursor=pointer]:
+          - generic [ref=f10e1019]:
+            - generic [ref=f10e1020]: STORY
+            - generic [ref=f10e1021]: US-6
+            - generic [ref=f10e1022]: ⛔
+            - generic [ref=f10e1023]: "3"
+          - generic [ref=f10e1024]: Recuperação de senha
+          - generic "Onboarding de novos clientes" [ref=f10e1025]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f10e1026]: 📝
+        - button "+ Adicionar história" [ref=f10e1028] [cursor=pointer]
+      - generic [ref=f10e1029]:
+        - generic [ref=f10e1030]:
+          - generic [ref=f10e1031]: In Progress
+          - generic [ref=f10e1032]: "2"
+          - generic [ref=f10e1033]: 5 pts
+          - generic [ref=f10e1034]: 2/3
+        - generic [ref=f10e1035]:
+          - button "STORY US-20 🙋 task precisa de você Validar separador vazio no slugify EP-19 · AUDIT-F2 epico" [ref=f10e1036] [cursor=pointer]:
+            - generic [ref=f10e1037]:
+              - generic [ref=f10e1038]: STORY
+              - generic [ref=f10e1039]: US-20
+              - generic "Uma task desta história precisa de você — abra a história para responder no chat da task." [ref=f10e1040]: 🙋 task precisa de você
+            - generic [ref=f10e1041]: Validar separador vazio no slugify
+            - generic "AUDIT-F2 epico" [ref=f10e1042]: EP-19 · AUDIT-F2 epico
+          - button "STORY US-2 5 🙋 task precisa de você Cadastro com e-mail e senha EP-1 · Onboarding de novos clientes 📝" [ref=f10e1043] [cursor=pointer]:
+            - generic [ref=f10e1044]:
+              - generic [ref=f10e1045]: STORY
+              - generic [ref=f10e1046]: US-2
+              - generic [ref=f10e1047]: "5"
+              - generic "Uma task desta história precisa de você — abra a história para responder no chat da task." [ref=f10e1048]: 🙋 task precisa de você
+            - generic [ref=f10e1049]: Cadastro com e-mail e senha
+            - generic "Onboarding de novos clientes" [ref=f10e1050]: EP-1 · Onboarding de novos clientes
+            - generic [ref=f10e1051]: 📝
+      - generic [ref=f10e1053]:
+        - generic [ref=f10e1054]:
+          - generic [ref=f10e1055]: Review
+          - generic [ref=f10e1056]: "1"
+          - generic [ref=f10e1057]: 8 pts
+          - generic [ref=f10e1058]: 1/3
+        - button "STORY US-7 8 Dashboard inicial EP-1 · Onboarding de novos clientes 📝" [ref=f10e1060] [cursor=pointer]:
+          - generic [ref=f10e1061]:
+            - generic [ref=f10e1062]: STORY
+            - generic [ref=f10e1063]: US-7
+            - generic [ref=f10e1064]: "8"
+          - generic [ref=f10e1065]: Dashboard inicial
+          - generic "Onboarding de novos clientes" [ref=f10e1066]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f10e1067]: 📝
+      - generic [ref=f10e1070]:
+        - generic [ref=f10e1071]: Done
+        - generic [ref=f10e1072]: "0"
+    - status [ref=f10e1074]

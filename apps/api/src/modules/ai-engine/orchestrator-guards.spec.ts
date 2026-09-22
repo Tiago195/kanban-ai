@@ -8,9 +8,6 @@ import type { ValidationRunner } from './validators/validation.runner';
 import type { AgentRunner } from './runners/agent-runner.interface';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
 import { Orchestrator } from './orchestrator';
-import type { MemoryIndexService } from '../memory/memory-index.service';
-import type { MemoryGitService } from '../memory/memory-git.service';
-import type { MemoryBootstrapService } from '../memory/memory-bootstrap.service';
 import { BUILTIN_LOOP_PROFILES } from './loop-profiles/loop-profiles';
 
 /**
@@ -84,23 +81,6 @@ function makeValidation(): ValidationRunner {
 
 function makeRunner(): AgentRunner {
   return { run: async () => ({ detail: '', summary: '', dodTouched: [] }) } as unknown as AgentRunner;
-}
-
-// EP-A: fakes dos serviços de memória. O orchestrator os usa de forma
-// totalmente defensiva (try/catch), então stubs neutros bastam para os guards.
-function makeMemoryIndex(): MemoryIndexService {
-  return {
-    query: async () => [],
-    commitAndReindex: async () => ({ oid: 'x', branch: 'main', projection: {} }),
-  } as unknown as MemoryIndexService;
-}
-
-function makeMemoryGit(): MemoryGitService {
-  return { readNeuron: async () => null } as unknown as MemoryGitService;
-}
-
-function makeMemoryBootstrap(): MemoryBootstrapService {
-  return { bootstrapFromRepo: async () => [] } as unknown as MemoryBootstrapService;
 }
 
 /**
@@ -205,11 +185,8 @@ function makeOrchestrator(opts: {
     realtime.svc,
     makeRunner(),
     config,
-    makeMemoryIndex(),
-    makeMemoryGit(),
-    makeMemoryBootstrap(),
     undefined,
-    opts.projectWorkspace as unknown as ConstructorParameters<typeof Orchestrator>[11],
+    opts.projectWorkspace as unknown as ConstructorParameters<typeof Orchestrator>[8],
   );
   return { orch, config, prisma, sessions, realtime };
 }
@@ -545,9 +522,6 @@ test('createDerivedTask: cria derivada com derivedDepth+1 e dependência reversa
     realtime.svc,
     makeRunner(),
     makeConfig(),
-    makeMemoryIndex(),
-    makeMemoryGit(),
-    makeMemoryBootstrap(),
   );
 
   const derivedId = await orch.createDerivedTask('origin-1', {
@@ -588,9 +562,6 @@ test('countOpenDerivedForProblem: conta irmãs abertas pelo título canônico', 
     makeRealtime().svc,
     makeRunner(),
     makeConfig(),
-    makeMemoryIndex(),
-    makeMemoryGit(),
-    makeMemoryBootstrap(),
   );
 
   const n = await priv(orch).countOpenDerivedForProblem('story-1', 'parser quebrado');
@@ -620,9 +591,6 @@ test('countOpenDerivedForProblem: parentId nulo retorna 0 (sem irmãs)', async (
     makeRealtime().svc,
     makeRunner(),
     makeConfig(),
-    makeMemoryIndex(),
-    makeMemoryGit(),
-    makeMemoryBootstrap(),
   );
 
   const n = await priv(orch).countOpenDerivedForProblem(null, 'qualquer');
@@ -946,9 +914,6 @@ test('runIteration: fatalError do runner escala a humano, grava outcome=error e 
     realtime.svc,
     fatalRunner,
     config,
-    makeMemoryIndex(),
-    makeMemoryGit(),
-    makeMemoryBootstrap(),
   );
 
   // Stubs mínimos dos pré-requisitos privados para o controle chegar à branch
@@ -1054,9 +1019,6 @@ test('runIteration: diff VAZIO + dodTouched reportado -> marca o DOD (não zera)
     realtime.svc,
     runner,
     config,
-    makeMemoryIndex(),
-    makeMemoryGit(),
-    makeMemoryBootstrap(),
   );
 
   const p = priv(orch);
@@ -1165,9 +1127,6 @@ test('runIteration: requireMinArtifact ON + validação passa mas sem artefato m
     realtime.svc,
     runner,
     config,
-    makeMemoryIndex(),
-    makeMemoryGit(),
-    makeMemoryBootstrap(),
   );
 
   const p = priv(orch);
@@ -1275,9 +1234,6 @@ test('runIteration: requireMinArtifact ON + code-change COM diff -> fecha normal
     realtime.svc,
     runner,
     config,
-    makeMemoryIndex(),
-    makeMemoryGit(),
-    makeMemoryBootstrap(),
   );
 
   const p = priv(orch);
@@ -1456,40 +1412,7 @@ test('US-PROJ4: sem serializeByRepo, mesmo Project não serializa épicos distin
   assert.equal(conflict, null, 'épicos diferentes não conflitam por default (serializeByRepo=false)');
 });
 
-/**
- * (d) O namespace da memória é derivado do projectId — projetos distintos NÃO
- * colidem (a colmeia de cada Project vive sob `projects/<id>/…`).
- */
-test('US-PROJ4: namespace da memória é projects/<projectId> e isola projetos distintos', async () => {
-  const prismaA = makePrisma({
-    cardFindUnique: async () => ({ boardId: 'board-a', parentId: 'epic-1' }),
-    boardFindUnique: async () => ({ projectId: 'proj-A' }),
-  });
-  const prismaB = makePrisma({
-    cardFindUnique: async () => ({ boardId: 'board-b', parentId: 'epic-2' }),
-    boardFindUnique: async () => ({ projectId: 'proj-B' }),
-  });
-  const { orch: orchA } = makeOrchestrator({ prisma: prismaA });
-  const { orch: orchB } = makeOrchestrator({ prisma: prismaB });
-
-  const nsA = await priv(orchA).resolveMemoryNamespace('sA');
-  const nsB = await priv(orchB).resolveMemoryNamespace('sB');
-
-  assert.equal(nsA, 'projects/proj-A', 'namespace segue projects/<projectId>');
-  assert.equal(nsB, 'projects/proj-B');
-  assert.notEqual(nsA, nsB, 'projetos distintos → namespaces distintos (sem colisão)');
-});
-
-/**
- * (d') Sem Project, o namespace é `undefined` → colmeia GLOBAL legada
- * (`modules/<x>.md`), comportamento idêntico ao de hoje.
- */
-test('US-PROJ4: sem Project, namespace da memória é undefined (colmeia global legada)', async () => {
-  const prisma = makePrisma({
-    cardFindUnique: async () => ({ boardId: 'board-x', parentId: 'epic-1' }),
-    boardFindUnique: async () => ({ projectId: null }),
-  });
-  const { orch } = makeOrchestrator({ prisma });
-  const ns = await priv(orch).resolveMemoryNamespace('s1');
-  assert.equal(ns, undefined, 'sem Project → namespace undefined (global)');
-});
+// US-F2.3 — os testes (d)/(d') do namespace da memória (`resolveMemoryNamespace`)
+// morreram com o próprio conceito: sem bare repo compartilhado não há namespace —
+// o isolamento por Project é o próprio clone (`<clone>/.hive/**`), coberto por
+// project-explorer.hive.spec.ts e learning-write.spec.ts.

@@ -1,0 +1,158 @@
+- generic [ref=f2e3]:
+  - banner [ref=f2e4]:
+    - heading "Sprint Board" [level=1] [ref=f2e5]
+    - generic [ref=f2e6]:
+      - searchbox "Buscar cards" [ref=f2e7]
+      - combobox "Filtrar por label" [ref=f2e8]:
+        - option "Todas as labels" [selected]
+        - option "Bug"
+        - option "Feature"
+        - option "Chore"
+        - option "Docs"
+        - option "Urgent"
+      - combobox "Filtrar por agente" [ref=f2e9]:
+        - option "Todos os agentes" [selected]
+        - option "Claude-Dev"
+        - option "GPT-Reviewer"
+        - option "Copilot-QA"
+      - button "✨ Criar backlog" [ref=f2e10] [cursor=pointer]
+      - button "🤖 Agentes" [ref=f2e11] [cursor=pointer]
+      - button "🗄️ Projetos" [ref=f2e12] [cursor=pointer]
+      - button "🗂️ Explorador" [ref=f2e13] [cursor=pointer]
+      - button "🔁 Loops" [ref=f2e14] [cursor=pointer]
+      - button "🔕 Review OFF" [ref=f2e15] [cursor=pointer]
+      - button "+ Coluna" [ref=f2e16] [cursor=pointer]
+      - button "⤓ Export" [ref=f2e17] [cursor=pointer]
+      - button "⤒ Import" [ref=f2e18] [cursor=pointer]
+      - combobox "Selecionar tema" [ref=f2e19] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+  - generic [ref=f2e20]:
+    - generic [ref=f2e21]:
+      - generic [ref=f2e22]: Épicos
+      - generic [ref=f2e23]: "2"
+    - generic [ref=f2e24]:
+      - generic [ref=f2e25]: Histórias
+      - generic [ref=f2e26]: "5"
+    - generic [ref=f2e27]:
+      - generic [ref=f2e28]: Tasks
+      - generic [ref=f2e29]: "6"
+    - generic [ref=f2e30]:
+      - generic [ref=f2e31]: Pontos concluídos
+      - generic [ref=f2e32]: "0"
+      - generic [ref=f2e33]: /
+      - generic [ref=f2e34]: "21"
+    - generic "Progresso da sprint (story points)" [ref=f2e35]
+    - generic [ref=f2e36]:
+      - generic [ref=f2e37]: Bloqueados
+      - generic [ref=f2e38]: "1"
+  - generic [ref=f2e39]:
+    - complementary [ref=f2e50]:
+      - generic [ref=f2e51]:
+        - generic [ref=f2e52]: ÉPICOS
+        - generic [ref=f2e53]: "2"
+        - button "+ Épico" [ref=f2e54] [cursor=pointer]
+      - generic [ref=f2e55]:
+        - generic [ref=f2e56] [cursor=pointer]:
+          - generic [ref=f2e57]:
+            - generic [ref=f2e58]: EP-1
+            - generic [ref=f2e59]: IN PROGRESS
+          - generic [ref=f2e60]: Onboarding de novos clientes
+          - generic [ref=f2e62]: 🧩 0/4 histórias
+        - generic [ref=f2e64] [cursor=pointer]:
+          - generic [ref=f2e65]:
+            - generic [ref=f2e66]: EP-19
+            - generic [ref=f2e67]: IN PROGRESS
+          - generic [ref=f2e68]: AUDIT-F2 epico
+          - generic [ref=f2e70]: 🧩 0/1 histórias
+    - generic [ref=f2e72]:
+      - generic [ref=f2e73]:
+        - generic [ref=f2e74]:
+          - generic [ref=f2e75]: Backlog
+          - generic [ref=f2e76]: "1"
+          - generic [ref=f2e77]: 5 pts
+        - button "STORY US-8 5 Auditoria de acesso EP-1 · Onboarding de novos clientes 📝" [ref=f2e79] [cursor=pointer]:
+          - generic [ref=f2e80]:
+            - generic [ref=f2e81]: STORY
+            - generic [ref=f2e82]: US-8
+            - generic [ref=f2e83]: "5"
+          - generic [ref=f2e84]: Auditoria de acesso
+          - generic "Onboarding de novos clientes" [ref=f2e85]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f2e86]: 📝
+        - button "+ Adicionar história" [ref=f2e88] [cursor=pointer]
+      - generic [ref=f2e89]:
+        - generic [ref=f2e90]:
+          - generic [ref=f2e91]: To Do
+          - generic [ref=f2e92]: "1"
+          - generic [ref=f2e93]: 3 pts
+          - generic [ref=f2e94]: 1/5
+        - button "STORY US-6 ⛔ 3 Recuperação de senha EP-1 · Onboarding de novos clientes 📝" [ref=f2e96] [cursor=pointer]:
+          - generic [ref=f2e97]:
+            - generic [ref=f2e98]: STORY
+            - generic [ref=f2e99]: US-6
+            - generic [ref=f2e100]: ⛔
+            - generic [ref=f2e101]: "3"
+          - generic [ref=f2e102]: Recuperação de senha
+          - generic "Onboarding de novos clientes" [ref=f2e103]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f2e104]: 📝
+        - button "+ Adicionar história" [ref=f2e106] [cursor=pointer]
+      - generic [ref=f2e107]:
+        - generic [ref=f2e108]:
+          - generic [ref=f2e109]: In Progress
+          - generic [ref=f2e110]: "2"
+          - generic [ref=f2e111]: 5 pts
+          - generic [ref=f2e112]: 2/3
+        - generic [ref=f2e113]:
+          - button "STORY US-20 🙋 task precisa de você Validar separador vazio no slugify EP-19 · AUDIT-F2 epico" [ref=f2e114] [cursor=pointer]:
+            - generic [ref=f2e115]:
+              - generic [ref=f2e116]: STORY
+              - generic [ref=f2e117]: US-20
+              - generic "Uma task desta história precisa de você — abra a história para responder no chat da task." [ref=f2e118]: 🙋 task precisa de você
+            - generic [ref=f2e119]: Validar separador vazio no slugify
+            - generic "AUDIT-F2 epico" [ref=f2e120]: EP-19 · AUDIT-F2 epico
+          - button "STORY US-2 5 🙋 task precisa de você Cadastro com e-mail e senha EP-1 · Onboarding de novos clientes 📝" [ref=f2e121] [cursor=pointer]:
+            - generic [ref=f2e122]:
+              - generic [ref=f2e123]: STORY
+              - generic [ref=f2e124]: US-2
+              - generic [ref=f2e125]: "5"
+              - generic "Uma task desta história precisa de você — abra a história para responder no chat da task." [ref=f2e126]: 🙋 task precisa de você
+            - generic [ref=f2e127]: Cadastro com e-mail e senha
+            - generic "Onboarding de novos clientes" [ref=f2e128]: EP-1 · Onboarding de novos clientes
+            - generic [ref=f2e129]: 📝
+      - generic [ref=f2e131]:
+        - generic [ref=f2e132]:
+          - generic [ref=f2e133]: Review
+          - generic [ref=f2e134]: "1"
+          - generic [ref=f2e135]: 8 pts
+          - generic [ref=f2e136]: 1/3
+        - button "STORY US-7 8 Dashboard inicial EP-1 · Onboarding de novos clientes 📝" [ref=f2e138] [cursor=pointer]:
+          - generic [ref=f2e139]:
+            - generic [ref=f2e140]: STORY
+            - generic [ref=f2e141]: US-7
+            - generic [ref=f2e142]: "8"
+          - generic [ref=f2e143]: Dashboard inicial
+          - generic "Onboarding de novos clientes" [ref=f2e144]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f2e145]: 📝
+      - generic [ref=f2e148]:
+        - generic [ref=f2e149]: Done
+        - generic [ref=f2e150]: "0"
+    - status [ref=f2e152]
+  - generic [ref=f2e43]:
+    - generic [ref=f2e45]:
+      - heading "🗂️ Explorador" [level=2] [ref=f2e46]
+      - button "Fechar" [ref=f2e47] [cursor=pointer]: ✕
+    - generic [ref=f2e48]:
+      - tablist [ref=f2e153]:
+        - tab "📁 Repositório" [ref=f2e154] [cursor=pointer]
+        - tab "🐝 O que a AI sabe" [active] [selected] [ref=f2e155] [cursor=pointer]
+        - tab "🕸️ Grafo" [ref=f2e156] [cursor=pointer]
+        - tab "📖 Wiki" [ref=f2e157] [cursor=pointer]
+      - generic [ref=f2e158]:
+        - generic [ref=f2e159]: 📁 Projeto
+        - combobox [ref=f2e160]:
+          - option "audit-f44-slugify — https://github.com/simov/slugify.git" [selected]
+          - option "array-move — https://github.com/sindresorhus/array-move"
+      - generic [ref=f2e1136]:
+        - generic [ref=f2e1137]: A AI ainda não aprendeu nada
+        - generic [ref=f2e1138]: Quando os agents rodarem, os neurônios que eles aprenderem aparecem aqui.

@@ -1,0 +1,23 @@
+- generic [ref=f19e4]:
+  - complementary "Áreas do explorador" [ref=f19e5]:
+    - button "Voltar ao quadro" [ref=f19e6] [cursor=pointer]:
+      - generic [ref=f19e7]: ←
+    - navigation "Áreas" [ref=f19e9]:
+      - button "Projetos" [ref=f19e10] [cursor=pointer]:
+        - generic [ref=f19e11]: 🗄️
+      - button "O que a AI sabe" [disabled] [ref=f19e13]:
+        - generic [ref=f19e14]: 🐝
+      - button "Grafo" [disabled] [ref=f19e16]:
+        - generic [ref=f19e17]: 🕸️
+      - button "Wiki" [disabled] [ref=f19e19]:
+        - generic [ref=f19e20]: 📖
+  - generic [ref=f19e22]:
+    - banner [ref=f19e23]:
+      - heading "Grafo" [level=1] [ref=f19e24]: 🕸️ Grafo
+      - generic [ref=f19e25]: o grafo de conhecimento do código
+      - combobox "Selecionar tema" [ref=f19e26] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+    - main [ref=f19e27]:
+      - generic [ref=f19e28]: Carregando projetos…

@@ -1,10 +1,20 @@
 import { useState } from "react";
 
-import type { Project, ProjectAuthKind, ProjectCloneState } from "@kanban-ai/shared";
+import type {
+  Project,
+  ProjectAuthKind,
+  ProjectCloneState,
+  ProjectKnowledgeSummary,
+} from "@kanban-ai/shared";
 
 import { showToast } from "@/shared/services/toastStore";
 
-import { useProjects, useSyncProject } from "../hooks/useProjectExplorer";
+import {
+  useProjects,
+  useProjectsKnowledge,
+  useSyncProject,
+} from "../hooks/useProjectExplorer";
+import { cloneStateBadge, knowledgeFacts } from "../lib/projectCard";
 import {
   useCreateProject,
   useDeleteProject,
@@ -15,105 +25,95 @@ import {
  * EP-PROJECT / US-PROJ6 — onboarding de Projects: registrar um repo git por URL,
  * ver o estado do clone AO VIVO (badge dirigido pelo evento WS
  * `project.clone_state`), listar os Projects, associar o Project ao quadro
- * (`Board.projectId`) e abrir o Project Explorer (US-PROJ7) de cada um.
+ * (`Board.projectId`) e explorar cada um.
+ *
+ * US-UX.1 — deixou de ser modal: agora é o PAINEL da área "Projetos" dentro
+ * da moldura do Explorador (`/explorer/:projectId/projects`). O conteúdo é o
+ * mesmo do antigo `/projects`; só a moldura mudou. "Explorar" um projeto da
+ * lista SELECIONA o projeto na URL da área (o repo/memória/grafo/wiki passam
+ * a ser dele).
  *
  * SÓ leitura/escrita via a superfície pública da feature — nada de importar
  * internals de outra feature.
  */
-export function ProjectsManager({
+export function ProjectsPanel({
   boardId,
   boardProjectId,
-  onClose,
   onOpenExplorer,
 }: {
   boardId: string | null;
   boardProjectId: string | null;
-  onClose: () => void;
-  onOpenExplorer: () => void;
+  onOpenExplorer: (projectId: string) => void;
 }) {
   const projectsQuery = useProjects();
   const projects = projectsQuery.data ?? [];
+  // US-UX.4 — estado do conhecimento de TODOS os projetos numa requisição só
+  // (`GET /projects/summary`) — alimenta a faixa de cada card.
+  const knowledgeQuery = useProjectsKnowledge();
+  const knowledge = knowledgeQuery.data ?? [];
   const [showForm, setShowForm] = useState(false);
 
   return (
-    <div
-      className="modal-layer"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="modal-panel" onClick={(event) => event.stopPropagation()}>
-        <div className="kb-modal">
-          <div className="modal-header">
-            <div className="modal-title-row">
-              <h2 style={{ margin: 0, fontSize: 16 }}>🗄️ Projetos (repositórios git)</h2>
-              <button className="modal-close" onClick={onClose} aria-label="Fechar">
-                ✕
-              </button>
-            </div>
+    <div data-testid="projects-panel">
+      <div className="modal-section" style={{ marginBottom: 12 }}>
+        <div
+          className="field-row"
+          style={{ justifyContent: "space-between", alignItems: "center" }}
+        >
+          <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            Cole a URL de um repositório git (https ou ssh) — o kanban-ai clona e gerencia.
           </div>
-          <div className="modal-body">
-            <div className="modal-section" style={{ marginBottom: 12 }}>
-              <div
-                className="field-row"
-                style={{ justifyContent: "space-between", alignItems: "center" }}
-              >
-                <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                  Cole a URL de um repositório git (https ou ssh) — o kanban-ai clona e gerencia.
-                </div>
-                <button
-                  className="kb-btn kb-btn-primary kb-btn-sm"
-                  data-testid="open-create-project"
-                  onClick={() => setShowForm((v) => !v)}
-                >
-                  {showForm ? "Cancelar" : "➕ Novo projeto"}
-                </button>
-              </div>
-            </div>
-
-            {showForm ? (
-              <ProjectCreateForm
-                existing={projects}
-                onCreated={() => setShowForm(false)}
-              />
-            ) : null}
-
-            <div className="modal-section">
-              <div className="modal-section-title">Seus projetos</div>
-              {projectsQuery.isLoading ? (
-                <div style={{ color: "var(--text-muted)" }}>Carregando projetos…</div>
-              ) : projects.length === 0 ? (
-                <div
-                  data-testid="projects-empty"
-                  style={{
-                    textAlign: "center",
-                    padding: "24px 16px",
-                    color: "var(--text-muted)",
-                    border: "1px dashed var(--border)",
-                    borderRadius: 8,
-                  }}
-                >
-                  <div style={{ fontSize: 14, fontWeight: 600 }}>Nenhum projeto ainda</div>
-                  <div style={{ fontSize: 12, marginTop: 6 }}>
-                    Clique em “Novo projeto” e cole a URL de um repositório git.
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: "grid", gap: 8 }} data-testid="projects-list">
-                  {projects.map((project) => (
-                    <ProjectRow
-                      key={project.id}
-                      project={project}
-                      boardId={boardId}
-                      isBoardProject={boardProjectId === project.id}
-                      onOpenExplorer={onOpenExplorer}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+          <button
+            className="kb-btn kb-btn-primary kb-btn-sm"
+            data-testid="open-create-project"
+            onClick={() => setShowForm((v) => !v)}
+          >
+            {showForm ? "Cancelar" : "➕ Novo projeto"}
+          </button>
         </div>
+      </div>
+
+      {showForm ? (
+        <ProjectCreateForm
+          existing={projects}
+          onCreated={() => setShowForm(false)}
+        />
+      ) : null}
+
+      <div className="modal-section">
+        <div className="modal-section-title">Seus projetos</div>
+        {projectsQuery.isLoading ? (
+          <div style={{ color: "var(--text-muted)" }}>Carregando projetos…</div>
+        ) : projects.length === 0 ? (
+          <div
+            data-testid="projects-empty"
+            style={{
+              textAlign: "center",
+              padding: "24px 16px",
+              color: "var(--text-muted)",
+              border: "1px dashed var(--border)",
+              borderRadius: 8,
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 600 }}>Nenhum projeto ainda</div>
+            <div style={{ fontSize: 12, marginTop: 6 }}>
+              Clique em “Novo projeto” e cole a URL de um repositório git.
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }} data-testid="projects-list">
+            {projects.map((project) => (
+              <ProjectRow
+                key={project.id}
+                project={project}
+                summary={knowledge.find((k) => k.projectId === project.id)}
+                boardId={boardId}
+                isBoardProject={boardProjectId === project.id}
+                onOpenExplorer={() => onOpenExplorer(project.id)}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -315,15 +315,23 @@ function ProjectCreateForm({
   );
 }
 
-// ── Linha de um projeto na lista ─────────────────────────────────────────────
+// ── Card de um projeto na lista (US-UX.4) ────────────────────────────────────
 
+/**
+ * US-UX.4 — cada projeto é um CARD com a faixa de estado do conhecimento
+ * (clone · grafo · wiki · memória): um olhar responde "o que a AI tem sobre
+ * este repo?". Estado é badge (nunca palavra solta), falha grita, e `Excluir`
+ * saiu da linha principal — vive no rodapé, atrás de confirmação inline.
+ */
 function ProjectRow({
   project,
+  summary,
   boardId,
   isBoardProject,
   onOpenExplorer,
 }: {
   project: Project;
+  summary: ProjectKnowledgeSummary | undefined;
   boardId: string | null;
   isBoardProject: boolean;
   onOpenExplorer: () => void;
@@ -331,53 +339,29 @@ function ProjectRow({
   const sync = useSyncProject(project.id);
   const deleteProject = useDeleteProject();
   const setBoardProject = useSetBoardProject(boardId);
+  // US-UX.4 — exclusão em dois passos: o botão discreto do rodapé só ARMA a
+  // confirmação; o destrutivo de verdade fica no bloco de confirmação.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const facts = knowledgeFacts({
+    cloneState: project.cloneState,
+    graphState: project.graphState,
+    summary,
+  });
+  const hasFailure = project.cloneState === "failed" || project.graphState === "failed";
 
   return (
     <div
-      className="field-row"
+      className={"project-card" + (hasFailure ? " project-card-failed" : "")}
       data-testid="project-row"
-      style={{
-        justifyContent: "space-between",
-        alignItems: "flex-start",
-        gap: 12,
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        padding: 12,
-      }}
     >
-      <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <div className="project-card-head">
+        <div className="project-card-title">
           <strong>{project.name}</strong>
           <CloneStateBadge state={project.cloneState} />
           {isBoardProject ? <span className="chip chip-ok">quadro atual</span> : null}
         </div>
-        <code
-          style={{
-            fontSize: 11,
-            color: "var(--text-muted)",
-            wordBreak: "break-all",
-          }}
-        >
-          {project.repoUrl}
-        </code>
-        {project.cloneState === "failed" && project.lastError ? (
-          <div
-            data-testid="project-last-error"
-            style={{ fontSize: 12, color: "var(--danger, #d33)" }}
-            title={project.lastError}
-          >
-            ⚠️ {project.lastError}
-          </div>
-        ) : null}
-        {project.lastSyncedAt ? (
-          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-            última sincronização: {new Date(project.lastSyncedAt).toLocaleString()}
-          </span>
-        ) : null}
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div className="project-card-actions">
           <button
             className="kb-btn kb-btn-ghost kb-btn-sm"
             data-testid="project-open-explorer"
@@ -399,66 +383,126 @@ function ProjectRow({
           >
             {sync.isPending ? "Sincronizando…" : "🔄 Sync"}
           </button>
-          <button
-            className="kb-btn kb-btn-danger kb-btn-sm"
-            data-testid="project-delete"
-            disabled={deleteProject.isPending}
-            onClick={() => {
-              if (!window.confirm(`Excluir o projeto "${project.name}"?`)) return;
-              deleteProject.mutate(project.id, {
-                onSuccess: () => showToast("Projeto excluído"),
-                onError: () => showToast("Falha ao excluir"),
-              });
-            }}
-          >
-            Excluir
-          </button>
+          {boardId ? (
+            <button
+              className={"kb-btn kb-btn-sm " + (isBoardProject ? "kb-btn-ghost" : "kb-btn-primary")}
+              data-testid="project-associate-board"
+              disabled={setBoardProject.isPending}
+              title={
+                isBoardProject
+                  ? "Desassociar este projeto do quadro atual"
+                  : "Associar este projeto ao quadro atual (Board.projectId)"
+              }
+              onClick={() =>
+                setBoardProject.mutate(isBoardProject ? null : project.id, {
+                  onSuccess: () =>
+                    showToast(isBoardProject ? "Projeto desassociado do quadro" : "Projeto associado ao quadro"),
+                  onError: () => showToast("Falha ao associar projeto ao quadro"),
+                })
+              }
+            >
+              {setBoardProject.isPending
+                ? "Salvando…"
+                : isBoardProject
+                  ? "✓ Associado — remover"
+                  : "🔗 Associar ao quadro"}
+            </button>
+          ) : null}
         </div>
-        {boardId ? (
-          <button
-            className={"kb-btn kb-btn-sm " + (isBoardProject ? "kb-btn-ghost" : "kb-btn-primary")}
-            data-testid="project-associate-board"
-            disabled={setBoardProject.isPending}
-            title={
-              isBoardProject
-                ? "Desassociar este projeto do quadro atual"
-                : "Associar este projeto ao quadro atual (Board.projectId)"
-            }
-            onClick={() =>
-              setBoardProject.mutate(isBoardProject ? null : project.id, {
-                onSuccess: () =>
-                  showToast(isBoardProject ? "Projeto desassociado do quadro" : "Projeto associado ao quadro"),
-                onError: () => showToast("Falha ao associar projeto ao quadro"),
-              })
-            }
-          >
-            {setBoardProject.isPending
-              ? "Salvando…"
-              : isBoardProject
-                ? "✓ Associado — remover"
-                : "🔗 Associar ao quadro"}
-          </button>
-        ) : null}
       </div>
+
+      <code className="project-card-url">{project.repoUrl}</code>
+
+      {project.cloneState === "failed" && project.lastError ? (
+        <div className="project-card-error" data-testid="project-last-error" title={project.lastError}>
+          ⚠️ clone falhou: {project.lastError}
+        </div>
+      ) : null}
+
+      {/* US-UX.4 — a faixa de estado do conhecimento. */}
+      <div className="project-card-facts" data-testid="project-knowledge">
+        {facts.map((fact) => (
+          <div
+            key={fact.key}
+            className={"pk-fact pk-" + fact.tone}
+            data-testid={"project-fact-" + fact.key}
+            title={fact.detail ?? undefined}
+          >
+            <span className="pk-fact-label">
+              <span aria-hidden>{fact.icon}</span> {fact.label}
+            </span>
+            <span className="pk-fact-value">{fact.value}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Grafo falhou → a causa aparece por extenso (falha grita, não sussurra). */}
+      {project.graphState === "failed" && project.graphLastError ? (
+        <div className="project-card-error" data-testid="project-graph-error">
+          ⚠️ grafo falhou: {project.graphLastError}
+        </div>
+      ) : null}
+
+      <div className="project-card-foot">
+        <span className="project-card-sync">
+          {project.lastSyncedAt
+            ? `última sincronização: ${new Date(project.lastSyncedAt).toLocaleString()}`
+            : "nunca sincronizado"}
+        </span>
+        {confirmingDelete ? null : (
+          <button
+            className="project-delete-link"
+            data-testid="project-delete"
+            onClick={() => setConfirmingDelete(true)}
+          >
+            Excluir projeto…
+          </button>
+        )}
+      </div>
+
+      {/* US-UX.4 — confirmação de exclusão inline (ação destrutiva e
+          irreversível nunca dispara em um clique). */}
+      {confirmingDelete ? (
+        <div className="project-delete-confirm" data-testid="project-delete-confirm">
+          <div>
+            Excluir o projeto <strong>{project.name}</strong>? Isso remove o clone gerenciado, o
+            grafo e a wiki — <strong>irreversível</strong>.
+          </div>
+          <div className="project-delete-confirm-actions">
+            <button
+              className="kb-btn kb-btn-ghost kb-btn-sm"
+              data-testid="project-delete-cancel"
+              onClick={() => setConfirmingDelete(false)}
+            >
+              Cancelar
+            </button>
+            <button
+              className="kb-btn kb-btn-danger kb-btn-sm"
+              data-testid="project-delete-confirm-btn"
+              disabled={deleteProject.isPending}
+              onClick={() =>
+                deleteProject.mutate(project.id, {
+                  onSuccess: () => showToast("Projeto excluído"),
+                  onError: () => showToast("Falha ao excluir"),
+                })
+              }
+            >
+              {deleteProject.isPending ? "Excluindo…" : "Excluir definitivamente"}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-// ── Badge de estado do clone (mesma semântica do ProjectExplorer) ────────────
-
-const CLONE_STATE_LABEL: Record<ProjectCloneState, string> = {
-  pending: "pendente",
-  cloning: "clonando",
-  ready: "pronto",
-  failed: "falhou",
-};
+// ── Badge de estado do clone (rótulos/tons puros em lib/projectCard.ts) ──────
 
 function CloneStateBadge({ state }: { state: ProjectCloneState }) {
-  const tone =
-    state === "ready" ? "chip-ok" : state === "failed" ? "chip-danger" : "chip-warn";
+  const badge = cloneStateBadge(state);
   return (
-    <span className={"chip " + tone} data-testid="clone-state-badge" data-state={state}>
-      {CLONE_STATE_LABEL[state]}
+    <span className={"chip chip-" + badge.tone} data-testid="clone-state-badge" data-state={state}>
+      {badge.label}
     </span>
   );
 }

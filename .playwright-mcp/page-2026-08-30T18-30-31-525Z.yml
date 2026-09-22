@@ -1,0 +1,93 @@
+- generic [ref=f30e4]:
+  - complementary "Áreas do explorador" [ref=f30e5]:
+    - button "Voltar ao quadro" [ref=f30e6] [cursor=pointer]:
+      - generic [ref=f30e7]: ←
+    - navigation "Áreas" [ref=f30e9]:
+      - button "Projetos" [ref=f30e10] [cursor=pointer]:
+        - generic [ref=f30e11]: 🗄️
+      - button "O que a AI sabe" [ref=f30e13] [cursor=pointer]:
+        - generic [ref=f30e14]: 🐝
+      - button "Grafo" [ref=f30e16] [cursor=pointer]:
+        - generic [ref=f30e17]: 🕸️
+      - button "Wiki" [ref=f30e19] [cursor=pointer]:
+        - generic [ref=f30e20]: 📖
+  - generic [ref=f30e22]:
+    - banner [ref=f30e23]:
+      - heading "O que a AI sabe" [level=1] [ref=f30e24]: 🐝 O que a AI sabe
+      - generic [ref=f30e25]: os neurônios que a frota aprendeu
+      - generic [ref=f30e26]:
+        - generic [ref=f30e27]: 📁 Projeto
+        - combobox "Projeto selecionado" [ref=f30e28]:
+          - option "audit-f44-slugify — https://github.com/simov/slugify.git"
+          - option "array-move — https://github.com/sindresorhus/array-move" [selected]
+      - combobox "Selecionar tema" [ref=f30e29] [cursor=pointer]:
+        - option "🌞 Claro" [selected]
+        - option "🌙 Escuro"
+        - option "◐ Alto contraste"
+    - main [ref=f30e30]:
+      - generic [ref=f30e34]:
+        - textbox "Buscar por nó, arquivo, pergunta, título ou tag…" [ref=f30e35]
+        - generic [ref=f30e36]: Destilado de 7 memória(s) pelo reflect · vereditos de 2026-08-30 · o código que mudou desde o aprendizado é sinalizado
+        - generic [ref=f30e37]:
+          - generic [ref=f30e38]: 🧠 O que a AI aprendeu (2)
+          - generic [ref=f30e39]:
+            - generic [ref=f30e40]:
+              - generic [ref=f30e41]:
+                - generic [ref=f30e42]: ✓ preferido
+                - strong [ref=f30e43]:
+                  - code [ref=f30e44]: arrayMoveImmutable()
+                - code [ref=f30e45]: index.js
+              - generic [ref=f30e46]: 2× útil · último sinal 2026-08-25
+              - list [ref=f30e47]:
+                - listitem [ref=f30e48]:
+                  - text: “Qual função usar para reordenar cards de uma lista?”
+                  - generic [ref=f30e49]: — 2026-08-25 · útil
+                - listitem [ref=f30e50]:
+                  - text: “Como mover um item sem mutar o array original?”
+                  - generic [ref=f30e51]: — 2026-08-10 · útil
+            - generic [ref=f30e52]:
+              - generic [ref=f30e53]:
+                - generic [ref=f30e54]: · tentativo
+                - strong [ref=f30e55]:
+                  - code [ref=f30e56]: arrayMoveMutable(array, fromIndex, toIndex)
+                - code [ref=f30e57]: readme.md
+              - generic [ref=f30e58]: 1× útil (ainda não corroborado) · último sinal 2026-08-22
+              - list [ref=f30e59]:
+                - listitem [ref=f30e60]:
+                  - text: “Onde está documentado o contrato de arrayMoveMutable?”
+                  - generic [ref=f30e61]: — 2026-08-22 · útil
+        - generic [ref=f30e62]:
+          - generic [ref=f30e63]: ⚖️ Contestado (1)
+          - generic [ref=f30e65]:
+            - generic [ref=f30e66]:
+              - generic [ref=f30e67]: ⚖ contestado
+              - strong [ref=f30e68]:
+                - code [ref=f30e69]: arrayMoveMutable()
+              - code [ref=f30e70]: index.js
+            - generic [ref=f30e71]: "1× útil · 1× beco/correção → a recência diz: beco sem saída · último sinal 2026-08-28"
+            - list [ref=f30e72]:
+              - listitem [ref=f30e73]:
+                - text: “arrayMoveMutable modifica o array recebido?”
+                - generic [ref=f30e74]: — 2026-08-20 · útil
+        - generic [ref=f30e75]:
+          - generic [ref=f30e76]: 🚧 Becos sem saída (2)
+          - generic [ref=f30e77]:
+            - generic [ref=f30e78]:
+              - generic [ref=f30e79]:
+                - generic [ref=f30e80]: ⛔ não re-deduzir
+                - generic [ref=f30e81]: “Existe suporte para mover um range de itens de uma vez?”
+              - generic [ref=f30e82]: · 2026-08-27
+            - generic [ref=f30e84]:
+              - generic [ref=f30e85]:
+                - generic [ref=f30e86]: ⛔ não re-deduzir
+                - generic [ref=f30e87]: “arrayMoveMutable devolve o array reordenado?”
+              - generic [ref=f30e88]:
+                - code [ref=f30e89]: index_arraymovemutable
+                - generic [ref=f30e90]: · 2026-08-28
+        - generic [ref=f30e91]:
+          - generic [ref=f30e92]: ✏️ Correções (1)
+          - generic [ref=f30e94]:
+            - generic [ref=f30e95]: "“arrayMove aceita índice negativo?” → Aceita: índices negativos contam a partir do fim do array (ver readme)."
+            - generic [ref=f30e96]: 2026-08-26
+        - group [ref=f30e97]:
+          - generic "Memórias cruas (7)" [ref=f30e98] [cursor=pointer]

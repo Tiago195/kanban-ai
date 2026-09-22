@@ -8,9 +8,6 @@ import type { ValidationRunner } from './validators/validation.runner';
 import type { AgentRunner } from './runners/agent-runner.interface';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
 import { Orchestrator } from './orchestrator';
-import type { MemoryIndexService } from '../memory/memory-index.service';
-import type { MemoryGitService } from '../memory/memory-git.service';
-import type { MemoryBootstrapService } from '../memory/memory-bootstrap.service';
 
 /**
  * US-BLOCK3 — blocker-dependency auto-wake (reverso do M3).
@@ -149,9 +146,6 @@ function makeOrchestrator(config: AppConfig, prisma: PrismaService): Orchestrato
   } as unknown as WorkspaceService;
   const validation = { validate: async () => ({ passed: true, problems: [] }) } as unknown as ValidationRunner;
   const runner = { run: async () => ({ detail: '', summary: '', dodTouched: [] }) } as unknown as AgentRunner;
-  const memoryIndex = { query: async () => [] } as unknown as MemoryIndexService;
-  const memoryGit = { readNeuron: async () => null } as unknown as MemoryGitService;
-  const memoryBootstrap = { bootstrapFromRepo: async () => [] } as unknown as MemoryBootstrapService;
   return new Orchestrator(
     prisma,
     makeSessions(config),
@@ -160,9 +154,6 @@ function makeOrchestrator(config: AppConfig, prisma: PrismaService): Orchestrato
     realtime,
     runner,
     config,
-    memoryIndex,
-    memoryGit,
-    memoryBootstrap,
   );
 }
 

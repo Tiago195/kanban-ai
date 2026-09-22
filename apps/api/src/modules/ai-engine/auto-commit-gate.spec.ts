@@ -9,9 +9,6 @@ import type { ValidationRunner } from './validators/validation.runner';
 import type { AgentRunner } from './runners/agent-runner.interface';
 import { AgentSessionManager } from './session-manager/agent-session-manager';
 import { Orchestrator } from './orchestrator';
-import type { MemoryIndexService } from '../memory/memory-index.service';
-import type { MemoryGitService } from '../memory/memory-git.service';
-import type { MemoryBootstrapService } from '../memory/memory-bootstrap.service';
 import type { StructuredEvidence } from '@kanban-ai/shared';
 
 /**
@@ -64,18 +61,6 @@ function makeRunner(): AgentRunner {
   return { run: async () => ({ detail: '', summary: '', dodTouched: [] }) } as unknown as AgentRunner;
 }
 
-function makeMemoryIndex(): MemoryIndexService {
-  return {
-    query: async () => [],
-    commitAndReindex: async () => ({ oid: 'x', branch: 'main', projection: {} }),
-  } as unknown as MemoryIndexService;
-}
-function makeMemoryGit(): MemoryGitService {
-  return { readNeuron: async () => null } as unknown as MemoryGitService;
-}
-function makeMemoryBootstrap(): MemoryBootstrapService {
-  return { bootstrapFromRepo: async () => [] } as unknown as MemoryBootstrapService;
-}
 function makeSessions(config: AppConfig): AgentSessionManager {
   const prisma = {
     agentRuntimeState: { upsert: async () => undefined },
@@ -120,9 +105,6 @@ function makeOrchestrator(opts: {
     makeRealtime(),
     makeRunner(),
     config,
-    makeMemoryIndex(),
-    makeMemoryGit(),
-    makeMemoryBootstrap(),
   );
 }
 

@@ -1,0 +1,19 @@
+- generic [ref=f6e4]:
+  - complementary "Áreas do explorador" [ref=f6e5]:
+    - button "Voltar ao quadro" [ref=f6e6] [cursor=pointer]:
+      - generic [ref=f6e7]: ←
+    - navigation "Áreas" [ref=f6e9]:
+      - button "Projetos" [ref=f6e10] [cursor=pointer]:
+        - generic [ref=f6e11]: 🗄️
+      - button "O que a AI sabe" [disabled] [ref=f6e13]:
+        - generic [ref=f6e14]: 🐝
+      - button "Grafo" [disabled] [ref=f6e16]:
+        - generic [ref=f6e17]: 🕸️
+      - button "Wiki" [disabled] [ref=f6e19]:
+        - generic [ref=f6e20]: 📖
+  - generic [ref=f6e22]:
+    - banner [ref=f6e23]:
+      - heading "Wiki" [level=1] [ref=f6e24]: 📖 Wiki
+      - generic [ref=f6e25]: a base de conhecimento derivada do grafo
+    - main [ref=f6e26]:
+      - generic [ref=f6e27]: Carregando projetos…

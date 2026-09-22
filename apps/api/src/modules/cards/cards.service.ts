@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../shared/db/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
@@ -22,6 +22,13 @@ import { mapIteration, type PrismaIterationRow } from './iteration.mapper';
 import { Orchestrator } from '../ai-engine/orchestrator';
 import { ModelsService } from '../models/models.service';
 import { BUILTIN_LOOP_PROFILES } from '../ai-engine/loop-profiles/loop-profiles';
+import type { AgentAdapterKind } from '@kanban-ai/shared';
+import {
+  AGENT_ADAPTER_KINDS,
+  APP_CONFIG,
+  DEFAULT_PROCESS_AGENT_ADAPTER,
+  type AppConfig,
+} from '../../shared/config/config';
 
 /** Status derivado exposto na leitura, por epic. */
 export interface EpicStatusView {
@@ -43,7 +50,17 @@ export class CardsService {
     private readonly realtime: RealtimeService,
     private readonly orchestrator: Orchestrator,
     private readonly models: ModelsService,
+    // US-F3.10 — cauda global da cascata de adapter (config.agentAdapter).
+    // `@Optional() x?: T` (armadilha de DI, projects/AGENTS.md): specs que
+    // instanciam posicionalmente seguem válidas; sem config, cai no default do
+    // processo (mock).
+    @Optional() @Inject(APP_CONFIG) private readonly config?: AppConfig,
   ) {}
+
+  /** US-F3.10 — adapter global efetivo (AGENT_ADAPTER -> default do processo). */
+  private globalAdapter(): AgentAdapterKind {
+    return this.config?.agentAdapter ?? DEFAULT_PROCESS_AGENT_ADAPTER;
+  }
 
   async findAll(query: ListCardsQueryDto = {}) {
     const { boardId, type, columnId, updatedSince, limit, cursor, fields, tenantId } = query;
@@ -130,11 +147,18 @@ export class CardsService {
   }
 
   /**
-   * Anexa `resolvedModel` a cada card resolvendo a cascata em memória
-   * (card → parent → board.defaultModel → CLI default), sem N+1 no banco.
+   * Anexa `resolvedModel` (e, US-F3.10, `resolvedAdapter`) a cada card
+   * resolvendo a cascata em memória (card → parent → board default → default
+   * global), sem N+1 no banco.
    */
   private async attachResolvedModel<
-    T extends { id: string; parentId: string | null; boardId: string; model: string | null },
+    T extends {
+      id: string;
+      parentId: string | null;
+      boardId: string;
+      model: string | null;
+      adapter?: string | null;
+    },
   >(cards: T[], boardId?: string): Promise<void> {
     if (cards.length === 0) return;
     const byId = new Map(cards.map((c) => [c.id, c]));
@@ -142,9 +166,10 @@ export class CardsService {
     const boardIds = boardId ? [boardId] : [...new Set(cards.map((c) => c.boardId))];
     const boards = await this.prisma.board.findMany({
       where: { id: { in: boardIds } },
-      select: { id: true, defaultModel: true },
+      select: { id: true, defaultModel: true, defaultAdapter: true },
     });
     const boardDefault = new Map(boards.map((b) => [b.id, b.defaultModel]));
+    const boardAdapter = new Map(boards.map((b) => [b.id, b.defaultAdapter]));
     const cliDefault = this.models.defaultModelId();
 
     const resolveFor = (card: T): string => {
@@ -158,8 +183,25 @@ export class CardsService {
       return boardDefault.get(card.boardId) ?? cliDefault;
     };
 
+    // US-F3.10 — mesma subida para o adapter; valores desconhecidos no banco
+    // são ignorados (a validação forte de escrita é do schema da API).
+    const known = (v: string | null | undefined): AgentAdapterKind | null =>
+      AGENT_ADAPTER_KINDS.find((k) => k === v) ?? null;
+    const resolveAdapterFor = (card: T): AgentAdapterKind => {
+      let node: T | undefined = card;
+      const seen = new Set<string>();
+      while (node && !seen.has(node.id)) {
+        seen.add(node.id);
+        const own = known(node.adapter);
+        if (own) return own;
+        node = node.parentId ? byId.get(node.parentId) : undefined;
+      }
+      return known(boardAdapter.get(card.boardId)) ?? this.globalAdapter();
+    };
+
     for (const card of cards) {
       (card as T & { resolvedModel: string }).resolvedModel = resolveFor(card);
+      (card as T & { resolvedAdapter: string }).resolvedAdapter = resolveAdapterFor(card);
     }
   }
 
@@ -180,9 +222,16 @@ export class CardsService {
     });
     if (!card) return card;
     const resolvedModel = await this.resolveModel(card.id, card.parentId, card.boardId, card.model);
+    const resolvedAdapter = await this.resolveAdapter(
+      card.id,
+      card.parentId,
+      card.boardId,
+      card.adapter,
+    );
     return {
       ...card,
       resolvedModel,
+      resolvedAdapter,
       iterations: card.iterations.map((it) => mapIteration(it as PrismaIterationRow)),
     };
   }
@@ -220,6 +269,44 @@ export class CardsService {
     if (board?.defaultModel) return board.defaultModel;
 
     return this.models.defaultModelId();
+  }
+
+  /**
+   * US-F3.10 — Resolve o adapter efetivo de um card via herança em cascata,
+   * espelhando `resolveModel`:
+   * `card.adapter ?? parent.adapter (recursivo) ?? board.defaultAdapter ??
+   * global (AGENT_ADAPTER -> default do processo)`.
+   */
+  async resolveAdapter(
+    cardId: string,
+    parentId: string | null,
+    boardId: string,
+    ownAdapter: string | null,
+  ): Promise<AgentAdapterKind> {
+    const known = (v: string | null | undefined): AgentAdapterKind | null =>
+      AGENT_ADAPTER_KINDS.find((k) => k === v) ?? null;
+    const own = known(ownAdapter);
+    if (own) return own;
+
+    let currentParentId = parentId;
+    const seen = new Set<string>([cardId]);
+    while (currentParentId && !seen.has(currentParentId)) {
+      seen.add(currentParentId);
+      const parent = await this.prisma.card.findUnique({
+        where: { id: currentParentId },
+        select: { adapter: true, parentId: true },
+      });
+      if (!parent) break;
+      const inherited = known(parent.adapter);
+      if (inherited) return inherited;
+      currentParentId = parent.parentId;
+    }
+
+    const board = await this.prisma.board.findUnique({
+      where: { id: boardId },
+      select: { defaultAdapter: true },
+    });
+    return known(board?.defaultAdapter) ?? this.globalAdapter();
   }
 
   /**
@@ -774,6 +861,7 @@ export class CardsService {
       ...(dto.aiProject !== undefined ? { aiProject: dto.aiProject } : {}),
       ...(dto.aiNotes !== undefined ? { aiNotes: dto.aiNotes } : {}),
       ...(dto.model !== undefined ? { model: dto.model } : {}),
+      ...(dto.adapter !== undefined ? { adapter: dto.adapter } : {}), // US-F3.10
       ...(dto.loopType !== undefined ? { loopType: dto.loopType } : {}),
       ...(dto.priority !== undefined ? { priority: dto.priority } : {}),
       ...(dto.startInPlanMode !== undefined ? { startInPlanMode: dto.startInPlanMode } : {}),

@@ -1,0 +1,348 @@
+- generic [ref=f5e3]:
+  - banner [ref=f5e1671]:
+    - heading "Sprint Board" [level=1] [ref=f5e1672]
+    - generic [ref=f5e1673]:
+      - searchbox "Buscar cards" [ref=f5e1674]
+      - combobox "Filtrar por label" [ref=f5e1675]:
+        - option "Todas as labels" [selected]
+        - option "Bug"
+        - option "Feature"
+        - option "Chore"
+        - option "Docs"
+        - option "Urgent"
+      - combobox "Filtrar por agente" [ref=f5e1676]:
+        - option "Todos os agentes" [selected]
+        - option "Claude-Dev"
+        - option "GPT-Reviewer"
+        - option "Copilot-QA"
+      - button "✨ Criar backlog" [ref=f5e1677] [cursor=pointer]
+      - button "🤖 Agentes" [ref=f5e1678] [cursor=pointer]
+      - button "🗄️ Projetos" [ref=f5e1679] [cursor=pointer]
+      - button "🗂️ Explorador" [ref=f5e1680] [cursor=pointer]
+      - button "🔁 Loops" [ref=f5e1681] [cursor=pointer]
+      - button "🔕 Review OFF" [ref=f5e1682] [cursor=pointer]
+      - button "+ Coluna" [ref=f5e1683] [cursor=pointer]
+      - button "⤓ Export" [ref=f5e1684] [cursor=pointer]
+      - button "⤒ Import" [ref=f5e1685] [cursor=pointer]
+      - combobox "Selecionar tema" [ref=f5e1686] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+  - generic [ref=f5e1687]:
+    - generic [ref=f5e1688]:
+      - generic [ref=f5e1689]: Épicos
+      - generic [ref=f5e1690]: "2"
+    - generic [ref=f5e1691]:
+      - generic [ref=f5e1692]: Histórias
+      - generic [ref=f5e1693]: "5"
+    - generic [ref=f5e1694]:
+      - generic [ref=f5e1695]: Tasks
+      - generic [ref=f5e1696]: "6"
+    - generic [ref=f5e1697]:
+      - generic [ref=f5e1698]: Pontos concluídos
+      - generic [ref=f5e1699]: "0"
+      - generic [ref=f5e1700]: /
+      - generic [ref=f5e1701]: "21"
+    - generic "Progresso da sprint (story points)" [ref=f5e1702]
+    - generic [ref=f5e1703]:
+      - generic [ref=f5e1704]: Bloqueados
+      - generic [ref=f5e1705]: "1"
+  - generic [ref=f5e1706]:
+    - complementary [ref=f5e1707]:
+      - generic [ref=f5e1708]:
+        - generic [ref=f5e1709]: ÉPICOS
+        - generic [ref=f5e1710]: "2"
+        - button "+ Épico" [ref=f5e1711] [cursor=pointer]
+      - generic [ref=f5e1712]:
+        - generic [ref=f5e1713] [cursor=pointer]:
+          - generic [ref=f5e1714]:
+            - generic [ref=f5e1715]: EP-1
+            - generic [ref=f5e1716]: IN PROGRESS
+          - generic [ref=f5e1717]: Onboarding de novos clientes
+          - generic [ref=f5e1719]: 🧩 0/4 histórias
+        - generic [ref=f5e1721] [cursor=pointer]:
+          - generic [ref=f5e1722]:
+            - generic [ref=f5e1723]: EP-19
+            - generic [ref=f5e1724]: IN PROGRESS
+          - generic [ref=f5e1725]: AUDIT-F2 epico
+          - generic [ref=f5e1727]: 🧩 0/1 histórias
+    - generic [ref=f5e1729]:
+      - generic [ref=f5e1730]:
+        - generic [ref=f5e1731]:
+          - generic [ref=f5e1732]: Backlog
+          - generic [ref=f5e1733]: "1"
+          - generic [ref=f5e1734]: 5 pts
+        - button "STORY US-8 5 Auditoria de acesso EP-1 · Onboarding de novos clientes 📝" [ref=f5e1736] [cursor=pointer]:
+          - generic [ref=f5e1737]:
+            - generic [ref=f5e1738]: STORY
+            - generic [ref=f5e1739]: US-8
+            - generic [ref=f5e1740]: "5"
+          - generic [ref=f5e1741]: Auditoria de acesso
+          - generic "Onboarding de novos clientes" [ref=f5e1742]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f5e1743]: 📝
+        - button "+ Adicionar história" [ref=f5e1745] [cursor=pointer]
+      - generic [ref=f5e1746]:
+        - generic [ref=f5e1747]:
+          - generic [ref=f5e1748]: To Do
+          - generic [ref=f5e1749]: "1"
+          - generic [ref=f5e1750]: 3 pts
+          - generic [ref=f5e1751]: 1/5
+        - button "STORY US-6 ⛔ 3 Recuperação de senha EP-1 · Onboarding de novos clientes 📝" [ref=f5e1753] [cursor=pointer]:
+          - generic [ref=f5e1754]:
+            - generic [ref=f5e1755]: STORY
+            - generic [ref=f5e1756]: US-6
+            - generic [ref=f5e1757]: ⛔
+            - generic [ref=f5e1758]: "3"
+          - generic [ref=f5e1759]: Recuperação de senha
+          - generic "Onboarding de novos clientes" [ref=f5e1760]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f5e1761]: 📝
+        - button "+ Adicionar história" [ref=f5e1763] [cursor=pointer]
+      - generic [ref=f5e1764]:
+        - generic [ref=f5e1765]:
+          - generic [ref=f5e1766]: In Progress
+          - generic [ref=f5e1767]: "2"
+          - generic [ref=f5e1768]: 5 pts
+          - generic [ref=f5e1769]: 2/3
+        - generic [ref=f5e1770]:
+          - button "STORY US-20 🙋 task precisa de você Validar separador vazio no slugify EP-19 · AUDIT-F2 epico" [ref=f5e1771] [cursor=pointer]:
+            - generic [ref=f5e1772]:
+              - generic [ref=f5e1773]: STORY
+              - generic [ref=f5e1774]: US-20
+              - generic "Uma task desta história precisa de você — abra a história para responder no chat da task." [ref=f5e1775]: 🙋 task precisa de você
+            - generic [ref=f5e1776]: Validar separador vazio no slugify
+            - generic "AUDIT-F2 epico" [ref=f5e1777]: EP-19 · AUDIT-F2 epico
+          - button "STORY US-2 5 🙋 task precisa de você Cadastro com e-mail e senha EP-1 · Onboarding de novos clientes 📝" [ref=f5e1778] [cursor=pointer]:
+            - generic [ref=f5e1779]:
+              - generic [ref=f5e1780]: STORY
+              - generic [ref=f5e1781]: US-2
+              - generic [ref=f5e1782]: "5"
+              - generic "Uma task desta história precisa de você — abra a história para responder no chat da task." [ref=f5e1783]: 🙋 task precisa de você
+            - generic [ref=f5e1784]: Cadastro com e-mail e senha
+            - generic "Onboarding de novos clientes" [ref=f5e1785]: EP-1 · Onboarding de novos clientes
+            - generic [ref=f5e1786]: 📝
+      - generic [ref=f5e1788]:
+        - generic [ref=f5e1789]:
+          - generic [ref=f5e1790]: Review
+          - generic [ref=f5e1791]: "1"
+          - generic [ref=f5e1792]: 8 pts
+          - generic [ref=f5e1793]: 1/3
+        - button "STORY US-7 8 Dashboard inicial EP-1 · Onboarding de novos clientes 📝" [ref=f5e1795] [cursor=pointer]:
+          - generic [ref=f5e1796]:
+            - generic [ref=f5e1797]: STORY
+            - generic [ref=f5e1798]: US-7
+            - generic [ref=f5e1799]: "8"
+          - generic [ref=f5e1800]: Dashboard inicial
+          - generic "Onboarding de novos clientes" [ref=f5e1801]: EP-1 · Onboarding de novos clientes
+          - generic [ref=f5e1802]: 📝
+      - generic [ref=f5e1805]:
+        - generic [ref=f5e1806]: Done
+        - generic [ref=f5e1807]: "0"
+    - status [ref=f5e1809]
+    - generic [ref=f5e1812]:
+      - generic [ref=f5e1813]:
+        - generic [ref=f5e1814]:
+          - generic [ref=f5e1815]: STORY
+          - generic [ref=f5e1816]: US-20
+        - generic [ref=f5e1817]:
+          - textbox "Título da história" [ref=f5e1818]: Validar separador vazio no slugify
+          - button "Fechar história" [ref=f5e1819] [cursor=pointer]: ✕
+      - generic [ref=f5e1820]:
+        - generic [ref=f5e1822]:
+          - generic [ref=f5e1823]:
+            - generic [ref=f5e1824]: Story Points
+            - combobox [ref=f5e1825]:
+              - option "—" [selected]
+              - option "1"
+              - option "2"
+              - option "3"
+              - option "5"
+              - option "8"
+              - option "13"
+          - generic [ref=f5e1826]:
+            - generic [ref=f5e1827]: Modo planejamento
+            - generic [ref=f5e1828]:
+              - checkbox "Iniciar em modo planejamento" [ref=f5e1829]
+              - text: Iniciar em modo planejamento
+        - generic [ref=f5e1830]:
+          - generic [ref=f5e1831]: Descrição
+          - textbox "Como um <usuário>, quero <objetivo>, para <benefício>…" [ref=f5e1832]
+        - generic [ref=f5e1833]:
+          - generic [ref=f5e1834]: Projeto-alvo (repositório onde a AI trabalha)
+          - textbox "Deixe vazio para herdar do épico, ou informe /caminho/do/repo" [ref=f5e1835]: /data/projects/df208dd9-dbd5-4911-b33d-84c9b44df10d
+          - generic [ref=f5e1836]: A AI cria uma branch/worktree isolada nesse repositório. Se vazio, herda o projeto-alvo do épico pai.
+        - generic [ref=f5e1837]:
+          - generic [ref=f5e1838]: Notas para a AI (contexto/escopo)
+          - textbox "Instruções, restrições e escopo para o agent…" [ref=f5e1839]
+        - generic [ref=f5e1840]:
+          - generic [ref=f5e1841]: Modelo de AI
+          - combobox [ref=f5e1842]:
+            - option "Herdar (épico → quadro)" [selected]
+            - option "Claude Opus 4.8 BR"
+            - option "Claude Opus 4.6"
+            - option "Claude Sonnet 4.5"
+            - option "GPT-5.4"
+          - generic [ref=f5e1843]:
+            - text: "Herdado:"
+            - strong [ref=f5e1844]: Claude Opus 4.8 BR
+        - generic [ref=f5e1845]:
+          - generic [ref=f5e1846]: Labels
+          - generic [ref=f5e1847]:
+            - generic [ref=f5e1848] [cursor=pointer]:
+              - generic [ref=f5e1850]: Bug
+              - button "🗑" [ref=f5e1851]
+            - generic [ref=f5e1852] [cursor=pointer]:
+              - generic [ref=f5e1854]: Feature
+              - button "🗑" [ref=f5e1855]
+            - generic [ref=f5e1856] [cursor=pointer]:
+              - generic [ref=f5e1858]: Chore
+              - button "🗑" [ref=f5e1859]
+            - generic [ref=f5e1860] [cursor=pointer]:
+              - generic [ref=f5e1862]: Docs
+              - button "🗑" [ref=f5e1863]
+            - generic [ref=f5e1864] [cursor=pointer]:
+              - generic [ref=f5e1866]: Urgent
+              - button "🗑" [ref=f5e1867]
+            - button "+ Nova label" [ref=f5e1868] [cursor=pointer]
+        - generic [ref=f5e1869]:
+          - generic [ref=f5e1870]: 🤖 Agentes responsáveis
+          - generic [ref=f5e1871]:
+            - generic [ref=f5e1872] [cursor=pointer]:
+              - generic [ref=f5e1873]: C
+              - generic [ref=f5e1874]: 🤖 Claude-Dev
+            - generic [ref=f5e1875] [cursor=pointer]:
+              - generic [ref=f5e1876]: G
+              - generic [ref=f5e1877]: 🤖 GPT-Reviewer
+            - generic [ref=f5e1878] [cursor=pointer]:
+              - generic [ref=f5e1879]: C
+              - generic [ref=f5e1880]: 🤖 Copilot-QA
+        - generic [ref=f5e1881]:
+          - generic [ref=f5e1882]:
+            - text: 🌊 Fluxos afetados
+            - generic [ref=f5e1883]: (2)
+          - generic [ref=f5e1884]:
+            - generic [ref=f5e1885]:
+              - generic [ref=f5e1886]:
+                - generic [ref=f5e1887]: Tratar separador vazio
+                - button "🗑" [ref=f5e1888] [cursor=pointer]
+              - generic [ref=f5e1889]: Tratar separador vazio
+            - generic [ref=f5e1890]:
+              - generic [ref=f5e1891]:
+                - generic [ref=f5e1892]: Movimentação de itens do array
+                - button "🗑" [ref=f5e1893] [cursor=pointer]
+              - generic [ref=f5e1894]: index.js, index.d.ts
+          - generic [ref=f5e1895]:
+            - 'textbox "Nome do fluxo (ex.: Cadastro de caixa)…" [ref=f5e1896]'
+            - button "+ Adicionar fluxo" [ref=f5e1897] [cursor=pointer]
+        - generic [ref=f5e1898]:
+          - generic [ref=f5e1899]:
+            - text: Tasks
+            - generic [ref=f5e1900]: 0/2
+            - button "+ Task" [ref=f5e1901] [cursor=pointer]
+            - button "💬 Chat da história" [ref=f5e1902] [cursor=pointer]
+          - generic [ref=f5e1903]:
+            - generic [ref=f5e1904]:
+              - generic [ref=f5e1905]:
+                - generic [ref=f5e1906]: To Do
+                - generic [ref=f5e1907]: "0"
+              - button "+ Task" [ref=f5e1909] [cursor=pointer]
+            - generic [ref=f5e1910]:
+              - generic [ref=f5e1911]:
+                - generic [ref=f5e1912]: In Progress
+                - generic [ref=f5e1913]: "2"
+              - generic [ref=f5e1914]:
+                - 'button "TK-22 🙋 precisa de você Corrigir: Arquivo inexistente no fluxo \"Tratar separador vazio\"" [ref=f5e1915]':
+                  - generic [ref=f5e1916]:
+                    - generic [ref=f5e1917]: TK-22
+                    - generic "Arquivo inexistente no fluxo \"Tratar separador vazio\"" [ref=f5e1918]: 🙋 precisa de você
+                  - generic [ref=f5e1919]: "Corrigir: Arquivo inexistente no fluxo \"Tratar separador vazio\""
+                - button "TK-21 Tratar separador vazio" [ref=f5e1920]:
+                  - generic [ref=f5e1921]: TK-21
+                  - generic [ref=f5e1923]: Tratar separador vazio
+            - generic [ref=f5e1925]:
+              - generic [ref=f5e1926]: Review
+              - generic [ref=f5e1927]: "0"
+            - generic [ref=f5e1930]:
+              - generic [ref=f5e1931]: Done
+              - generic [ref=f5e1932]: "0"
+          - status [ref=f5e1934]
+        - generic [ref=f5e1935]:
+          - generic [ref=f5e1936]: 📊 Custo & qualidade do loop
+          - generic [ref=f5e1937]:
+            - generic [ref=f5e1938]:
+              - generic [ref=f5e1939]:
+                - generic [ref=f5e1940]: "30.000"
+                - generic [ref=f5e1941]: Tokens de entrada
+              - generic [ref=f5e1942]:
+                - generic [ref=f5e1943]: "7.500"
+                - generic [ref=f5e1944]: Tokens de saída
+              - generic [ref=f5e1945]:
+                - generic [ref=f5e1946]: 2.4 s
+                - generic [ref=f5e1947]: Duração média / iteração
+              - generic [ref=f5e1948]:
+                - generic [ref=f5e1949]: "25"
+                - generic [ref=f5e1950]: Iterações
+                - generic [ref=f5e1951]: 2 tasks
+              - generic [ref=f5e1952]:
+                - generic [ref=f5e1953]: "12.5"
+                - generic [ref=f5e1954]: Iterações / task
+              - generic [ref=f5e1955]:
+                - generic [ref=f5e1956]: 64%
+                - generic [ref=f5e1957]: Taxa de derivação
+                - generic [ref=f5e1958]: validação falhou
+              - generic [ref=f5e1959]:
+                - generic [ref=f5e1960]: 36%
+                - generic [ref=f5e1961]: Taxa de OK
+                - generic [ref=f5e1962]: desfecho ok
+            - table [ref=f5e1963]:
+              - rowgroup [ref=f5e1964]:
+                - row [ref=f5e1965]:
+                  - columnheader "Task" [ref=f5e1966]
+                  - columnheader "Título" [ref=f5e1967]
+                  - columnheader "Estado" [ref=f5e1968]
+                  - columnheader "Iterações" [ref=f5e1969]
+              - rowgroup [ref=f5e1970]:
+                - row [ref=f5e1971]:
+                  - cell "TK-22" [ref=f5e1972]
+                  - 'cell "Corrigir: Arquivo inexistente no fluxo \"Tratar separador vazio\"" [ref=f5e1973]'
+                  - cell "validating" [ref=f5e1974]
+                  - cell "20" [ref=f5e1975]
+                - row [ref=f5e1976]:
+                  - cell "TK-21" [ref=f5e1977]
+                  - cell "Tratar separador vazio" [ref=f5e1978]
+                  - cell "blocked_dep" [ref=f5e1979]
+                  - cell "5" [ref=f5e1980]
+        - generic [ref=f5e1981]:
+          - generic [ref=f5e1982]: Definition of Done (DOD)
+          - generic [ref=f5e1983]:
+            - textbox "Critério de concluído…" [ref=f5e1984]
+            - button "+ Adicionar" [ref=f5e1985] [cursor=pointer]
+        - generic [ref=f5e1986]: Comentários
+        - generic [ref=f5e1988]:
+          - generic [ref=f5e1989]: Atividade
+          - generic [ref=f5e1990]:
+            - generic [ref=f5e1991]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e1992]: AI registrou fluxos afetados (Tratar separador vazio)30/08/2026
+            - generic [ref=f5e1993]: AI registrou fluxos afetados (Tratar separador vazio)30/08/2026
+            - generic [ref=f5e1994]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e1995]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e1996]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e1997]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e1998]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e1999]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2000]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2001]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2002]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2003]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2004]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2005]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2006]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2007]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2008]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2009]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2010]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2011]: história em In Progress — motor de AI acordado30/08/2026
+            - generic [ref=f5e2012]: história em In Progress — motor de AI acordado30/08/2026
+        - generic [ref=f5e2013]:
+          - generic [ref=f5e2014]: Zona de perigo
+          - button "🗑 Excluir história" [ref=f5e2015] [cursor=pointer]
+          - generic [ref=f5e2016]: Remove 2 card(s) filho(s) em cascata.

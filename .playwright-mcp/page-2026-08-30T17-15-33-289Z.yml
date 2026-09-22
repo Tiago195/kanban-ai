@@ -1,0 +1,26 @@
+- generic [ref=f5e4]:
+  - complementary "Áreas do explorador" [ref=f5e5]:
+    - button "Voltar ao quadro" [ref=f5e6] [cursor=pointer]:
+      - generic [ref=f5e7]: ←
+    - navigation "Áreas" [ref=f5e9]:
+      - button "Projetos" [ref=f5e10] [cursor=pointer]:
+        - generic [ref=f5e11]: 🗄️
+      - button "O que a AI sabe" [active] [ref=f5e13] [cursor=pointer]:
+        - generic [ref=f5e14]: 🐝
+      - button "Grafo" [ref=f5e16] [cursor=pointer]:
+        - generic [ref=f5e17]: 🕸️
+      - button "Wiki" [ref=f5e19] [cursor=pointer]:
+        - generic [ref=f5e20]: 📖
+  - generic [ref=f5e22]:
+    - banner [ref=f5e23]:
+      - heading "O que a AI sabe" [level=1] [ref=f5e29]: 🐝 O que a AI sabe
+      - generic [ref=f5e25]: os neurônios que a frota aprendeu
+      - generic [ref=f5e30]:
+        - generic [ref=f5e31]: 📁 Projeto
+        - combobox "Projeto selecionado" [ref=f5e32]:
+          - option "audit-f44-slugify — https://github.com/simov/slugify.git"
+          - option "array-move — https://github.com/sindresorhus/array-move" [selected]
+    - main [ref=f5e26]:
+      - generic [ref=f5e34]:
+        - generic [ref=f5e35]: A AI ainda não aprendeu nada
+        - generic [ref=f5e36]: Quando os agents rodarem, os neurônios que eles aprenderem aparecem aqui.

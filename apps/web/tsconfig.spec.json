@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "sourceMap": false,
+    "isolatedModules": true
+  },
+  "include": ["src/**/*.spec.ts", "src/**/lib/**/*.ts"]
+}

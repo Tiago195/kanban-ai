@@ -601,3 +601,198 @@ três decisões anteriores da fundação:
   **compartilhado e persistente**, fora do worktree, onde o conhecimento de uma
   sessão fica disponível para as próximas e para agents paralelos — exatamente o
   que arquivos locais/ignorados (ver acima) não conseguem oferecer.
+
+## Emenda — 2026-08-30 (US-F2.10/EP-F2): cutover para o grafo — boa parte desta decisão está revogada
+
+O EP-F2 mediu o serviço descrito acima funcionando de verdade e o resultado
+obrigou a revisão: **a arquitetura de coordenação deste ADR estava
+tecnicamente correta e funcionalmente inútil**, porque o elo que justificava
+tudo — o *recall* (a memória chegar à próxima sessão) — praticamente nunca
+funcionou. Esta emenda registra o cutover (`GRAPHIFY_MEMORY_RECALL` e
+`GRAPHIFY_AFFECTED_FLOWS` com default **ligado**) e delimita o que fica de pé.
+
+### A evidência medida (por que revogar)
+
+- **US-F2.1 (oráculo de characterization, `memory-recall.characterization.spec.ts`):**
+  o recall legado fazia `contains` da **frase inteira** (`título + nomes de
+  flows` concatenados) contra o índice. Com qualquer `affectedFlow` presente,
+  nada casa; com termo vazio, devolve **5 neurônios arbitrários** (os mais
+  recentes); e a falha é **100% silenciosa** — "memória vazia" e "memória
+  quebrada" eram indistinguíveis para a IA e para o operador. A colmeia
+  acumulava conhecimento que **não voltava**.
+- **US-F2.5 (`memory-recall-graph.spec.ts` + validação empírica contra o
+  sidecar real):** no mesmo cenário, o `LIKE` devolve `[]` e a travessia do
+  grafo devolve o neurônio certo — recuperado **porque a task toca o arquivo**
+  (aresta `describes`, ADR-0041/US-F2.4), não porque compartilha palavras.
+- **US-F2.7:** o blast radius derivado do grafo achou **7 arquivos afetados
+  não declarados** pela IA numa iteração real deste próprio repo (commit
+  `8f3d27f`).
+
+### O que esta emenda REVOGA
+
+- **Git como fonte da verdade da memória (Camada 1 como repositório).** O
+  bare repo próprio + `isomorphic-git` saem. Os neurônios viram **arquivos
+  `.md` simples** no clone do Project (`<clone>/.hive/**.md`, materializados
+  pela US-F2.4), indexados pelo grafo de conhecimento do graphify (ADR-0041).
+- **Camada 2 inteira — índice Postgres, locks e eventos `memory.*`.** O
+  `MemoryIndex` global, o lease advisory (TTL/heartbeat), o modelo
+  `FREE`/`EDITING`/`REVIEW`, o CAS por `baseCommit`/`409`, os ramos
+  `mem/ai/<sessao>/*` e a arbitragem por `REVIEW` deixam de existir. No alvo,
+  a **API é a única escritora** (canal `learnings` do resultado da iteração,
+  serializado por task — US-F2.6): não há escritores concorrentes externos
+  para coordenar, então o aparato de coordenação protege um cenário que não
+  ocorre mais.
+- **O control plane `/memory/*` + as 12 tools MCP `memory_*` +
+  `MEMORY_API_TOKENS`** (deprecados na US-F2.8; deleção mecânica na US-F2.3 —
+  tabela de destinos em `docs/specs/ep-f2-rewire-consumidores.md`). Agents
+  externos consultam o MCP do graphify diretamente.
+
+### O que se PERDE (perdas conscientes, sem eufemismo)
+
+- **Histórico/blame do aprendizado.** "O que a AI sabia quando?" deixa de ter
+  resposta nativa: o `.md` no `.hive/` é a única versão. O rollback de um
+  aprendizado errado vira edição manual, não `git revert`.
+- **Identidade e escopo por agent.** O graphify tem UMA `--api-key`: some o
+  `holder` estável, o escopo de escrita por módulo (`classifyWrite`) e a
+  atribuição de autoria. Mitigação de fato: sem endpoints de escrita externos,
+  a chave única protege só leitura.
+- **Arbitragem de conflito.** Sem escritores concorrentes não nasce `REVIEW`;
+  se um dia houver múltiplos escritores de memória de novo, o problema de
+  *lost-update* volta e precisará de solução nova (este ADR continua sendo o
+  registro de como foi resolvido uma vez).
+
+### O que se GANHA
+
+- **Recall que funciona** — recuperação por estrutura (a task toca o arquivo →
+  o arquivo tem aresta `describes` → o neurônio volta), com a evidência medida
+  acima, e **falha honesta**: quando o grafo não está `ready` ou o sidecar
+  está fora, a IA recebe aviso explícito no prompt ("Memória do projeto
+  INDISPONÍVEL"), o card recebe Activity e o boot avisa o operador quando a
+  frota inteira está sem memória (`GRAPHIFY_API_KEY` ausente com o recall
+  ligado). **Sem fallback para o LIKE** — decisão da US-F2.5, reavaliada e
+  mantida neste cutover: o oráculo da F2.1 prova que o fallback devolveria
+  `[]` nos mesmos cenários, ou seja, ele só re-mascararia a falha (o defeito
+  original) sem recuperar nada.
+- **Menos peças operacionais**: sai o bare repo + índice + scheduler de
+  GC/lease do processo da API; a ordem de escrita disciplinada
+  (`commit → reindexa → WS`) deixa de ser um invariante a policiar.
+
+### O que SOBREVIVE (a premissa original continua valendo)
+
+- **Neurônios `.md` granulares, legíveis e escrevíveis por humanos e AIs** —
+  o coração deste ADR está intacto; mudou o **substrato** (arquivo no clone +
+  grafo, em vez de git próprio + índice), não o **formato** nem o objetivo
+  (fechar a amnésia entre sessões, ADR-0008).
+- **A separação "conteúdo vs. índice descartável"**: o grafo do graphify é
+  100% reconstruível a partir dos `.md` (rebuild), exatamente como o índice
+  Postgres era — o princípio do ADR-0004 segue aplicado, com outra engine.
+- **O diagnóstico do Contexto** (sessões efêmeras perdem conhecimento; os
+  documentos estáticos não bastam) permanece válido e é o que o grafo passa a
+  servir.
+
+### Rollback e remoção
+
+`GRAPHIFY_MEMORY_RECALL=false` / `GRAPHIFY_AFFECTED_FLOWS=false` restauram o
+comportamento legado **byte-idêntico** (provado pelas specs de paridade das
+US-F2.5/F2.7 — é a rede de segurança do épico). O substrato velho vive até a
+**US-F2.3**, que deleta o módulo `memory/` seguindo a tabela de destinos da
+US-F2.8; a partir dela o rollback deixa de existir e esta emenda passa a
+descrever o único caminho.
+
+## Emenda — 2026-08-30 (US-F2.3/EP-F2): a deleção prevista acima foi EXECUTADA
+
+A emenda da US-F2.10 delimitou o que estava revogado e previu: *"o substrato
+velho vive até a US-F2.3 … a partir dela o rollback deixa de existir"*. Esta
+emenda registra que a US-F2.3 aconteceu — o que segue abaixo é o estado real
+do sistema, e o corpo deste ADR passa a ser histórico.
+
+### O que foi deletado (seguindo `docs/specs/ep-f2-rewire-consumidores.md`)
+
+- **O módulo `apps/api/src/modules/memory/` inteiro** (~5.2k linhas): bare
+  repo + `isomorphic-git` (Camada 1), índice/CAS/merge 3-way (Camada 2),
+  locks/lease, REVIEW/arbitragem, bootstrap/semeadura, GC, scheduler, guard e
+  registro de tokens.
+- **O control plane `/memory/*`** (11 rotas) e **as 12 tools MCP `memory_*`**.
+- **`MEMORY_*` envs** (`MEMORY_GIT_DIR`, `MEMORY_SCHEDULER_ENABLED`,
+  `MEMORY_LOCK_SWEEP_INTERVAL_MS`, `MEMORY_GC_INTERVAL_MS`,
+  `MEMORY_API_TOKENS`) e o bloco `config.memory`.
+- **Os tipos/eventos do substrato** em `packages/shared`: eventos
+  `memory.*`, DTOs de lock/CAS/REVIEW, `Neuron`, `AgentId`, `Owner`,
+  `MemoryLockState`/`MemoryAccessMode`; `MemoryNeuronSummary`/`Detail`
+  perderam os campos de coordenação (`lockState`/`holder`/`stale`/
+  `archivedAt`/`headCommit`).
+- **Os neurônios existentes no bare repo** — apagados sem migração e sem
+  arquivamento (decisão do dono). Os `.md` já materializados em
+  `<clone>/.hive/` são o dado vivo.
+- **O rollback `GRAPHIFY_MEMORY_RECALL=false`** deixou de restaurar o LIKE
+  (não existe mais LIKE): agora só DESLIGA o recall. O oráculo da US-F2.1
+  (`memory-recall.characterization.spec.ts`) foi aposentado junto — o
+  comportamento que ele fixava (e os 8 achados) está registrado no épico.
+
+### O que mudou de lugar (sobreviventes)
+
+- `neuron-format.ts` (formato v2, `appendLearning` lazy) →
+  `apps/api/src/shared/neuron-format.ts`.
+- `detectModules` → `apps/api/src/modules/projects/detect-modules.ts`
+  (o Explorer `repoInfo` sempre foi consumidor — correção ao doc da F2.9, que
+  o dava como morto).
+- A escrita de learnings → `ProjectHiveService.mutateHiveFile` (o `.hive/`
+  do clone é a fonte da verdade; `materialize()` deixou de existir — quem
+  escreve avisa o grafo via rebuild incremental).
+- `withNamespace` NÃO sobreviveu (correção ao §5.4 do doc da F2.9): sem bare
+  repo compartilhado não há namespace — o isolamento por Project é o próprio
+  clone.
+
+### A resposta ao lost-update (o que o CAS/merge protegia)
+
+Dois agents anexando ao mesmo neurônio era o cenário que o aparato de
+coordenação resolvia. A resposta mínima honesta implementada:
+
+1. **A API é a única escritora** (decisão da F2.8 §2.1; sem control plane não
+   há escritor externo) e roda em **um único processo Node**.
+2. `mutateHiveFile` faz o read-modify-write **síncrono, sem await entre a
+   leitura e o rename** — em Node single-thread duas escritas nunca se
+   intercalam dentro do processo, qualquer que seja a concorrência de stories
+   (`AGENT_SERIALIZE_BY_REPO` continua sendo um guard adicional opcional, e a
+   serialização por epic/`inFlight` reduz a janela a quase nada).
+3. A escrita é **atômica no FS** (tmp + rename) contra corrupção por crash.
+
+Teto conhecido e documentado no código (`project-hive.service.ts`): a
+garantia é single-process. Se um dia houver um segundo escritor (outra
+instância da API, um worker), o lost-update volta — e este ADR continua sendo
+o registro de como o problema foi resolvido uma vez.
+
+### O que segue vivo (e por quê)
+
+- O model Prisma **`MemoryIndex`** ainda existe no schema — a remoção é a
+  **US-F2.12**, bloqueada pelo EP-F4. Nota da execução da F2.3: depois desta
+  deleção ele ficou **sem nenhum consumidor de produção** (o fallback do
+  Explorer, seu último leitor, morreu aqui).
+- `ProjectHiveService` (leitura + escrita do `.hive/`), o formato v2 de
+  neurônio e o recall por grafo — o coração da premissa original (fechar a
+  amnésia entre sessões) nas mãos do novo substrato.
+
+## Emenda — 2026-08-30 (US-F2.12/EP-F2): o índice foi aposentado — Camada 2 integralmente desmontada
+
+A pendência registrada acima ("o model Prisma `MemoryIndex` ainda existe no
+schema — a remoção é a US-F2.12") foi executada: migration
+`20260830120000_f212_drop_memory_index` dropa a tabela e o model saiu do
+`schema.prisma`.
+
+Por que o DROP destrutivo é seguro (a decisão não é nova — é consequência):
+
+- O model era a **projeção derivada** de neurônios do git da memória, e esse
+  substrato foi apagado na US-F2.3 (decisões do dono: o git da memória sai,
+  os neurônios são apagados). Projeção de fonte que não existe não tem o que
+  preservar.
+- **Zero consumidores de produção** desde a F2.3 — o fallback do Project
+  Explorer era o último leitor e morreu lá; a verificação da F2.12 confirmou
+  zero referências de código em `apps/api`, `apps/mcp`, `apps/web` e
+  `packages/shared`.
+- Este próprio ADR o definiu como *"cache, não arquivo… não há migração de
+  dados de memória para preservar"* (ADR-0004 aplicado à memória).
+
+Com isso a **Camada 2 está integralmente desmontada**: módulo, control plane,
+tools MCP, envs, tipos (F2.3) e agora o storage (F2.12). O que segue vivo é o
+listado na emenda da F2.3: `ProjectHiveService` + `.hive/` no clone, formato
+v2 de neurônio e recall por grafo.

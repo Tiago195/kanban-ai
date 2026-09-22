@@ -78,6 +78,13 @@ export interface AgentRunInput {
    * implementação que emite `agent.question` e aguarda a resposta via endpoint.
    */
   onQuestion?: (question: AgentQuestion) => Promise<string>;
+  /**
+   * US-F3.5 — true quando esta iteração é a análise de uma task SEM DOD (a
+   * mesma condição que o `buildPrompt` usa para pedir `proposedDod`). Runners
+   * com `outputSchema` incluem o campo `proposedDod` no schema SÓ quando true
+   * (R3 do mapa da US-F3.3). Runners de marcador/mock ignoram.
+   */
+  proposeDod?: boolean;
 }
 
 /** Resultado de uma execução de iteração. */
@@ -103,9 +110,10 @@ export interface AgentRunResult {
    */
   affectedFlows?: { name: string; files: string[]; note?: string }[];
   /**
-   * US-A4 — Aprendizados que o agent quer PERSISTIR na memória em colmeia
-   * (ADR-0027). Cada item vira/atualiza um neurônio `.md`. O orchestrator
-   * consome esta lista ao fechar a iteração (US-A3): grava via MemoryWriteService.
+   * US-A4 — Aprendizados que o agent quer PERSISTIR na colmeia do Project
+   * (ADR-0027, emenda US-F2.10). Cada item vira/atualiza um neurônio `.md` em
+   * `<clone>/.hive/`. O orchestrator consome esta lista ao fechar a iteração
+   * (US-A3/US-F2.3, `persistLearning`).
    * `path` é o neurônio-alvo (ex.: `modules/<modulo>.md`); `summary` é o texto
    * do aprendizado; `scope` (opcional) é uma dica do módulo/escopo. Opcional e
    * retrocompatível: ausência = nenhum aprendizado reportado.
@@ -154,6 +162,14 @@ export interface AgentRunResult {
 /** Interface plugável do runner. */
 export interface AgentRunner {
   readonly id: string;
+  /**
+   * US-F3.5 — true quando o runner consome o resultado via `outputSchema`
+   * (objeto validado por schema) em vez do protocolo de marcadores
+   * `<<<KANBAN_RESULT>>>`. O `buildPrompt` usa este flag para NÃO ensinar o
+   * formato de marcador (as regras de formato passam a viver no schema).
+   * Ausente/false = protocolo de marcador (CopilotCliRunner, default).
+   */
+  readonly structuredOutput?: boolean;
   run(input: AgentRunInput): Promise<AgentRunResult>;
 }
 

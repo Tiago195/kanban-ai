@@ -40,6 +40,27 @@ export function resolveDispatchModel(
 }
 
 /**
+ * US-F3.10 — Resolve o adapter EFETIVO de um dispatch (cascata × recovery lane).
+ *
+ *  - Trabalho normal (`recovery=false`): o adapter resolvido em cascata
+ *    (task → story → epic → board.defaultAdapter → global) VENCE.
+ *  - Recuperação status-only (`recovery=true`): a lane VENCE e usa o adapter
+ *    GLOBAL (`config.agentAdapter`). Racional: o `AGENT_CHEAP_MODEL_ID` é um id
+ *    no namespace de modelos do adapter global — mandá-lo para o adapter do
+ *    card seria 404 garantido em outro vendor; e a recuperação é status-only e
+ *    barata por princípio: rodar no caminho de hoje (global + modelo barato)
+ *    garante que uma task pinada num adapter caro NUNCA fica mais cara
+ *    justamente na recuperação. Comportamento idêntico ao pré-F3.10.
+ */
+export function resolveDispatchAdapter<T>(
+  cascadeAdapter: T,
+  globalAdapter: T,
+  recovery: boolean,
+): T {
+  return recovery ? globalAdapter : cascadeAdapter;
+}
+
+/**
  * Bloco de guard injetado no prompt SOMENTE no caminho de recuperação. Instrui a
  * AI a NÃO produzir trabalho entregável — apenas normalizar o estado/limpar o
  * lock e pedir intervenção humana se necessário.

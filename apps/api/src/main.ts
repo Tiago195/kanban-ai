@@ -41,6 +41,20 @@ async function bootstrap(): Promise<void> {
 
   const config = loadConfig();
 
+  // US-F2.10 (cutover) — o recall por grafo é o DEFAULT, mas sem
+  // GRAPHIFY_API_KEY a integração inteira fica off: nenhum grafo fica `ready`
+  // e TODA a frota de Boards com Project roda sem memória (o prompt avisa a
+  // IA, mas o operador precisa de UM aviso agregado no boot, não N por card).
+  if (config.graphify.memoryRecallEnabled && !config.graphify.apiKey) {
+    Logger.warn(
+      'US-F2.10: GRAPHIFY_MEMORY_RECALL está LIGADO (default do cutover) mas GRAPHIFY_API_KEY ' +
+        'está ausente — todos os Boards com Project ficarão SEM memória nesta frota. Configure a ' +
+        'chave (e suba o sidecar graphify) ou desligue o recall com GRAPHIFY_MEMORY_RECALL=false ' +
+        '(US-F2.3: não existe mais fallback legado).',
+      'Bootstrap',
+    );
+  }
+
   // US-HARD2 — circuit-breaker de crash-loop. ANTES de qualquer conexão a
   // Postgres/LLM (i.e. antes de `NestFactory.create`), aplicamos backoff
   // persistido: se o boot anterior não registrou shutdown limpo, esperamos um

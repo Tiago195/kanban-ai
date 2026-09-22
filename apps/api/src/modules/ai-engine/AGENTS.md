@@ -27,6 +27,12 @@ ai-engine/
 
 - **`AgentRunner`** (`runners/agent-runner.interface.ts`): `run(input) => AgentRunResult`.
   Token de DI: `AGENT_RUNNER`. v1: `CopilotCliRunner` (subprocess da Copilot CLI).
+  US-F3.4: `TanStackRunner` (`runners/tanstack.runner.ts`, sobre `@tanstack/ai` +
+  endpoint OpenAI-compatível via `TANSTACK_BASE_URL`) convive atrás do MESMO token,
+  selecionado só com `AGENT_ADAPTER=tanstack` (dark launch: fora do catálogo da UI
+  quando inativo; instanciado LAZY pelo registry — `copilot-cli` NÃO passa por ele).
+  Extração de resultado reusa o protocolo de marcadores do bridge
+  (`runners/tanstack-marker-protocol.ts`); `outputSchema` é a US-F3.5.
 - **`AgentSessionManager`**: `start`, `get`, `abort`, `canStart` — estados
   `running|idle|dead`. **Interface plugável** (ponto de extensão para BullMQ+Redis).
 - **`Orchestrator`**: `onStoryEnterInProgress(storyId)`, `stop(storyId, mode)`,
@@ -182,11 +188,11 @@ não do Card. A resolução (fallback-preserving) vive no `orchestrator.ts`:
   (story→epic `aiProject`), comportamento idêntico ao de hoje. A assinatura de
   `WorkspaceService.resolveWorkdir(key, targetRepoPath)` **NÃO muda** — só a
   origem do path.
-- Memória namespaceada por `projectId` — `resolveMemoryNamespace(storyId)`
-  devolve `projects/<projectId>` (ou `undefined` no legado). Flui para
-  `bootstrapFromRepo({namespace})`, `memoryIndex.query(term, limit, namespace)`
-  (READ em `buildContext`) e `withNamespace(learning.path, namespace)` (WRITE de
-  learnings). Colmeias de projetos distintos NÃO colidem.
+- Memória por Project (US-F2.3) — a colmeia vive em `<clone>/.hive/**.md`,
+  per-Project por construção (o clone é do Project). `persistLearning` escreve
+  via `ProjectHiveService.mutateHiveFile(projectId, path, mutate)`; o recall é
+  por grafo (`recallFromGraph`). Board legado sem Project não tem memória
+  (perda visível via Activity).
 
 ## O que NÃO mexer
 
@@ -389,36 +395,38 @@ nem os mocks/testes:
 
 Ao mudar esses contratos, mantenha este arquivo em dia.
 
-## Integração com a memória em colmeia (EP-A / ADR-0027)
+## Integração com a memória (EP-A/EP-F2 — ADR-0027 com as emendas F2.10/F2.3)
 
-O loop engine **consome** e **alimenta** a memória em colmeia — antes ele começava
-"amnésico". Toda interação é **defensiva** (try/catch + fallback): a memória
-NUNCA pode derrubar o loop. `sessionId = taskId` (estável entre iterações);
-neurônios vivem em `modules/<modulo>.md`.
+O loop engine **consome** e **alimenta** a colmeia do Project — neurônios `.md`
+em `<clone>/.hive/**.md` (a fonte da verdade desde a US-F2.3; o git da memória
+e o módulo `memory/` foram deletados na F2.3, e a tabela `MemoryIndex` foi
+dropada na US-F2.12). Toda interação é
+**defensiva**: a memória NUNCA pode derrubar o loop.
 
-- **READ (US-A1)** — `buildContext` (async) faz um fetch best-effort de
-  neurônios via `MemoryIndexService.query(...)` → `MemoryGitService.readNeuron(...)`
-  (limite 5, conteúdo truncado). O resultado vai em `context.memoryNeurons` e é
-  injetado por `buildPrompt` na seção **"Memória do projeto (colmeia)"** antes do
-  histórico de iterações. Em falha, `memoryNeurons = []`.
+- **READ (US-F2.5/F2.10)** — `buildContext` recupera memória por TRAVESSIA DE
+  GRAFO (`recallFromGraph` → `ProjectGraphQueryService`), com os corpos dos
+  neurônios lidos do `.hive/` do clone (`appendNeuronBodies` →
+  `ProjectHiveService.readHiveFile`). Falha ≠ vazio: o prompt avisa
+  explicitamente ("Memória do projeto INDISPONÍVEL") e o card ganha Activity.
+  Sem Project / env off → iteração roda SEM memória (o recall LIKE morreu na
+  US-F2.3).
 - **INSTRUÇÃO (US-A2)** — o template `KANBAN_RESULT` inclui o campo opcional
   `learnings[]` (`{ path, summary, scope? }`) e uma regra explicando quando/como
   a AI deve reportar aprendizados reutilizáveis.
-- **WRITE (US-A3)** — após `persistAffectedFlows`, cada item de
-  `runResult.learnings` é anexado (não sobrescreve) ao neurônio via
-  `MemoryIndexService.commitAndReindex({path, content, sessionId, message})`
-  (git commit → reindexa Postgres → WS, na ordem invariante do ADR-0027). Um
-  warning por learning em caso de falha; o loop segue.
-- **BOOTSTRAP (US-A5)** — `onStoryEnterInProgress`, antes de `startAuto`, chama
-  `MemoryBootstrapService.bootstrapFromRepo({repoPath, sessionId, namespace?})`
-  para semear neurônios iniciais por módulo do repo-alvo. É **idempotente** (pula
-  módulos já existentes) e defensivo. **US-PROJ4:** `repoPath` = clone gerenciado
-  quando o Board tem Project; `namespace` = `projects/<projectId>` isola a colmeia.
+- **WRITE (US-A3/F2.6/F2.3)** — cada item de `runResult.learnings` é anexado ao
+  neurônio via `persistLearning` → `ProjectHiveService.mutateHiveFile`
+  (read-modify-write SÍNCRONO + rename atômico; ver a doc da classe para a
+  resposta ao lost-update). Perda definitiva vira Activity no card com o resumo
+  completo. Sucesso agenda o rebuild incremental do grafo com o `.hive/…`
+  escrito.
+- **BOOTSTRAP** — não existe mais (US-F2.9): o neurônio nasce LAZY na primeira
+  escrita de learning (memory doc canônico do graphify — US-F5.1,
+  `serializeMemoryDoc` em `shared/neuron-format.ts`, gravado em
+  `<clone>/.hive/memory/`).
 
 O contrato `learnings` é parseado em `runners/cli-adapter.ts` (`parseLearnings`)
 e tipado em `runners/agent-runner.interface.ts` (`AgentRunResult.learnings`).
-`MemoryModule` é `@Global`, então os 3 serviços são injetados direto no
-construtor do `Orchestrator`.
+O `ProjectHiveService` vem do `ProjectsModule` (injeção `@Optional()`).
 
 ## Como testar
 

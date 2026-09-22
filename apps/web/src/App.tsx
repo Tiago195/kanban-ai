@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Routes, Route, useNavigate, useParams } from "react-router-dom";
+import { Navigate, Routes, Route, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import type { IterationPhase } from "@kanban-ai/shared";
 
@@ -21,7 +21,7 @@ import {
 import { useRealtime } from "@/features/realtime";
 import { useReviewNotifications } from "@/features/realtime/hooks/useReviewNotifications";
 import { BacklogChatView } from "@/features/backlog-chat";
-import { ProjectExplorer, ProjectsManager } from "@/features/projects";
+import { ExplorerPage } from "@/features/projects";
 import { Toast } from "@/shared/components/Toast";
 import { getHealth } from "@/shared/services/apiClient";
 import { showToast } from "@/shared/services/toastStore";
@@ -41,6 +41,9 @@ export default function App() {
   const setFilters = useBoardUiStore((state) => state.setFilters);
 
   const navigate = useNavigate();
+  // US-UX.1 — em `/explorer/**` a camada de conhecimento é PÁGINA INTEIRA:
+  // o quadro não renderiza atrás competindo por atenção.
+  const isExplorer = useLocation().pathname.startsWith("/explorer");
 
   useEffect(() => {
     getHealth()
@@ -92,6 +95,10 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {/* US-UX.1 — o quadro (header + métricas + colunas) só existe FORA da
+          moldura do Explorador; lá, a página é da camada de conhecimento. */}
+      {isExplorer ? null : (
+        <>
       <header className="app-header">
         <h1 className="app-title" title={"WS: " + status}>
           Sprint Board
@@ -163,7 +170,7 @@ export default function App() {
             type="button"
             title="Registrar um repositório git como Projeto e associá-lo ao quadro"
             data-testid="open-projects"
-            onClick={() => navigate("/projects")}
+            onClick={() => navigate("/explorer")}
           >
             🗄️ Projetos
           </button>
@@ -261,6 +268,8 @@ export default function App() {
       </div>
 
       <BoardView />
+        </>
+      )}
 
       <Toast />
 
@@ -273,18 +282,22 @@ export default function App() {
           path="/loops"
           element={<LoopsModal boardId={boardId} onClose={() => navigate("/")} />}
         />
-        <Route path="/explorer" element={<ProjectExplorer onClose={() => navigate("/")} />} />
+        {/* US-UX.1 — a moldura: página inteira endereçável. `/explorer` sem
+            projeto/área redireciona para a forma canônica
+            `/explorer/:projectId/:area` (máquina em lib/explorerShell.ts). */}
+        <Route path="/explorer" element={<ExplorerPage theme={theme} setTheme={setTheme} />} />
+        <Route path="/explorer/:projectId" element={<ExplorerPage theme={theme} setTheme={setTheme} />} />
         <Route
-          path="/projects"
-          element={
-            <ProjectsManager
-              boardId={boardId}
-              boardProjectId={board?.projectId ?? null}
-              onClose={() => navigate("/")}
-              onOpenExplorer={() => navigate("/explorer")}
-            />
-          }
+          path="/explorer/:projectId/:area"
+          element={<ExplorerPage theme={theme} setTheme={setTheme} />}
         />
+        {/* US-UX.5 — deep link de artigo da Wiki: /explorer/:id/wiki/:slug. */}
+        <Route
+          path="/explorer/:projectId/:area/:slug"
+          element={<ExplorerPage theme={theme} setTheme={setTheme} />}
+        />
+        {/* Compat: o antigo modal `/projects` agora vive na área Projetos. */}
+        <Route path="/projects" element={<Navigate to="/explorer" replace />} />
         <Route path="/backlog-chat" element={<BacklogChatRoute />} />
         <Route path="/backlog-chat/:sessionId" element={<BacklogChatRoute />} />
       </Routes>

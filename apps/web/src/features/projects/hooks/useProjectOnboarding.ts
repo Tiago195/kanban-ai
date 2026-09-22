@@ -16,6 +16,8 @@ export function useCreateProject() {
     mutationFn: (input: CreateProjectInput) => apiClient.createProject(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      // US-UX.4: a faixa de conhecimento acompanha a lista.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectsKnowledge });
     },
   });
 }
@@ -27,6 +29,8 @@ export function useDeleteProject() {
     mutationFn: (projectId: string) => apiClient.deleteProject(projectId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      // US-UX.4: a faixa de conhecimento acompanha a lista.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectsKnowledge });
     },
   });
 }

@@ -2524,3 +2524,499 @@
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   white-space: nowrap;
 }
+
+/* =========================================================================
+   US-UX.1 — A MOLDURA do Explorador: página inteira com rail vertical
+   persistente (Projetos · O que a AI sabe · Grafo · Wiki), cabeçalho da área
+   com o seletor de projeto, e conteúdo com espaço para respirar.
+   Só tokens da casa — funciona nos 3 temas (claro / .dark / .high-contrast).
+   ========================================================================= */
+.explorer-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Rail vertical persistente */
+.explorer-rail {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 10px;
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.explorer-rail-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.explorer-rail-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+.explorer-rail-btn:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.explorer-rail-btn[aria-current="page"],
+.explorer-rail-btn[aria-current="page"]:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+.explorer-rail-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* Foco de teclado VISÍVEL no rail (os 3 temas têm --accent contrastante). */
+.explorer-rail-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.explorer-rail-btn[aria-current="page"]:focus-visible {
+  outline-color: var(--text);
+}
+.explorer-rail-back {
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  border-color: var(--border);
+}
+.explorer-rail-icon {
+  font-size: 16px;
+  width: 20px;
+  flex-shrink: 0;
+  text-align: center;
+}
+.explorer-rail-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Coluna principal: cabeçalho da área + conteúdo rolável */
+.explorer-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.explorer-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 20px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.explorer-topbar-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.explorer-topbar-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.explorer-topbar-project {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+  flex: 0 1 460px;
+}
+.explorer-topbar-project select {
+  flex: 1;
+  min-width: 160px;
+}
+.explorer-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px 32px;
+}
+.explorer-content-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+/* Tela estreita: o rail colapsa para ícones (labels somem, tooltips ficam). */
+@media (max-width: 900px) {
+  .explorer-rail {
+    width: 58px;
+    padding: 12px 8px;
+  }
+  .explorer-rail-label {
+    display: none;
+  }
+  .explorer-rail-btn {
+    justify-content: center;
+    padding: 9px 0;
+  }
+  .explorer-rail-icon {
+    width: auto;
+  }
+  .explorer-topbar {
+    padding: 10px 12px;
+  }
+  .explorer-topbar-hint {
+    display: none;
+  }
+  .explorer-content {
+    padding: 12px 12px 24px;
+  }
+}
+
+/* =========================================================================
+   US-UX.2 — Esqueleto do grafo em ALTO CONTRASTE: a cor de comunidade
+   (HSL fixo do communityColor) sai de cena — bolha e nó viram traço branco
+   sobre preto (21:1) e o RÓTULO da bolha é o portador da identidade.
+   Detecção pela CLASSE no <html> (.high-contrast — padrão da casa); CSS
+   vence atributos de apresentação do SVG e reage à troca de tema sem JS.
+   ========================================================================= */
+.high-contrast .skeleton-bubble circle {
+  fill: transparent;
+  stroke: #fff;
+  stroke-opacity: 1;
+  stroke-width: 1.5;
+}
+.high-contrast .skeleton-node circle {
+  fill: #000;
+  fill-opacity: 1;
+  stroke: #fff;
+  stroke-width: 2;
+}
+
+/* US-UX.2 — barra proporcional em ALTO CONTRASTE: mesma regra das bolhas —
+   sem matiz de comunidade (o texto sobre HSL fixo media 4.05:1, abaixo dos
+   4.5:1 de AA e da promessa 21:1 do tema). Preto + borda branca + texto
+   branco; a proporção continua na LARGURA, que é a informação da barra.
+   !important porque o segmento é pintado por style inline no componente. */
+.high-contrast .community-bar-segment {
+  background: #000 !important;
+  color: #fff !important;
+  border-right: 2px solid #fff !important;
+}
+
+/* US-UX.5 — Wiki: navegação lateral (lista de artigos AO LADO do documento)
+   + artigo com deep link. Usa só os tokens de tema existentes (--text,
+   --text-muted, --surface, --border), então os 3 temas seguem valendo. */
+.wiki-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.wiki-nav {
+  display: grid;
+  gap: 12px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 8px;
+  border-right: 1px solid var(--border);
+}
+.wiki-nav section {
+  display: grid;
+  gap: 2px;
+}
+.wiki-nav-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.wiki-nav-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.wiki-nav-item:hover {
+  background: var(--surface);
+}
+/* Item ativo: fundo de superfície + barra de acento (decorativa) — o texto
+   fica em --text sobre --surface, contraste alto nos 3 temas (o acento como
+   FUNDO reprovaria 4.5:1 no claro). */
+.wiki-nav-item[aria-current="page"] {
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 700;
+}
+.wiki-nav-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wiki-nav-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.wiki-nav-item[aria-current="page"] .wiki-nav-count {
+  color: inherit;
+}
+/* ~900px: a navegação empilha acima do artigo, com altura contida. */
+@media (max-width: 900px) {
+  .wiki-layout {
+    grid-template-columns: 1fr;
+  }
+  .wiki-nav {
+    max-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding-right: 0;
+    padding-bottom: 8px;
+  }
+}
+
+/* US-UX.4 — Projetos: card com estado do conhecimento.
+   Chips de estado (antes sem NENHUM estilo — "pronto" era palavra solta),
+   card do projeto com a faixa clone · grafo · wiki · memória, e a confirmação
+   inline de exclusão. Tons calculados por tema para contraste ≥ 4.5:1
+   (medidos; cor nunca é o único canal — todo estado tem rótulo textual). */
+:root {
+  --chip-ok-fg: #116149; /* 6.3:1 sobre o fundo tintado claro */
+  --chip-ok-bg: color-mix(in srgb, var(--ok) 15%, var(--surface-2));
+  --chip-warn-fg: #7a4a00; /* 6.5:1 */
+  --chip-warn-bg: color-mix(in srgb, var(--warn) 18%, var(--surface-2));
+  --chip-danger-fg: #a1272c; /* 6.1:1 */
+  --chip-danger-bg: color-mix(in srgb, var(--danger) 14%, var(--surface-2));
+  --danger-strong: #c22b31; /* texto de erro sobre --surface-2: 5.7:1 */
+}
+.dark {
+  --chip-ok-fg: #5ad4a0; /* 6.2:1 sobre o fundo tintado escuro */
+  --chip-ok-bg: color-mix(in srgb, var(--ok) 18%, var(--surface-2));
+  --chip-warn-fg: #ffc95e; /* 7.0:1 */
+  --chip-warn-bg: color-mix(in srgb, var(--warn) 18%, var(--surface-2));
+  --chip-danger-fg: #ff8a92; /* 5.5:1 */
+  --chip-danger-bg: color-mix(in srgb, var(--danger) 18%, var(--surface-2));
+  --danger-strong: #ff8a92; /* 7.0:1 sobre --surface-2 */
+}
+.high-contrast {
+  /* Preto puro + tons já AAA da paleta; o contorno marca o chip. */
+  --chip-ok-fg: var(--ok);
+  --chip-ok-bg: transparent;
+  --chip-warn-fg: var(--warn);
+  --chip-warn-bg: transparent;
+  --chip-danger-fg: var(--danger);
+  --chip-danger-bg: transparent;
+  --danger-strong: var(--danger); /* 6.9:1 sobre preto */
+}
+
+/* Chip base (estado SEMPRE com rótulo textual; a cor só reforça). */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  white-space: nowrap;
+}
+.chip-ok {
+  color: var(--chip-ok-fg);
+  background: var(--chip-ok-bg);
+  border-color: color-mix(in srgb, var(--chip-ok-fg) 45%, transparent);
+}
+.chip-warn {
+  color: var(--chip-warn-fg);
+  background: var(--chip-warn-bg);
+  border-color: color-mix(in srgb, var(--chip-warn-fg) 45%, transparent);
+}
+.chip-danger {
+  color: var(--chip-danger-fg);
+  background: var(--chip-danger-bg);
+  border-color: color-mix(in srgb, var(--chip-danger-fg) 55%, transparent);
+}
+.high-contrast .chip-ok,
+.high-contrast .chip-warn,
+.high-contrast .chip-danger {
+  border-color: currentColor;
+}
+
+/* O card de um projeto na lista. */
+.project-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow);
+}
+/* Falha (clone ou grafo) GRITA: filete danger na borda esquerda do card. */
+.project-card-failed {
+  border-left: 4px solid var(--danger);
+}
+.project-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.project-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.project-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.project-card-url {
+  font-size: 11px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+.project-card-error {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger-strong);
+}
+
+/* A faixa de estado do conhecimento: 4 fatos, um olhar responde tudo. */
+.project-card-facts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap; /* ~900px: os fatos quebram linha sem estourar o card */
+}
+.pk-fact {
+  display: grid;
+  gap: 1px;
+  min-width: 118px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.pk-fact-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  /* muted puxado 20% para --text: 4.5:1 exato virava 5.4:1 no claro (medido). */
+  color: color-mix(in srgb, var(--text-muted) 80%, var(--text));
+}
+.pk-fact-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.pk-ok .pk-fact-value {
+  color: var(--chip-ok-fg);
+}
+.pk-warn .pk-fact-value {
+  color: var(--chip-warn-fg);
+}
+.pk-danger {
+  background: var(--chip-danger-bg);
+  border-color: color-mix(in srgb, var(--chip-danger-fg) 55%, transparent);
+}
+.pk-danger .pk-fact-value {
+  color: var(--chip-danger-fg);
+}
+/* Os tons ok/warn assentam sobre --surface-2 (par medido do texto). */
+.pk-ok,
+.pk-warn {
+  background: var(--surface-2);
+}
+.high-contrast .pk-fact {
+  background: transparent;
+}
+.high-contrast .pk-danger {
+  border-color: var(--chip-danger-fg);
+}
+
+/* Rodapé: sync à esquerda; Excluir DEMOVIDO a link discreto à direita. */
+.project-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.project-card-sync {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.project-delete-link {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--text-muted);
+  text-decoration: underline;
+  border-radius: 4px;
+}
+.project-delete-link:hover {
+  color: var(--danger-strong);
+}
+
+/* Confirmação inline de exclusão (destrutivo nunca dispara em 1 clique). */
+.project-delete-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 60%, transparent);
+  border-radius: 8px;
+  background: var(--chip-danger-bg);
+  color: var(--text);
+}
+.high-contrast .project-delete-confirm {
+  background: transparent;
+  border-color: var(--danger);
+}
+.project-delete-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}

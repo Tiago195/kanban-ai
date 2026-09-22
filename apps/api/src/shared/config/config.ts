@@ -50,45 +50,16 @@ export interface AppConfig {
   wsPath: string;
   databaseUrl: string;
   /**
-   * US-OBS4 — adapter de agent ativo no loop engine. O `AGENT_RUNNER` é
-   * resolvido a partir deste `kind` via `agent-adapter.registry`. Default
-   * `copilot-cli` (não-regressão: sem env, o loop se comporta como antes).
-   * Lido de `AGENT_ADAPTER`; valores desconhecidos caem no default. Ver
-   * ADR-0036.
+   * US-OBS4/US-F3.1 — adapter de agent ativo no loop engine, ÚNICA fonte de
+   * verdade da seleção de runner. O `AGENT_RUNNER` é resolvido a partir deste
+   * `kind` via `agent-adapter.registry`. Precedência (ADR-0036, emenda
+   * US-F3.1): `AGENT_ADAPTER` explícito vence; ausente/vazio, o alias
+   * DEPRECADO `AGENT_RUNNER_KIND` (`mock|copilot-cli`) é honrado (com warning
+   * de deprecação no boot); sem os dois, default do processo `mock`
+   * (ADR-0014). `AGENT_ADAPTER` explícito desconhecido cai no default de
+   * catálogo `copilot-cli`.
    */
   agentAdapter: AgentAdapterKind;
-  /**
-   * Serviço de memória (ADR-0027, Camada 1 — git como fonte da verdade).
-   */
-  memory: {
-    /**
-     * Raiz do **bare git repository** da memória (isomorphic-git). Aponta para
-     * um **volume dedicado do serviço**, FORA do repo-alvo, com ciclo de vida
-     * independente (não é clone nem convive com o working tree do projeto).
-     * Lido de `MEMORY_GIT_DIR`. Default: `./.kanban-ai-memory/git` (relativo ao
-     * cwd da API). A validação no boot garante que esteja configurado/válido.
-     */
-    gitDir: string;
-    /**
-     * EP-B (ADR-0027) — liga o `MemorySchedulerService`, que dispara em cadência
-     * os jobs de manutenção da colmeia (`expireStale` de locks + GC). Lido de
-     * `MEMORY_SCHEDULER_ENABLED`. Default `true`; `'false'` desliga TODOS os
-     * timers (nada é agendado no boot).
-     */
-    schedulerEnabled: boolean;
-    /**
-     * EP-B — intervalo (ms) do tick que varre e auto-libera leases vencidos
-     * (`MemoryLockService.expireStale`). Lido de `MEMORY_LOCK_SWEEP_INTERVAL_MS`.
-     * Default `30000` (30s).
-     */
-    lockSweepIntervalMs: number;
-    /**
-     * EP-B — intervalo (ms) do job de garbage collection da memória
-     * (`MemoryGcService`). Lido de `MEMORY_GC_INTERVAL_MS`. Default `3600000`
-     * (1h).
-     */
-    gcIntervalMs: number;
-  };
   agent: {
     defaultModel: string;
     /**
@@ -104,6 +75,13 @@ export interface AppConfig {
     watchdogIntervalMs: number;
     autoStepIntervalMs: number;
     workspacesDir: string;
+    /**
+     * US-F3.1 — campo LEGADO, agora DERIVADO de `agentAdapter` (nunca diverge:
+     * `mock` quando `agentAdapter === 'mock'`, senão `copilot-cli`). Não é mais
+     * lido de env própria em separado — a env `AGENT_RUNNER_KIND` é apenas um
+     * alias deprecado que alimenta a resolução de `agentAdapter`. Será removido
+     * junto com o alias na próxima versão.
+     */
     runnerKind: 'mock' | 'copilot-cli';
     /** Comando base da CLI (ex.: 'copilot', 'node'). */
     cliCommand: string;
@@ -115,6 +93,17 @@ export interface AppConfig {
     hitlTimeoutMs: number;
     /** Timeout de inatividade de stdout do subprocesso. */
     streamIdleTimeoutMs: number;
+    /**
+     * US-F3.4 — config do runner TanStack (`AGENT_ADAPTER=tanstack`).
+     * `baseUrl` (TANSTACK_BASE_URL) aponta um endpoint OpenAI-compatível
+     * (chat completions + SSE); `model` (TANSTACK_MODEL) sobrepõe o modelo
+     * por-card quando definido. A credencial opcional TANSTACK_API_KEY é lida
+     * do env pelo runner (nunca armazenada aqui nem exposta em endpoints).
+     */
+    tanstack: {
+      baseUrl: string;
+      model: string;
+    };
     /** #1: habilita validação empírica (rodar scripts do projeto no worktree). */
     validationEnabled: boolean;
     /** #1: timeout (ms) por script de validação rodado no worktree. */
@@ -438,6 +427,86 @@ export interface AppConfig {
     sshCommand: string | undefined;
   };
   /**
+   * EP-F1 / US-F1.3 — cliente do wrapper HTTP de build do sidecar graphify
+   * (ADR-0041). O build do grafo de conhecimento por Project roda no sidecar
+   * (`POST /build`), disparado quando o clone do Project fica `ready`.
+   */
+  graphify: {
+    /**
+     * URL base do wrapper de build (bind fixo em 127.0.0.1 — ADR-0041 §5; só a
+     * porta é configurável). Derivada de `GRAPHIFY_BUILD_PORT` (default 8130).
+     */
+    buildUrl: string;
+    /**
+     * Chave de API do sidecar (a MESMA do MCP/wrapper — `GRAPHIFY_API_KEY`).
+     * Vazia (default) = integração DESLIGADA: o build de grafo é pulado com log
+     * (graphState fica `pending`) e nada mais muda — retrocompatível com
+     * ambientes sem o sidecar.
+     */
+    apiKey: string;
+    /**
+     * Timeout (ms) do lado do caller para o `POST /build` síncrono. Deve ser
+     * MAIOR que o `GRAPHIFY_BUILD_TIMEOUT` do sidecar (default 1800s), senão o
+     * caller desiste antes do 504 legível do wrapper. Lido de
+     * `GRAPHIFY_BUILD_TIMEOUT_MS`. Default `1830000` (30,5 min).
+     */
+    buildTimeoutMs: number;
+    /**
+     * US-F1.4 — endpoint MCP (Streamable HTTP) de LEITURA do grafo no sidecar
+     * (ADR-0041 §1). Bind fixo em 127.0.0.1; só a porta é configurável.
+     * Derivada de `GRAPHIFY_MCP_PORT` (default 8129).
+     */
+    mcpUrl: string;
+    /**
+     * US-F1.4 — timeout (ms) por chamada de tool de leitura do grafo. Leituras
+     * são rápidas (índice quente no sidecar); um teto curto garante que quem
+     * consome contexto de grafo nunca fique pendurado. Lido de
+     * `GRAPHIFY_QUERY_TIMEOUT_MS`. Default `15000` (15s).
+     */
+    queryTimeoutMs: number;
+    /**
+     * US-F1.5 — liga o rebuild INCREMENTAL do grafo ao fim de cada iteração do
+     * loop (fire-and-forget, coalescido por Project — nunca no caminho crítico
+     * da iteração). Default **false** (strangler-fig do EP-F1: nada muda até
+     * alguém ligar). Lido de `GRAPHIFY_INCREMENTAL_REBUILD` (`true` liga).
+     * Requer `GRAPHIFY_API_KEY` — sem a chave a integração inteira fica off.
+     */
+    incrementalRebuildEnabled: boolean;
+    /**
+     * US-F1.5 — a cada N rebuilds incrementais do MESMO Project, dispara um
+     * build COMPLETO com `force: true`. O incremental é comprovadamente lossy
+     * (o `_reconcile_existing_graph` do graphify evicta nós de pacote externo:
+     * medido 3514 → 3510); o force periódico restaura o corpus. Lido de
+     * `GRAPHIFY_INCREMENTAL_FORCE_EVERY`. Default `10`.
+     */
+    incrementalForceEvery: number;
+    /**
+     * US-F2.5/US-F2.10 — RECALL de memória por travessia de grafo no
+     * `buildContext` (substitui o `LIKE '%termo%'` do índice velho quando o
+     * Board tem Project com grafo `ready`). Default **true** desde o cutover
+     * da US-F2.10 (o oráculo da US-F2.1 provou que o LIKE praticamente nunca
+     * recuperava nada, em silêncio; ver emenda do ADR-0027).
+     * `GRAPHIFY_MEMORY_RECALL=false` desliga o recall (a iteração roda SEM
+     * memória) — desde a US-F2.3 NÃO há mais rollback para o LIKE: o módulo
+     * `memory/` foi deletado. Requer `GRAPHIFY_API_KEY` — sem a chave o grafo nunca fica
+     * `ready` e o prompt sinaliza memória indisponível (sem fallback: mascarar
+     * era o defeito antigo).
+     */
+    memoryRecallEnabled: boolean;
+    /**
+     * US-F2.7/US-F2.10 — DERIVAÇÃO do blast radius (`POST /affected` do
+     * wrapper, US-F1.6) ao fim de cada iteração: os arquivos tocados pelo diff
+     * viram seeds e o resultado vira um `AffectedFlow` derivado que COMPLEMENTA
+     * (e confere) os fluxos declarados pela IA. Default **true** desde o
+     * cutover da US-F2.10 (na validação da F2.7 o derivado achou 7 arquivos
+     * não declarados numa iteração real). `GRAPHIFY_AFFECTED_FLOWS=false` é o
+     * ROLLBACK — restaura o comportamento só-declarado byte-idêntico. Requer
+     * `GRAPHIFY_API_KEY` — sem a chave o `/affected` reporta a integração
+     * desligada e a falha fica visível ao operador.
+     */
+    affectedFlowsEnabled: boolean;
+  };
+  /**
    * US-HARD2 — circuit-breaker de crash-loop no boot com backoff persistido.
    */
   boot: {
@@ -490,32 +559,6 @@ function csv(value: string | undefined, fallback: string[]): string[] {
 }
 
 /**
- * Default do bare repo da memória (ADR-0027, Camada 1). VOLUME DEDICADO, com
- * ciclo de vida independente e FORA do repo-alvo.
- */
-export const DEFAULT_MEMORY_GIT_DIR = './.kanban-ai-memory/git';
-
-/**
- * Resolve e valida o caminho do bare repo da memória (`MEMORY_GIT_DIR`),
- * falhando cedo com mensagem clara se estiver configurado de forma inválida.
- *
- * - Ausente (`undefined`): usa o default documentado.
- * - Presente mas vazio/só-espaços: erro (configuração explícita inválida).
- * - Presente e válido: usa o valor com trim.
- */
-export function resolveMemoryGitDir(value: string | undefined): string {
-  if (value === undefined) return DEFAULT_MEMORY_GIT_DIR;
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    throw new Error(
-      'MEMORY_GIT_DIR está definido mas vazio: configure o caminho do bare repo ' +
-        `da memória (volume dedicado, fora do repo-alvo) ou remova a variável para usar o default "${DEFAULT_MEMORY_GIT_DIR}".`,
-    );
-  }
-  return trimmed;
-}
-
-/**
  * US-OBS4 — kinds de adapter conhecidos. Fonte da verdade para validar
  * `AGENT_ADAPTER` e para o registry declarar descritores. Espelha o union
  * `AgentAdapterKind` de `@kanban-ai/shared`.
@@ -526,19 +569,82 @@ export const AGENT_ADAPTER_KINDS: readonly AgentAdapterKind[] = [
   'codex',
   'gemini',
   'mock',
+  // US-F3.4 — runner sobre @tanstack/ai; desligado por padrão (o default do
+  // processo segue 'mock'). Selecionável só com AGENT_ADAPTER=tanstack.
+  'tanstack',
 ];
 
-/** Adapter default do loop (não-regressão). */
-export const DEFAULT_AGENT_ADAPTER: AgentAdapterKind = 'copilot-cli';
 /**
- * Resolve `AGENT_ADAPTER` para um `AgentAdapterKind` conhecido. Ausente, vazio
- * ou desconhecido → default `copilot-cli` (não-regressão). Case-insensitive.
+ * Default de CATÁLOGO/fallback (ADR-0036): para onde caem um `AGENT_ADAPTER`
+ * explícito desconhecido e os kinds sem runner wired no registry. NÃO é o
+ * default do processo sem envs — esse é `DEFAULT_PROCESS_AGENT_ADAPTER`.
  */
-export function resolveAgentAdapter(value: string | undefined): AgentAdapterKind {
-  if (value === undefined) return DEFAULT_AGENT_ADAPTER;
-  const normalized = value.trim().toLowerCase();
-  const match = AGENT_ADAPTER_KINDS.find((k) => k === normalized);
-  return match ?? DEFAULT_AGENT_ADAPTER;
+export const DEFAULT_AGENT_ADAPTER: AgentAdapterKind = 'copilot-cli';
+
+/**
+ * US-F3.1 — default do PROCESSO quando nenhuma env de seleção está presente:
+ * `mock` (ADR-0014, emendado): dev sem `.env` fica no runner determinístico,
+ * sem subprocesso real/quota/login. Produção sempre seta a env explícita.
+ */
+export const DEFAULT_PROCESS_AGENT_ADAPTER: AgentAdapterKind = 'mock';
+/**
+ * US-F3.1 — resolve a seleção de runner para um `AgentAdapterKind` conhecido.
+ * Precedência (ADR-0036, emenda US-F3.1):
+ *
+ * 1. `AGENT_ADAPTER` explícito (não-vazio) VENCE — valor desconhecido cai no
+ *    default de catálogo `copilot-cli` (comportamento pré-US-F3.1).
+ * 2. Ausente/vazio: o alias DEPRECADO `AGENT_RUNNER_KIND` (`mock|copilot-cli`)
+ *    é honrado (retrocompat por uma versão; warning de deprecação no boot).
+ * 3. Sem os dois → default do processo `mock` (ADR-0014: dev sem `.env` fica
+ *    no runner determinístico, sem subprocesso real).
+ *
+ * Case-insensitive nos dois valores. A matriz completa é idêntica ao
+ * comportamento pré-unificação (nenhum setup regride).
+ */
+export function resolveAgentAdapter(
+  value: string | undefined,
+  legacyRunnerKind?: string,
+): AgentAdapterKind {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized !== undefined && normalized.length > 0) {
+    const match = AGENT_ADAPTER_KINDS.find((k) => k === normalized);
+    return match ?? DEFAULT_AGENT_ADAPTER;
+  }
+  const legacy = legacyRunnerKind?.trim().toLowerCase();
+  if (legacy === 'mock' || legacy === 'copilot-cli') return legacy;
+  return DEFAULT_PROCESS_AGENT_ADAPTER;
+}
+
+// US-F3.1 — flag de processo: o aviso de deprecação do alias AGENT_RUNNER_KIND
+// é emitido UMA única vez no boot, não a cada resolução.
+let legacyRunnerKindWarned = false;
+
+/**
+ * US-F3.1 — emite (via `warn`) o aviso de deprecação de `AGENT_RUNNER_KIND`
+ * quando a env legada foi quem decidiu a seleção (i.e. está setada e
+ * `AGENT_ADAPTER` está ausente/vazio). No máximo UMA vez por processo.
+ * Retorna `true` se o aviso foi emitido nesta chamada.
+ */
+export function warnLegacyAgentRunnerKindOnce(
+  warn: (message: string) => void,
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  if (legacyRunnerKindWarned) return false;
+  const adapter = env.AGENT_ADAPTER?.trim() ?? '';
+  const legacy = env.AGENT_RUNNER_KIND?.trim() ?? '';
+  if (adapter.length > 0 || legacy.length === 0) return false;
+  legacyRunnerKindWarned = true;
+  warn(
+    `AGENT_RUNNER_KIND está DEPRECADO e será removido na próxima versão — ` +
+      `use AGENT_ADAPTER=${resolveAgentAdapter(undefined, legacy)} no lugar ` +
+      `(US-F3.1 / ADR-0036). O valor legado "${legacy}" ainda foi honrado neste boot.`,
+  );
+  return true;
+}
+
+/** US-F3.1 — reseta a flag do aviso de deprecação (uso exclusivo em testes). */
+export function resetLegacyAgentRunnerKindWarningForTests(): void {
+  legacyRunnerKindWarned = false;
 }
 
 /**
@@ -566,17 +672,17 @@ export function resolveProjectsDir(value: string | undefined): string {
 }
 
 export function loadConfig(): AppConfig {
+  // US-F3.1 — AGENT_ADAPTER é a única fonte de verdade; AGENT_RUNNER_KIND é
+  // alias deprecado honrado só na ausência dele (ver resolveAgentAdapter).
+  const agentAdapter = resolveAgentAdapter(
+    process.env.AGENT_ADAPTER,
+    process.env.AGENT_RUNNER_KIND,
+  );
   return {
     apiPort: num(process.env.API_PORT, 3333),
     wsPath: process.env.WS_PATH ?? '/ws',
     databaseUrl: process.env.DATABASE_URL ?? '',
-    agentAdapter: resolveAgentAdapter(process.env.AGENT_ADAPTER),
-    memory: {
-      gitDir: resolveMemoryGitDir(process.env.MEMORY_GIT_DIR),
-      schedulerEnabled: process.env.MEMORY_SCHEDULER_ENABLED !== 'false',
-      lockSweepIntervalMs: num(process.env.MEMORY_LOCK_SWEEP_INTERVAL_MS, 30_000),
-      gcIntervalMs: num(process.env.MEMORY_GC_INTERVAL_MS, 3_600_000),
-    },
+    agentAdapter,
     agent: {
       defaultModel: process.env.AGENT_DEFAULT_MODEL ?? 'opus',
       cheapModelId: process.env.AGENT_CHEAP_MODEL_ID ?? '', // US-OBS2-5: lane de recuperação
@@ -584,12 +690,18 @@ export function loadConfig(): AppConfig {
       watchdogIntervalMs: num(process.env.AGENT_WATCHDOG_INTERVAL_MS, 120_000),
       autoStepIntervalMs: num(process.env.AGENT_AUTO_STEP_INTERVAL_MS, 1_500),
       workspacesDir: process.env.AGENT_WORKSPACES_DIR ?? './.agent-workspaces',
-      runnerKind: process.env.AGENT_RUNNER_KIND === 'copilot-cli' ? 'copilot-cli' : 'mock',
+      // US-F3.1 — DERIVADO de agentAdapter (campo legado; não pode divergir).
+      runnerKind: agentAdapter === 'mock' ? 'mock' : 'copilot-cli',
       cliCommand: process.env.AGENT_CLI_COMMAND ?? 'copilot',
       cliArgs: (process.env.AGENT_CLI_ARGS ?? '').split(' ').filter((a) => a.length > 0),
       promptMode: process.env.AGENT_CLI_PROMPT_MODE === 'arg' ? 'arg' : 'stdin',
       hitlTimeoutMs: num(process.env.AGENT_HITL_TIMEOUT_MS, 600_000),
       streamIdleTimeoutMs: num(process.env.AGENT_STREAM_IDLE_TIMEOUT_MS, 120_000),
+      // US-F3.4 — endpoint/modelo do runner TanStack (vazios = não configurado).
+      tanstack: {
+        baseUrl: process.env.TANSTACK_BASE_URL ?? '',
+        model: process.env.TANSTACK_MODEL ?? '',
+      },
       validationEnabled: process.env.AGENT_VALIDATION_ENABLED !== 'false',
       validationTimeoutMs: num(process.env.AGENT_VALIDATION_TIMEOUT_MS, 300_000),
       validationScripts: (process.env.AGENT_VALIDATION_SCRIPTS ?? '')
@@ -656,6 +768,22 @@ export function loadConfig(): AppConfig {
       gitTimeoutMs: num(process.env.PROJECTS_GIT_TIMEOUT_MS, 300_000),
       allowSsh: process.env.PROJECTS_ALLOW_SSH === 'true',
       sshCommand: process.env.PROJECTS_SSH_COMMAND?.trim() || undefined,
+    },
+    graphify: {
+      buildUrl: `http://127.0.0.1:${num(process.env.GRAPHIFY_BUILD_PORT, 8130)}`,
+      apiKey: (process.env.GRAPHIFY_API_KEY ?? '').trim(),
+      buildTimeoutMs: num(process.env.GRAPHIFY_BUILD_TIMEOUT_MS, 1_830_000),
+      mcpUrl: `http://127.0.0.1:${num(process.env.GRAPHIFY_MCP_PORT, 8129)}/mcp`,
+      queryTimeoutMs: num(process.env.GRAPHIFY_QUERY_TIMEOUT_MS, 15_000),
+      // US-F1.5 — rebuild incremental pós-iteração: desligado por default.
+      incrementalRebuildEnabled: process.env.GRAPHIFY_INCREMENTAL_REBUILD === 'true',
+      incrementalForceEvery: num(process.env.GRAPHIFY_INCREMENTAL_FORCE_EVERY, 10),
+      // US-F2.10 — CUTOVER: recall por grafo LIGADO por default; `false` é o
+      // rollback (restaura o LIKE legado byte-idêntico, até a F2.3).
+      memoryRecallEnabled: process.env.GRAPHIFY_MEMORY_RECALL !== 'false',
+      // US-F2.10 — CUTOVER: blast radius derivado LIGADO por default; `false`
+      // é o rollback (só fluxos declarados pela IA, byte-idêntico).
+      affectedFlowsEnabled: process.env.GRAPHIFY_AFFECTED_FLOWS !== 'false',
     },
     boot: {
       circuitBreakerEnabled: process.env.BOOT_CIRCUIT_BREAKER_ENABLED !== 'false',

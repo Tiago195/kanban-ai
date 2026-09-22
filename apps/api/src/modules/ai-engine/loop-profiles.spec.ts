@@ -7,9 +7,6 @@ import type { WorkspaceService } from './workspaces/workspace.service';
 import type { ValidationRunner } from './validators/validation.runner';
 import type { AgentRunner } from './runners/agent-runner.interface';
 import type { AgentSessionManager } from './session-manager/agent-session-manager';
-import type { MemoryIndexService } from '../memory/memory-index.service';
-import type { MemoryGitService } from '../memory/memory-git.service';
-import type { MemoryBootstrapService } from '../memory/memory-bootstrap.service';
 import { Orchestrator } from './orchestrator';
 import {
   BUILTIN_LOOP_PROFILES,
@@ -43,9 +40,6 @@ function makeOrchestrator(): Orchestrator {
     { broadcast: noop } as unknown as RealtimeService,
     { id: 'mock', run: async () => ({ detail: '', summary: '', dodTouched: [] }) } as unknown as AgentRunner,
     { agent: { wakeupQueueEnabled: false } } as unknown as AppConfig,
-    {} as unknown as MemoryIndexService,
-    {} as unknown as MemoryGitService,
-    {} as unknown as MemoryBootstrapService,
   );
 }
 
@@ -63,7 +57,6 @@ function makeContext(): any {
     dodItems: [],
     affectedFlows: [],
     iterationHistory: [],
-    memoryNeurons: [],
     siblingHandoffs: [],
     epicNotes: '',
     lastDiff: '',

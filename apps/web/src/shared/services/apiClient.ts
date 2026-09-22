@@ -12,10 +12,16 @@ import type {
   CreateDodItemDto,
   CreateFlowDto,
   FleetDashboard,
+  GraphFileCardsResponse,
+  GraphProjectionResponse,
+  ProjectLearningResponse,
+  ProjectWikiArticleResponse,
+  ProjectWikiIndexResponse,
   IterationPhase,
   LoopMetrics,
   MoveCardDto,
   Project,
+  ProjectKnowledgeSummary,
   CreateProjectInput,
   ProjectRepoInfo,
   MemoryNeuronSummary,
@@ -511,6 +517,15 @@ export const apiClient = {
   },
 
   /**
+   * US-UX.4 — estado do conhecimento de TODOS os Projects numa requisição só
+   * (grafo/wiki/memória por projeto, com falha tipada por faceta) — alimenta a
+   * faixa de conhecimento dos cards da lista sem N×4 chamadas.
+   */
+  getProjectsKnowledge(): Promise<ProjectKnowledgeSummary[]> {
+    return request<ProjectKnowledgeSummary[]>(`/projects/summary`);
+  },
+
+  /**
    * EP-PROJECT / US-PROJ6 — cria um Project por URL git (https ou ssh). O clone
    * roda de forma ASSÍNCRONA no backend; o estado (`cloneState`) é observável via
    * `GET /projects` e pelo evento WS `project.clone_state`.
@@ -541,6 +556,58 @@ export const apiClient = {
   getProjectNeuron(projectId: string, path: string): Promise<MemoryNeuronDetail> {
     return request<MemoryNeuronDetail>(
       `/projects/${projectId}/memory/read?path=${encodeURIComponent(path)}`,
+    );
+  },
+
+  /**
+   * US-F4.2 — projeção do grafo de conhecimento do Project (corte no servidor,
+   * US-F4.1). Sem params = `overview`; `search`/`focus`/`community` mudam o modo.
+   */
+  getProjectGraph(
+    projectId: string,
+    params: { focus?: string; community?: number; search?: string; depth?: number } = {},
+  ): Promise<GraphProjectionResponse> {
+    const qs = new URLSearchParams();
+    if (params.search) qs.set("search", params.search);
+    else if (params.focus) {
+      qs.set("focus", params.focus);
+      if (params.depth) qs.set("depth", String(params.depth));
+    } else if (params.community != null) qs.set("community", String(params.community));
+    const query = qs.toString();
+    return request<GraphProjectionResponse>(
+      `/projects/${projectId}/graph${query ? `?${query}` : ""}`,
+    );
+  },
+
+  /**
+   * US-F4.3 — nó → arquivo → card(s): cards dos boards do Project que tocaram
+   * o arquivo (`AffectedFlow.files` + `Iteration.handoffFiles`). `cards: []`
+   * é resposta válida (estado vazio honesto).
+   */
+  getProjectGraphFileCards(projectId: string, file: string): Promise<GraphFileCardsResponse> {
+    return request<GraphFileCardsResponse>(
+      `/projects/${projectId}/graph/file-cards?file=${encodeURIComponent(file)}`,
+    );
+  },
+
+  /**
+   * US-UX.3 — painel da memória: o que o `graphify reflect` aprendeu
+   * (vereditos por nó com proveniência e `stale`, becos sem saída, correções).
+   * `generated: false` = reflect nunca rodou (estado vazio honesto).
+   */
+  getProjectLearning(projectId: string): Promise<ProjectLearningResponse> {
+    return request<ProjectLearningResponse>(`/projects/${projectId}/learning`);
+  },
+
+  /** US-F5.4 — índice da Wiki do grafo (`generated: false` = ainda não gerada). */
+  getProjectWiki(projectId: string): Promise<ProjectWikiIndexResponse> {
+    return request<ProjectWikiIndexResponse>(`/projects/${projectId}/wiki`);
+  },
+
+  /** US-F5.4 — um artigo da Wiki (markdown completo), endereçado por slug. */
+  getProjectWikiArticle(projectId: string, slug: string): Promise<ProjectWikiArticleResponse> {
+    return request<ProjectWikiArticleResponse>(
+      `/projects/${projectId}/wiki/article?slug=${encodeURIComponent(slug)}`,
     );
   },
 

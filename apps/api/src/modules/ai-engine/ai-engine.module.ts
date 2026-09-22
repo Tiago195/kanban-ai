@@ -9,18 +9,24 @@ import { CopilotCliRunner } from './runners/copilot-cli.runner';
 import { MockAgentRunner } from './runners/mock-agent.runner';
 import { AgentAdapterRegistry } from './runners/agent-adapter.registry';
 import { AGENT_RUNNER, type AgentRunner } from './runners/agent-runner.interface';
-import { APP_CONFIG, type AppConfig } from '../../shared/config/config';
+import {
+  APP_CONFIG,
+  warnLegacyAgentRunnerKindOnce,
+  type AppConfig,
+} from '../../shared/config/config';
 import { WorkspaceService } from './workspaces/workspace.service';
 import { WakeupQueueService } from './wakeup-queue.service';
 
 /**
  * Módulo do loop engine (núcleo).
  *
- * O AgentRunner é injetado via token `AGENT_RUNNER` (plugável). US-OBS4: a
+ * O AgentRunner é injetado via token `AGENT_RUNNER` (plugável). US-F3.1: a
  * implementação ativa é resolvida pelo `AgentAdapterRegistry` a partir de
- * `config.agentAdapter` (env `AGENT_ADAPTER`, default `copilot-cli`). O legado
- * `AGENT_RUNNER_KIND` (`mock|copilot-cli`) continua respeitado como fallback
- * para não regredir os ambientes de dev/testes que o usam.
+ * `config.agentAdapter` — a ÚNICA fonte de verdade da seleção (env
+ * `AGENT_ADAPTER`; sem envs, default do processo `mock` — ADR-0014). A env
+ * legada `AGENT_RUNNER_KIND`
+ * é apenas um alias DEPRECADO que alimenta essa resolução na ausência de
+ * `AGENT_ADAPTER` (warning de deprecação emitido uma vez no boot).
  *
  * O AgentSessionManager é in-process; ponto de extensão para BullMQ+Redis.
  */
@@ -38,21 +44,18 @@ import { WakeupQueueService } from './wakeup-queue.service';
     AgentAdapterRegistry,
     {
       provide: AGENT_RUNNER,
-      inject: [APP_CONFIG, AgentAdapterRegistry, MockAgentRunner],
+      inject: [APP_CONFIG, AgentAdapterRegistry],
       useFactory: (
         config: AppConfig,
         registry: AgentAdapterRegistry,
-        mock: MockAgentRunner,
       ): AgentRunner => {
-        // Retrocompat: o legado AGENT_RUNNER_KIND=mock ainda força o mock
-        // (dev/testes). Fora isso, o adapter resolve via registry a partir de
-        // AGENT_ADAPTER, mantendo copilot-cli como default.
-        const active =
-          config.agent.runnerKind === 'mock' &&
-          process.env.AGENT_ADAPTER === undefined
-            ? mock
-            : registry.resolveActive();
-        new Logger('AiEngineModule').log(
+        const logger = new Logger('AiEngineModule');
+        // US-F3.1 — config.agentAdapter já absorveu o alias deprecado
+        // AGENT_RUNNER_KIND (precedência na resolveAgentAdapter); aqui só
+        // resolvemos via registry e avisamos a deprecação UMA vez no boot.
+        warnLegacyAgentRunnerKindOnce((message) => logger.warn(message));
+        const active = registry.resolveActive();
+        logger.log(
           `AGENT_RUNNER ativo: adapter=${config.agentAdapter} (${active.id})` +
             (active.id === 'copilot-cli'
               ? ` — comando: ${config.agent.cliCommand} ${config.agent.cliArgs.join(' ')}`.trimEnd()

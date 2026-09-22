@@ -30,12 +30,6 @@ function makeConfig(overrides: Partial<AppConfig['agent']>): AppConfig {
     apiPort: 3333,
     wsPath: '/ws',
     databaseUrl: '',
-    memory: {
-      gitDir: './.kanban-ai-memory/git',
-      schedulerEnabled: false,
-      lockSweepIntervalMs: 30_000,
-      gcIntervalMs: 3_600_000,
-    },
     agent: {
       defaultModel: 'mock',
       maxConcurrentSessions: 3,

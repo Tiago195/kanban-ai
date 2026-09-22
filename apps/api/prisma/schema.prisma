@@ -91,6 +91,16 @@ enum ProjectCloneState {
   failed  // clone/sync falhou (ver lastError)
 }
 
+// EP-F1 / US-F1.3 — estado do build do grafo de conhecimento (graphify) do
+// Project. Espelha o estilo de ProjectCloneState; o build roda no sidecar
+// (POST /build do wrapper, ADR-0041) disparado quando o clone fica ready.
+enum ProjectGraphState {
+  pending  // criado, grafo ainda não construído
+  building // build em andamento no sidecar graphify
+  ready    // graph.json disponível (ver graphBuiltAt)
+  failed   // build falhou (ver graphLastError)
+}
+
 // Entidade de primeira classe que representa "o repositório em que a frota
 // trabalha", desacoplada de path físico. Ortogonal à hierarquia Epic→Story→Task
 // (associada ao Board, raiz da cascata de repo-alvo). Ver docs/specs/ep-project.md.
@@ -107,6 +117,11 @@ model Project {
   cloneState    ProjectCloneState @default(pending)
   lastError     String?
   lastSyncedAt  DateTime?
+  // US-F1.3 — grafo de conhecimento (graphify) por Project, construído no
+  // sidecar quando o clone fica ready. Colunas aditivas (default/nullable).
+  graphState     ProjectGraphState @default(pending)
+  graphBuiltAt   DateTime? // instante do último build bem-sucedido
+  graphLastError String? // mensagem legível quando graphState='failed'
   // Multi-tenant cooperativo (mesmo rótulo opaco de Card.tenantId, ADR-0009).
   tenantId      String?
   createdAt     DateTime          @default(now())
@@ -124,6 +139,9 @@ model Board {
   title        String
   seq          Int      @default(0) // contador para chaves EP-/US-/TK-
   defaultModel String? // modelo default do quadro (raiz da cascata de heranca)
+  // US-F3.10 — adapter default do quadro (raiz da cascata de adapter, analoga a
+  // defaultModel). null = herda do global (env AGENT_ADAPTER -> default do processo).
+  defaultAdapter String?
   // EP-PROJECT / US-PROJ1 — repo-alvo do quadro (raiz da cascata, análoga a
   // defaultModel). Nullable: Board sem projectId cai no fallback Card.aiProject.
   projectId    String?
@@ -210,6 +228,11 @@ model Card {
   // Modelo de AI para desenvolver este card. null = herda do pai
   // (task -> story -> epic -> board.defaultModel).
   model String?
+
+  // US-F3.10 — adapter (vendor de agent) para desenvolver este card. null =
+  // herda do pai (task -> story -> epic -> board.defaultAdapter -> AGENT_ADAPTER
+  // global). Espelha o par model/defaultModel para controle de custo por card.
+  adapter String?
 
   // Hierarquia: task -> story -> epic
   parentId String?
@@ -696,44 +719,6 @@ model LoopProfile {
 
   @@unique([boardId, profileId])
   @@index([boardId])
-}
-
-// ─────────────────────────────────────────────────────────────
-// Memória viva (colmeia) — Camada 2: índice Postgres (ADR-0027)
-// ─────────────────────────────────────────────────────────────
-
-// Índice da memória: PROJEÇÃO DERIVADA e DESCARTÁVEL dos neurônios .md
-// versionados no git (Camada 1 = fonte da verdade). Reconstruível a partir do
-// git a qualquer momento — nunca migrar dados de memória para cá. Este model é
-// só ARMAZENAMENTO; a lógica de reindex/lock/review vive em outros épicos.
-model MemoryIndex {
-  // Projeção do neurônio ------------------------------------------------------
-  path       String @id // path do neurônio no git (chave natural, ex.: api/cards.md)
-  headCommit String // SHA de origem em main projetado neste índice
-  title      String @default("")
-  tags       String @default("[]") // JSON array serializado (SQLite-friendly / portável)
-  summary    String @default("")
-  searchText String @default("") // ponteiro de busca (conteúdo/keywords achatados)
-
-  // Coordenação (armazenamento apenas; comportamento vive em EP-78..EP-80) -----
-  lockState    String    @default("FREE") // FREE | EDITING | REVIEW (ver MemoryLockState)
-  holder       String? // agentId dono do lock ativo (sessão+story), se houver
-  leaseId      String? // id do lease advisory ativo (EP-78)
-  expiresAt    DateTime? // instante de expiração do lease (TTL + heartbeat, EP-78)
-  baseCommit   String? // baseCommit do lock/edição ativa (compare-and-swap)
-  activeBranch String? // branch efêmera do agent (mem/ai/<sessao>/<path>)
-  reviewQueued Boolean   @default(false) // marcador de fila de REVIEW (conflito semântico)
-
-  // Garbage collection (EP-85) -------------------------------------------------
-  stale      Boolean   @default(false) // path some do repo-alvo (candidato a arquivo)
-  archivedAt DateTime? // instante em que foi arquivado (git preserva o histórico)
-  lastSeenCommit String? // último SHA de main em que o path ainda existia no repo
-
-  updatedAt DateTime @updatedAt
-
-  @@index([lockState])
-  @@index([holder])
-  @@index([stale])
 }
 
 // ─────────────────────────────────────────────────────────────

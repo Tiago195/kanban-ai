@@ -1,0 +1,106 @@
+- generic [ref=f5e4]:
+  - complementary "Áreas do explorador" [ref=f5e5]:
+    - button "Voltar ao quadro" [ref=f5e6] [cursor=pointer]:
+      - generic [ref=f5e7]: ←
+    - navigation "Áreas" [ref=f5e9]:
+      - button "Projetos" [ref=f5e10] [cursor=pointer]:
+        - generic [ref=f5e11]: 🗄️
+      - button "O que a AI sabe" [ref=f5e13] [cursor=pointer]:
+        - generic [ref=f5e14]: 🐝
+      - button "Grafo" [ref=f5e16] [cursor=pointer]:
+        - generic [ref=f5e17]: 🕸️
+      - button "Wiki" [ref=f5e19] [cursor=pointer]:
+        - generic [ref=f5e20]: 📖
+  - generic [ref=f5e22]:
+    - banner [ref=f5e23]:
+      - heading "Grafo" [level=1] [ref=f5e38]: 🕸️ Grafo
+      - generic [ref=f5e25]: o grafo de conhecimento do código
+      - generic [ref=f5e30]:
+        - generic [ref=f5e31]: 📁 Projeto
+        - combobox "Projeto selecionado" [ref=f5e32]:
+          - option "audit-f44-slugify — https://github.com/simov/slugify.git"
+          - option "array-move — https://github.com/sindresorhus/array-move" [selected]
+    - main [ref=f5e26]:
+      - generic [ref=f5e39]:
+        - generic [ref=f5e40]:
+          - button "← Visão geral" [ref=f5e950] [cursor=pointer]
+          - textbox "Buscar nó por nome ou arquivo…" [ref=f5e41]
+          - generic [ref=f5e1055]: atualizando…
+        - generic [ref=f5e42]: Exibindo 30 de 84 nós · 29 de 76 arestas · 12 comunidades
+        - generic [ref=f5e951]:
+          - generic [ref=f5e952]:
+            - generic [ref=f5e953]: Vizinhança de “Change Log”
+            - generic [ref=f5e954]: "profundidade:"
+            - button "1" [ref=f5e955] [cursor=pointer]
+            - button "2" [ref=f5e956] [cursor=pointer]
+            - button "3" [ref=f5e957] [cursor=pointer]
+          - generic [ref=f5e958]:
+            - text: document
+            - code [ref=f5e959]: CHANGELOG.md
+            - text: · grau 29 · Change Log
+          - generic [ref=f5e960]:
+            - generic [ref=f5e961]:
+              - text: Cards que tocaram
+              - code [ref=f5e962]: CHANGELOG.md
+            - generic [ref=f5e963]: procurando cards…
+          - img "Ego-grafo de Change Log" [ref=f5e964]:
+            - generic "changelog —contains→ changelog_change_log" [ref=f5e965]
+            - generic "changelog_change_log —contains→ changelog_v1_0_1_2016_08_08" [ref=f5e966]
+            - generic "changelog_change_log —contains→ changelog_v1_1_0_2017_01_08" [ref=f5e967]
+            - generic "changelog_change_log —contains→ changelog_v1_2_2_2017_11_09" [ref=f5e968]
+            - generic "changelog_change_log —contains→ changelog_v1_2_3_2017_11_13" [ref=f5e969]
+            - generic "changelog_change_log —contains→ changelog_v1_2_6_2017_11_24" [ref=f5e970]
+            - generic "changelog_change_log —contains→ changelog_v1_2_7_2017_12_17" [ref=f5e971]
+            - generic "changelog_change_log —contains→ changelog_v1_2_8_2017_12_23" [ref=f5e972]
+            - generic "changelog_change_log —contains→ changelog_v1_2_9_2017_12_30" [ref=f5e973]
+            - generic "changelog_change_log —contains→ changelog_v1_3_0_2018_05_13" [ref=f5e974]
+            - generic "changelog_change_log —contains→ changelog_v1_3_1_2018_08_05" [ref=f5e975]
+            - generic "changelog_change_log —contains→ changelog_v1_3_4_2018_12_06" [ref=f5e976]
+            - generic "changelog_change_log —contains→ changelog_v1_3_5_2019_09_08" [ref=f5e977]
+            - generic "changelog_change_log —contains→ changelog_v1_3_6_2019_11_03" [ref=f5e978]
+            - generic "changelog_change_log —contains→ changelog_v1_4_2_2020_06_23" [ref=f5e979]
+            - generic "changelog_change_log —contains→ changelog_v1_4_5_2020_07_26" [ref=f5e980]
+            - generic "changelog_change_log —contains→ changelog_v1_4_7_2021_02_21" [ref=f5e981]
+            - generic "changelog_change_log —contains→ changelog_v1_5_1_2021_05_02" [ref=f5e982]
+            - generic "changelog_change_log —contains→ changelog_v1_5_2_2021_05_08" [ref=f5e983]
+            - generic "changelog_change_log —contains→ changelog_v1_5_3_2021_05_11" [ref=f5e984]
+            - generic "changelog_change_log —contains→ changelog_v1_6_0_2021_07_15" [ref=f5e985]
+            - generic "changelog_change_log —contains→ changelog_v1_6_1_2021_10_04" [ref=f5e986]
+            - generic "changelog_change_log —contains→ changelog_v1_6_2_2021_11_07" [ref=f5e987]
+            - generic "changelog_change_log —contains→ changelog_v1_6_3_2021_11_22" [ref=f5e988]
+            - generic "changelog_change_log —contains→ changelog_v1_6_4_2021_12_16" [ref=f5e989]
+            - generic "changelog_change_log —contains→ changelog_v1_6_5_2022_01_03" [ref=f5e990]
+            - generic "changelog_change_log —contains→ changelog_v1_6_6_2023_03_26" [ref=f5e991]
+            - generic "changelog_change_log —contains→ changelog_v1_6_8_2026_03_13" [ref=f5e992]
+            - generic "changelog_change_log —contains→ changelog_v1_6_9_2026_04_01" [ref=f5e993]
+            - generic "Change Log (document, grau 29) CHANGELOG.md" [ref=f5e994] [cursor=pointer]: Change Log
+            - generic "CHANGELOG.md (document, grau 1) CHANGELOG.md" [ref=f5e996] [cursor=pointer]: CHANGELOG.md
+            - generic "v1.0.1 (2016-08-08) (document, grau 1) CHANGELOG.md" [ref=f5e998] [cursor=pointer]: v1.0.1 (2016-08-08)
+            - generic "v1.1.0 (2017-01-08) (document, grau 1) CHANGELOG.md" [ref=f5e1000] [cursor=pointer]: v1.1.0 (2017-01-08)
+            - generic "v1.2.2 (2017-11-09) (document, grau 1) CHANGELOG.md" [ref=f5e1002] [cursor=pointer]: v1.2.2 (2017-11-09)
+            - generic "v1.2.3 (2017-11-13) (document, grau 1) CHANGELOG.md" [ref=f5e1004] [cursor=pointer]: v1.2.3 (2017-11-13)
+            - generic "v1.2.6 (2017-11-24) (document, grau 1) CHANGELOG.md" [ref=f5e1006] [cursor=pointer]: v1.2.6 (2017-11-24)
+            - generic "v1.2.7 (2017-12-17) (document, grau 1) CHANGELOG.md" [ref=f5e1008] [cursor=pointer]: v1.2.7 (2017-12-17)
+            - generic "v1.2.8 (2017-12-23) (document, grau 1) CHANGELOG.md" [ref=f5e1010] [cursor=pointer]: v1.2.8 (2017-12-23)
+            - generic "v1.2.9 (2017-12-30) (document, grau 1) CHANGELOG.md" [ref=f5e1012] [cursor=pointer]: v1.2.9 (2017-12-30)
+            - generic "v1.3.0 (2018-05-13) (document, grau 1) CHANGELOG.md" [ref=f5e1014] [cursor=pointer]: v1.3.0 (2018-05-13)
+            - generic "v1.3.1 (2018-08-05) (document, grau 1) CHANGELOG.md" [ref=f5e1016] [cursor=pointer]: v1.3.1 (2018-08-05)
+            - generic "v1.3.4 (2018-12-06) (document, grau 1) CHANGELOG.md" [ref=f5e1018] [cursor=pointer]: v1.3.4 (2018-12-06)
+            - generic "v1.3.5 (2019-09-08) (document, grau 1) CHANGELOG.md" [ref=f5e1020] [cursor=pointer]: v1.3.5 (2019-09-08)
+            - generic "v1.3.6 (2019-11-03) (document, grau 1) CHANGELOG.md" [ref=f5e1022] [cursor=pointer]: v1.3.6 (2019-11-03)
+            - generic "v1.4.2 (2020-06-23) (document, grau 1) CHANGELOG.md" [ref=f5e1024] [cursor=pointer]: v1.4.2 (2020-06-23)
+            - generic "v1.4.5 (2020-07-26) (document, grau 1) CHANGELOG.md" [ref=f5e1026] [cursor=pointer]: v1.4.5 (2020-07-26)
+            - generic "v1.4.7 (2021-02-21) (document, grau 1) CHANGELOG.md" [ref=f5e1028] [cursor=pointer]: v1.4.7 (2021-02-21)
+            - generic "v1.5.1 (2021-05-02) (document, grau 1) CHANGELOG.md" [ref=f5e1030] [cursor=pointer]: v1.5.1 (2021-05-02)
+            - generic "v1.5.2 (2021-05-08) (document, grau 1) CHANGELOG.md" [ref=f5e1032] [cursor=pointer]: v1.5.2 (2021-05-08)
+            - generic "v1.5.3 (2021-05-11) (document, grau 1) CHANGELOG.md" [ref=f5e1034] [cursor=pointer]: v1.5.3 (2021-05-11)
+            - generic "v1.6.0 (2021-07-15) (document, grau 1) CHANGELOG.md" [ref=f5e1036] [cursor=pointer]: v1.6.0 (2021-07-15)
+            - generic "v1.6.1 (2021-10-04) (document, grau 1) CHANGELOG.md" [ref=f5e1038] [cursor=pointer]: v1.6.1 (2021-10-04)
+            - generic "v1.6.2 (2021-11-07) (document, grau 1) CHANGELOG.md" [ref=f5e1040] [cursor=pointer]: v1.6.2 (2021-11-07)
+            - generic "v1.6.3 (2021-11-22) (document, grau 1) CHANGELOG.md" [ref=f5e1042] [cursor=pointer]: v1.6.3 (2021-11-22)
+            - generic "v1.6.4 (2021-12-16) (document, grau 1) CHANGELOG.md" [ref=f5e1044] [cursor=pointer]: v1.6.4 (2021-12-16)
+            - generic "v1.6.5 (2022-01-03) (document, grau 1) CHANGELOG.md" [ref=f5e1046] [cursor=pointer]: v1.6.5 (2022-01-03)
+            - generic "v1.6.6 (2023-03-26) (document, grau 1) CHANGELOG.md" [ref=f5e1048] [cursor=pointer]: v1.6.6 (2023-03-26)
+            - generic "v1.6.8 (2026-03-13) (document, grau 1) CHANGELOG.md" [ref=f5e1050] [cursor=pointer]: v1.6.8 (2026-03-13)
+            - generic "v1.6.9 (2026-04-01) (document, grau 1) CHANGELOG.md" [ref=f5e1052] [cursor=pointer]: v1.6.9 (2026-04-01)
+          - generic [ref=f5e1054]: "29 vizinho(s) até profundidade 1 · relações: contains · clique num nó para expandir a partir dele"

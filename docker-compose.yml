@@ -46,7 +46,13 @@ services:
       API_PORT: '3333'
       WS_PATH: ${WS_PATH:-/ws}
       AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL:-opus}
-      AGENT_RUNNER_KIND: ${AGENT_RUNNER_KIND:-mock}
+      # US-F3.1 — o compose NÃO decide a seleção de runner: passthrough puro
+      # das duas envs com default VAZIO (vazio conta como ausente para o app).
+      # A precedência documentada (ADR-0036, emenda) resolve: AGENT_ADAPTER
+      # explícito vence; o alias deprecado AGENT_RUNNER_KIND é honrado com
+      # warning de deprecação; sem os dois → mock (ADR-0014), sem warning.
+      AGENT_ADAPTER: ${AGENT_ADAPTER:-}
+      AGENT_RUNNER_KIND: ${AGENT_RUNNER_KIND:-}
       AGENT_CLI_COMMAND: ${AGENT_CLI_COMMAND:-copilot}
       AGENT_CLI_ARGS: ${AGENT_CLI_ARGS:-}
       AGENT_CLI_PROMPT_MODE: ${AGENT_CLI_PROMPT_MODE:-stdin}
@@ -83,6 +89,28 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       # Watch confiável em bind mount (inotify não propaga bem no Docker).
       CHOKIDAR_USEPOLLING: 'true'
+      # US-F1.3: cliente do wrapper de build do sidecar graphify (mesma chave e
+      # porta do serviço `graphify` abaixo; localhost via network_mode host).
+      # Sem GRAPHIFY_API_KEY a integração fica desligada (graphState=pending).
+      GRAPHIFY_BUILD_PORT: ${GRAPHIFY_BUILD_PORT:-8130}
+      GRAPHIFY_API_KEY: ${GRAPHIFY_API_KEY:-}
+      # US-F1.7 (auditoria): a API também lê estas envs (config.ts, bloco
+      # graphify). GRAPHIFY_MCP_PORT em especial PRECISA ser repassada: se ela
+      # for customizada no .env e só o serviço `graphify` receber, o sidecar
+      # muda de porta mas a API segue chamando o default 8129 — e como o
+      # cliente de query é best-effort ({ok:false} engolido), a falha é
+      # SILENCIOSA. Defaults idênticos aos do config.ts.
+      GRAPHIFY_MCP_PORT: ${GRAPHIFY_MCP_PORT:-8129}
+      GRAPHIFY_QUERY_TIMEOUT_MS: ${GRAPHIFY_QUERY_TIMEOUT_MS:-15000}
+      GRAPHIFY_BUILD_TIMEOUT_MS: ${GRAPHIFY_BUILD_TIMEOUT_MS:-1830000}
+      GRAPHIFY_INCREMENTAL_REBUILD: ${GRAPHIFY_INCREMENTAL_REBUILD:-false}
+      GRAPHIFY_INCREMENTAL_FORCE_EVERY: ${GRAPHIFY_INCREMENTAL_FORCE_EVERY:-10}
+      # US-F2.10 (cutover): passthrough PURO com default vazio (vazio = ausente
+      # para o app ⇒ default LIGADO do config.ts). Sem estas linhas, o ROLLBACK
+      # (`=false` no .env) nunca chegaria à API containerizada — e o rollback é
+      # a rede de segurança do EP-F2 até a F2.3.
+      GRAPHIFY_MEMORY_RECALL: ${GRAPHIFY_MEMORY_RECALL:-}
+      GRAPHIFY_AFFECTED_FLOWS: ${GRAPHIFY_AFFECTED_FLOWS:-}
       TSC_WATCHFILE: 'DynamicPriorityPolling'
       TSC_WATCHDIRECTORY: 'DynamicPriorityPolling'
     volumes:
@@ -140,8 +168,82 @@ services:
       - .:/app
     entrypoint: ['sh', '/app/docker/web-dev-entrypoint.sh']
 
+  # ───────────────────────────────────────────────────────────────────────────
+  # Sidecar graphify (US-F1.1, ADR-0041) — servidor MCP do grafo de conhecimento
+  # exposto por Streamable HTTP em http://127.0.0.1:${GRAPHIFY_MCP_PORT}/mcp.
+  #
+  # Segurança (com network_mode host o processo escuta NA REDE DO HOST):
+  #   • bind SEMPRE em 127.0.0.1 — 0.0.0.0 exporia o grafo à rede inteira;
+  #   • GRAPHIFY_API_KEY é OBRIGATÓRIA: o entrypoint recusa subir sem ela
+  #     (fail-fast; um default inseguro deixaria o endpoint sem auth);
+  #   • porta configurável (default 8129) — nada de 8080 fixo, porta comum
+  #     demais para um serviço no host;
+  #   • imagem roda como usuário não-root (docker/graphify.Dockerfile).
+  #
+  # Os grafos (default + um por Project, endereçado via `project_path` dos
+  # tools) vivem sob o ~/.graphify do usuário do container → HOME persistido
+  # no volume `kanban_graphify_home`. Os clones dos Projects entram :ro
+  # DELIBERADAMENTE: o build (US-F1.3) escreve os grafos FORA do clone
+  # (GRAPHIFY_OUT absoluto sob o HOME — ADR-0041 §3); o default do graphify
+  # (graphify-out/ DENTRO do repo escaneado) sujaria o working tree do
+  # repo-alvo, onde os agents trabalham — com :ro, um build regredido quebra
+  # em vez de poluir o clone.
+  # ───────────────────────────────────────────────────────────────────────────
+  graphify:
+    build:
+      context: .
+      dockerfile: docker/graphify.Dockerfile
+    container_name: kanban-ai-graphify
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      GRAPHIFY_MCP_PORT: ${GRAPHIFY_MCP_PORT:-8129}
+      # Porta do wrapper HTTP de build+affected (US-F1.6) — mesmo regime do
+      # MCP: bind fixo 127.0.0.1, só a porta configurável.
+      GRAPHIFY_BUILD_PORT: ${GRAPHIFY_BUILD_PORT:-8130}
+      # Sem default proposital: ausente/vazia ⇒ o container FALHA ao subir.
+      GRAPHIFY_API_KEY: ${GRAPHIFY_API_KEY:-}
+    volumes:
+      - kanban_graphify_home:/home/graphify/.graphify
+      - kanban_projects:/data/projects:ro
+    # `$$` escapa a interpolação do compose — as vars são lidas pelo bash DENTRO
+    # do container. O serve lê GRAPHIFY_API_KEY direto do ambiente (argparse
+    # default), então a chave nunca aparece na command line do processo.
+    #
+    # Dois processos no mesmo container (US-F1.6): o servidor MCP (leitura) e o
+    # wrapper de build+affected. Supervisionamento mínimo: ambos em background
+    # e `wait -n` — se QUALQUER um morrer o entrypoint (PID 1) sai, o container
+    # cai inteiro (nada de zumbi "healthy" com metade dos processos) e o
+    # `restart: unless-stopped` ressuscita os dois.
+    entrypoint:
+      - bash
+      - -c
+      - |
+        if [ -z "$$GRAPHIFY_API_KEY" ]; then
+          echo '[graphify] ERRO: GRAPHIFY_API_KEY nao definida. Defina no .env' >&2
+          echo '[graphify] (ex.: GRAPHIFY_API_KEY=$(openssl rand -hex 32)). Sem' >&2
+          echo '[graphify] a chave os endpoints MCP e de build ficariam sem autenticacao.' >&2
+          exit 1
+        fi
+        python -m graphify.serve /home/graphify/.graphify/global-graph.json \
+          --transport http --host 127.0.0.1 --port "$${GRAPHIFY_MCP_PORT:-8129}" &
+        python /opt/graphify_build_server.py &
+        wait -n
+        exit 1
+    healthcheck:
+      # TCP connect nas DUAS portas: uvicorn (MCP) e wrapper de build aceitando
+      # conexão = container de pé (as rotas exigem auth, então um GET "verde"
+      # não existe sem expor a chave aqui).
+      test: ["CMD-SHELL", "python -c \"import socket,os; socket.create_connection(('127.0.0.1', int(os.environ.get('GRAPHIFY_MCP_PORT','8129'))), timeout=3); socket.create_connection(('127.0.0.1', int(os.environ.get('GRAPHIFY_BUILD_PORT','8130'))), timeout=3)\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   kanban_pgdata:
   # Raiz gerenciada dos clones de Project (<PROJECTS_DIR>/<projectId>). Path
   # INTERNO ao container → habilita a API containerizada em modo Project (ADR-0038).
   kanban_projects:
+  # HOME/.graphify do sidecar graphify (US-F1.1, ADR-0041) — persiste os grafos
+  # (um por Project em projects/<projectId>/graphify-out/) entre recriações.
+  kanban_graphify_home:

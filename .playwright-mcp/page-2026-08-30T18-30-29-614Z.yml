@@ -1,0 +1,28 @@
+- generic [ref=f30e4]:
+  - complementary "Áreas do explorador" [ref=f30e5]:
+    - button "Voltar ao quadro" [ref=f30e6] [cursor=pointer]:
+      - generic [ref=f30e7]: ←
+    - navigation "Áreas" [ref=f30e9]:
+      - button "Projetos" [ref=f30e10] [cursor=pointer]:
+        - generic [ref=f30e11]: 🗄️
+      - button "O que a AI sabe" [disabled] [ref=f30e13]:
+        - generic [ref=f30e14]: 🐝
+      - button "Grafo" [disabled] [ref=f30e16]:
+        - generic [ref=f30e17]: 🕸️
+      - button "Wiki" [disabled] [ref=f30e19]:
+        - generic [ref=f30e20]: 📖
+  - generic [ref=f30e22]:
+    - banner [ref=f30e23]:
+      - heading "O que a AI sabe" [level=1] [ref=f30e24]: 🐝 O que a AI sabe
+      - generic [ref=f30e25]: os neurônios que a frota aprendeu
+      - generic [ref=f30e26]:
+        - generic [ref=f30e27]: 📁 Projeto
+        - combobox "Projeto selecionado" [ref=f30e28]:
+          - option "audit-f44-slugify — https://github.com/simov/slugify.git" [selected]
+          - option "array-move — https://github.com/sindresorhus/array-move"
+      - combobox "Selecionar tema" [ref=f30e29] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+    - main [ref=f30e30]:
+      - generic [ref=f30e31]: Carregando projetos…

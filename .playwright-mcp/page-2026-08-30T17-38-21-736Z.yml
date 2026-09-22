@@ -1,0 +1,172 @@
+- generic [ref=f20e4]:
+  - complementary "Áreas do explorador" [ref=f20e5]:
+    - button "Voltar ao quadro" [ref=f20e6] [cursor=pointer]:
+      - generic [ref=f20e7]: ←
+    - navigation "Áreas" [ref=f20e9]:
+      - button "Projetos" [ref=f20e10] [cursor=pointer]:
+        - generic [ref=f20e11]: 🗄️
+      - button "O que a AI sabe" [ref=f20e13] [cursor=pointer]:
+        - generic [ref=f20e14]: 🐝
+      - button "Grafo" [ref=f20e16] [cursor=pointer]:
+        - generic [ref=f20e17]: 🕸️
+      - button "Wiki" [ref=f20e19] [cursor=pointer]:
+        - generic [ref=f20e20]: 📖
+  - generic [ref=f20e22]:
+    - banner [ref=f20e23]:
+      - heading "Grafo" [level=1] [ref=f20e24]: 🕸️ Grafo
+      - generic [ref=f20e30]:
+        - generic [ref=f20e31]: 📁 Projeto
+        - combobox "Projeto selecionado" [ref=f20e32]:
+          - option "audit-f44-slugify — https://github.com/simov/slugify.git" [selected]
+          - option "array-move — https://github.com/sindresorhus/array-move"
+      - combobox "Selecionar tema" [ref=f20e26] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+    - main [ref=f20e27]:
+      - generic [ref=f20e33]:
+        - textbox "Buscar nó por nome ou arquivo…" [ref=f20e35]
+        - generic [ref=f20e36]: Exibindo 84 de 84 nós · 76 de 76 arestas · 12 comunidades
+        - generic [ref=f20e738]:
+          - generic [ref=f20e739]:
+            - generic [ref=f20e740]: Mapa de comunidades — largura proporcional ao nº de nós (84 no grafo) · clique para abrir
+            - group "Mapa proporcional de comunidades" [ref=f20e741]:
+              - button "Change Log — 30 nós (36%)" [ref=f20e742] [cursor=pointer]: Change Log · 30
+              - button "package.json — 14 nós (17%)" [ref=f20e743] [cursor=pointer]: package.json · 14
+              - button "devDependencies — 9 nós (11%)" [ref=f20e744] [cursor=pointer]: devDependencies · 9
+              - button "slugify — 7 nós (8%)" [ref=f20e745] [cursor=pointer]: slugify · 7
+              - button "scripts — 6 nós (7%)" [ref=f20e746] [cursor=pointer]: scripts · 6
+              - button "files — 5 nós (6%)" [ref=f20e747] [cursor=pointer]
+              - button "keywords — 5 nós (6%)" [ref=f20e748] [cursor=pointer]
+              - button "slugify.d.ts — 3 nós (4%)" [ref=f20e749] [cursor=pointer]
+              - button "slugify.js — 2 nós (2%)" [ref=f20e750] [cursor=pointer]
+              - button "build.js — 1 nós (1%)" [ref=f20e751] [cursor=pointer]
+              - button "locales.js — 1 nós (1%)" [ref=f20e752] [cursor=pointer]
+              - button "test/slugify.js — 1 nós (1%)" [ref=f20e753] [cursor=pointer]
+          - generic [ref=f20e754]:
+            - generic [ref=f20e755]:
+              - generic [ref=f20e756]: Esqueleto do sistema — 47 nós · clique numa bolha (comunidade) ou num nó (focus)
+              - 'button "filtro ativo: 37 nós documentais ocultos — clique para exibir" [pressed] [ref=f20e757] [cursor=pointer]'
+            - 'img "Esqueleto do sistema: comunidades como bolhas proporcionais, nós e arestas" [ref=f20e758]':
+              - button "Abrir comunidade package.json — 14 nós" [ref=f20e759] [cursor=pointer]:
+                - generic: package.json · 14
+              - button "Abrir comunidade devDependencies — 9 nós" [ref=f20e761] [cursor=pointer]:
+                - generic: devDependencies · 9
+              - button "Abrir comunidade scripts — 6 nós" [ref=f20e763] [cursor=pointer]:
+                - generic: scripts · 6
+              - button "Abrir comunidade files — 5 nós" [ref=f20e765] [cursor=pointer]:
+                - generic: files · 5
+              - button "Abrir comunidade keywords — 5 nós" [ref=f20e767] [cursor=pointer]:
+                - generic: keywords · 5
+              - button "Abrir comunidade slugify.d.ts — 3 nós" [ref=f20e769] [cursor=pointer]:
+                - generic: slugify.d.ts · 3
+              - button "Abrir comunidade slugify.js — 2 nós" [ref=f20e771] [cursor=pointer]:
+                - generic: slugify.js · 2
+              - button "Abrir comunidade build.js — 1 nós" [ref=f20e773] [cursor=pointer]:
+                - generic: build.js · 1
+              - button "Abrir comunidade locales.js — 1 nós" [ref=f20e775] [cursor=pointer]:
+                - generic: locales.js · 1
+              - button "Abrir comunidade test/slugify.js — 1 nós" [ref=f20e777] [cursor=pointer]:
+                - generic: test/slugify.js · 1
+              - generic "package —contains→ package_author" [ref=f20e779]
+              - generic "package —contains→ package_description" [ref=f20e780]
+              - generic "package —contains→ package_devdependencies" [ref=f20e781]
+              - generic "package —contains→ package_engines" [ref=f20e782]
+              - generic "package —contains→ package_files" [ref=f20e783]
+              - generic "package —contains→ package_homepage" [ref=f20e784]
+              - generic "package —contains→ package_keywords" [ref=f20e785]
+              - generic "package —contains→ package_license" [ref=f20e786]
+              - generic "package —contains→ package_main" [ref=f20e787]
+              - generic "package —contains→ package_name" [ref=f20e788]
+              - generic "package —contains→ package_repository" [ref=f20e789]
+              - generic "package —contains→ package_scripts" [ref=f20e790]
+              - generic "package —contains→ package_types" [ref=f20e791]
+              - generic "package —contains→ package_version" [ref=f20e792]
+              - generic "package_devdependencies —contains→ package_devdependencies_coveralls" [ref=f20e793]
+              - generic "package_devdependencies —contains→ package_devdependencies_github_changes" [ref=f20e794]
+              - generic "package_devdependencies —contains→ package_devdependencies_mocha" [ref=f20e795]
+              - generic "package_devdependencies —contains→ package_devdependencies_nyc" [ref=f20e796]
+              - generic "package_devdependencies_coveralls —imports→ coveralls" [ref=f20e797]
+              - generic "package_devdependencies_github_changes —imports→ github_changes" [ref=f20e798]
+              - generic "package_devdependencies_mocha —imports→ mocha" [ref=f20e799]
+              - generic "package_devdependencies_nyc —imports→ nyc" [ref=f20e800]
+              - generic "package_engines —contains→ package_engines_node" [ref=f20e801]
+              - generic "package_files —extends→ ref_license" [ref=f20e802]
+              - generic "package_files —extends→ ref_readme_md" [ref=f20e803]
+              - generic "package_files —extends→ ref_slugify_d_ts" [ref=f20e804]
+              - generic "package_files —extends→ ref_slugify_js" [ref=f20e805]
+              - generic "package_keywords —extends→ ref_slug" [ref=f20e806]
+              - generic "package_keywords —extends→ ref_slugify" [ref=f20e807]
+              - generic "package_keywords —extends→ ref_url" [ref=f20e808]
+              - generic "package_keywords —extends→ ref_urlify" [ref=f20e809]
+              - generic "package_repository —contains→ package_repository_type" [ref=f20e810]
+              - generic "package_repository —contains→ package_repository_url" [ref=f20e811]
+              - generic "package_scripts —contains→ package_scripts_build" [ref=f20e812]
+              - generic "package_scripts —contains→ package_scripts_build_changelog" [ref=f20e813]
+              - generic "package_scripts —contains→ package_scripts_test" [ref=f20e814]
+              - generic "package_scripts —contains→ package_scripts_test_ci" [ref=f20e815]
+              - generic "package_scripts —contains→ package_scripts_test_cov" [ref=f20e816]
+              - generic "slugify —contains→ slugify_replace" [ref=f20e817]
+              - generic "slugify_d —contains→ slugify_d_extendargs" [ref=f20e818]
+              - generic "slugify_d —contains→ slugify_d_slugify" [ref=f20e819]
+              - button "Focar no nó package.json (grau 14)" [ref=f20e820] [cursor=pointer]:
+                - generic: package.json
+              - button "Focar no nó repository (grau 3)" [ref=f20e822] [cursor=pointer]
+              - button "Focar no nó engines (grau 2)" [ref=f20e824] [cursor=pointer]
+              - button "Focar no nó author (grau 1)" [ref=f20e826] [cursor=pointer]
+              - button "Focar no nó description (grau 1)" [ref=f20e828] [cursor=pointer]
+              - button "Focar no nó node (grau 1)" [ref=f20e830] [cursor=pointer]
+              - button "Focar no nó homepage (grau 1)" [ref=f20e832] [cursor=pointer]
+              - button "Focar no nó license (grau 1)" [ref=f20e834] [cursor=pointer]
+              - button "Focar no nó main (grau 1)" [ref=f20e836] [cursor=pointer]
+              - button "Focar no nó name (grau 1)" [ref=f20e838] [cursor=pointer]
+              - button "Focar no nó type (grau 1)" [ref=f20e840] [cursor=pointer]
+              - button "Focar no nó url (grau 1)" [ref=f20e842] [cursor=pointer]
+              - button "Focar no nó types (grau 1)" [ref=f20e844] [cursor=pointer]
+              - button "Focar no nó version (grau 1)" [ref=f20e846] [cursor=pointer]
+              - button "Focar no nó devDependencies (grau 5)" [ref=f20e848] [cursor=pointer]:
+                - generic: devDependencies
+              - button "Focar no nó coveralls (grau 2)" [ref=f20e850] [cursor=pointer]
+              - button "Focar no nó github-changes (grau 2)" [ref=f20e852] [cursor=pointer]
+              - button "Focar no nó mocha (grau 2)" [ref=f20e854] [cursor=pointer]
+              - button "Focar no nó nyc (grau 2)" [ref=f20e856] [cursor=pointer]
+              - button "Focar no nó coveralls (grau 1)" [ref=f20e858] [cursor=pointer]
+              - button "Focar no nó github-changes (grau 1)" [ref=f20e860] [cursor=pointer]
+              - button "Focar no nó mocha (grau 1)" [ref=f20e862] [cursor=pointer]
+              - button "Focar no nó nyc (grau 1)" [ref=f20e864] [cursor=pointer]
+              - button "Focar no nó scripts (grau 6)" [ref=f20e866] [cursor=pointer]:
+                - generic: scripts
+              - button "Focar no nó build (grau 1)" [ref=f20e868] [cursor=pointer]
+              - button "Focar no nó build:changelog (grau 1)" [ref=f20e870] [cursor=pointer]
+              - button "Focar no nó test (grau 1)" [ref=f20e872] [cursor=pointer]
+              - button "Focar no nó test:ci (grau 1)" [ref=f20e874] [cursor=pointer]
+              - button "Focar no nó test:cov (grau 1)" [ref=f20e876] [cursor=pointer]
+              - button "Focar no nó files (grau 5)" [ref=f20e878] [cursor=pointer]:
+                - generic: files
+              - button "Focar no nó LICENSE (grau 1)" [ref=f20e880] [cursor=pointer]
+              - button "Focar no nó README.md (grau 1)" [ref=f20e882] [cursor=pointer]
+              - button "Focar no nó slugify.d.ts (grau 1)" [ref=f20e884] [cursor=pointer]
+              - button "Focar no nó slugify.js (grau 1)" [ref=f20e886] [cursor=pointer]
+              - button "Focar no nó keywords (grau 5)" [ref=f20e888] [cursor=pointer]:
+                - generic: keywords
+              - button "Focar no nó slug (grau 1)" [ref=f20e890] [cursor=pointer]
+              - button "Focar no nó slugify (grau 1)" [ref=f20e892] [cursor=pointer]
+              - button "Focar no nó url (grau 1)" [ref=f20e894] [cursor=pointer]
+              - button "Focar no nó urlify (grau 1)" [ref=f20e896] [cursor=pointer]
+              - button "Focar no nó slugify.d.ts (grau 2)" [ref=f20e898] [cursor=pointer]:
+                - generic: slugify.d.ts
+              - button "Focar no nó ExtendArgs (grau 1)" [ref=f20e900] [cursor=pointer]
+              - button "Focar no nó slugify (grau 1)" [ref=f20e902] [cursor=pointer]
+              - button "Focar no nó slugify.js (grau 1)" [ref=f20e904] [cursor=pointer]:
+                - generic: slugify.js
+              - button "Focar no nó replace() (grau 1)" [ref=f20e906] [cursor=pointer]
+              - button "Focar no nó build.js (grau 0)" [ref=f20e908] [cursor=pointer]:
+                - generic: build.js
+              - button "Focar no nó locales.js (grau 0)" [ref=f20e910] [cursor=pointer]:
+                - generic: locales.js
+              - button "Focar no nó test/slugify.js (grau 0)" [ref=f20e912] [cursor=pointer]:
+                - generic: test/slugify.js
+          - group [ref=f20e914]:
+            - generic "Todas as comunidades (12)" [ref=f20e915] [cursor=pointer]
+          - group [ref=f20e916]:
+            - generic "Lista de nós (47 — 37 documentais ocultos pelo filtro)" [ref=f20e917] [cursor=pointer]

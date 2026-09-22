@@ -50,6 +50,8 @@ export interface ApiBoard {
   assignees: Assignee[];
   loopProfiles: ApiLoopProfile[];
   defaultModel?: string | null;
+  /** US-F3.10 — adapter default do quadro (raiz da cascata de adapter). */
+  defaultAdapter?: string | null;
   /** EP-PROJECT / US-PROJ6 — Project (repo git gerenciado) associado ao quadro. */
   projectId?: string | null;
 }
@@ -88,6 +90,10 @@ export interface ApiCardSummary {
   startInPlanMode?: boolean;
   model?: string | null;
   resolvedModel?: string | null;
+  /** US-F3.10 — adapter (vendor de agent) do card; null herda (cascata). */
+  adapter?: string | null;
+  /** US-F3.10 — adapter efetivo resolvido pela cascata (sempre presente na API). */
+  resolvedAdapter?: string | null;
   loopType?: string | null;
   execState?: ExecState | null;
   derivedFromId?: string | null;

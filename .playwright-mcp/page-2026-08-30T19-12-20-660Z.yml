@@ -1,0 +1,224 @@
+- generic [ref=f39e4]:
+  - complementary "Áreas do explorador" [ref=f39e5]:
+    - button "Voltar ao quadro" [ref=f39e6] [cursor=pointer]:
+      - generic [ref=f39e7]: ←
+    - navigation "Áreas" [ref=f39e9]:
+      - button "Projetos" [ref=f39e10] [cursor=pointer]:
+        - generic [ref=f39e11]: 🗄️
+      - button "O que a AI sabe" [ref=f39e13] [cursor=pointer]:
+        - generic [ref=f39e14]: 🐝
+      - button "Grafo" [ref=f39e16] [cursor=pointer]:
+        - generic [ref=f39e17]: 🕸️
+      - button "Wiki" [ref=f39e19] [cursor=pointer]:
+        - generic [ref=f39e20]: 📖
+  - generic [ref=f39e22]:
+    - banner [ref=f39e23]:
+      - heading "Wiki" [level=1] [ref=f39e24]: 📖 Wiki
+      - generic [ref=f39e25]: a base de conhecimento derivada do grafo
+      - generic [ref=f39e26]:
+        - generic [ref=f39e27]: 📁 Projeto
+        - combobox "Projeto selecionado" [ref=f39e28]:
+          - option "audit-f44-slugify — https://github.com/simov/slugify.git" [selected]
+          - option "array-move — https://github.com/sindresorhus/array-move"
+      - combobox "Selecionar tema" [ref=f39e29] [cursor=pointer]:
+        - option "🌞 Claro"
+        - option "🌙 Escuro" [selected]
+        - option "◐ Alto contraste"
+    - main [ref=f39e30]:
+      - generic [ref=f39e33]:
+        - navigation "Artigos da wiki" [ref=f39e34]:
+          - button "📖 Visão geral" [ref=f39e35] [cursor=pointer]
+          - generic [ref=f39e37]:
+            - generic [ref=f39e38]: Comunidades (12)
+            - button "Change Log 30" [active] [ref=f39e39] [cursor=pointer]:
+              - generic [ref=f39e40]: Change Log
+              - generic [ref=f39e41]: "30"
+            - button "package.json 14" [ref=f39e42] [cursor=pointer]:
+              - generic [ref=f39e43]: package.json
+              - generic [ref=f39e44]: "14"
+            - button "devDependencies 9" [ref=f39e45] [cursor=pointer]:
+              - generic [ref=f39e46]: devDependencies
+              - generic [ref=f39e47]: "9"
+            - button "slugify 7" [ref=f39e48] [cursor=pointer]:
+              - generic [ref=f39e49]: slugify
+              - generic [ref=f39e50]: "7"
+            - button "scripts 6" [ref=f39e51] [cursor=pointer]:
+              - generic [ref=f39e52]: scripts
+              - generic [ref=f39e53]: "6"
+            - button "files 5" [ref=f39e54] [cursor=pointer]:
+              - generic [ref=f39e55]: files
+              - generic [ref=f39e56]: "5"
+            - button "keywords 5" [ref=f39e57] [cursor=pointer]:
+              - generic [ref=f39e58]: keywords
+              - generic [ref=f39e59]: "5"
+            - button "slugify.d.ts 3" [ref=f39e60] [cursor=pointer]:
+              - generic [ref=f39e61]: slugify.d.ts
+              - generic [ref=f39e62]: "3"
+            - button "slugify.js 2" [ref=f39e63] [cursor=pointer]:
+              - generic [ref=f39e64]: slugify.js
+              - generic [ref=f39e65]: "2"
+            - button "locales.js 1" [ref=f39e66] [cursor=pointer]:
+              - generic [ref=f39e67]: locales.js
+              - generic [ref=f39e68]: "1"
+            - button "test/slugify.js 1" [ref=f39e69] [cursor=pointer]:
+              - generic [ref=f39e70]: test/slugify.js
+              - generic [ref=f39e71]: "1"
+            - button "build.js 1" [ref=f39e72] [cursor=pointer]:
+              - generic [ref=f39e73]: build.js
+              - generic [ref=f39e74]: "1"
+          - generic [ref=f39e75]:
+            - generic [ref=f39e76]: Nós centrais (10)
+            - button "Change Log 29" [ref=f39e77] [cursor=pointer]:
+              - generic [ref=f39e78]: Change Log
+              - generic [ref=f39e79]: "29"
+            - button "slugify 6" [ref=f39e80] [cursor=pointer]:
+              - generic [ref=f39e81]: slugify
+              - generic [ref=f39e82]: "6"
+            - button "scripts 6" [ref=f39e83] [cursor=pointer]:
+              - generic [ref=f39e84]: scripts
+              - generic [ref=f39e85]: "6"
+            - button "files 5" [ref=f39e86] [cursor=pointer]:
+              - generic [ref=f39e87]: files
+              - generic [ref=f39e88]: "5"
+            - button "keywords 5" [ref=f39e89] [cursor=pointer]:
+              - generic [ref=f39e90]: keywords
+              - generic [ref=f39e91]: "5"
+            - button "repository 3" [ref=f39e92] [cursor=pointer]:
+              - generic [ref=f39e93]: repository
+              - generic [ref=f39e94]: "3"
+            - button "engines 2" [ref=f39e95] [cursor=pointer]:
+              - generic [ref=f39e96]: engines
+              - generic [ref=f39e97]: "2"
+            - button "coveralls 2" [ref=f39e98] [cursor=pointer]:
+              - generic [ref=f39e99]: coveralls
+              - generic [ref=f39e100]: "2"
+            - button "github-changes 2" [ref=f39e101] [cursor=pointer]:
+              - generic [ref=f39e102]: github-changes
+              - generic [ref=f39e103]: "2"
+            - button "mocha 2" [ref=f39e104] [cursor=pointer]:
+              - generic [ref=f39e105]: mocha
+              - generic [ref=f39e106]: "2"
+        - generic [ref=f39e119]:
+          - generic [ref=f39e120]: Change Log
+          - blockquote [ref=f39e121]: 30 nodes
+          - generic [ref=f39e122]: Conceitos-chave
+          - list [ref=f39e123]:
+            - listitem [ref=f39e124]:
+              - strong [ref=f39e125]: Change Log
+              - text: (29 connections) —
+              - code [ref=f39e126]: CHANGELOG.md
+            - listitem [ref=f39e127]:
+              - strong [ref=f39e128]: CHANGELOG.md
+              - text: (1 connections) —
+              - code [ref=f39e129]: CHANGELOG.md
+            - listitem [ref=f39e130]:
+              - strong [ref=f39e131]: v1.0.1 (2016-08-08)
+              - text: (1 connections) —
+              - code [ref=f39e132]: CHANGELOG.md
+            - listitem [ref=f39e133]:
+              - strong [ref=f39e134]: v1.1.0 (2017-01-08)
+              - text: (1 connections) —
+              - code [ref=f39e135]: CHANGELOG.md
+            - listitem [ref=f39e136]:
+              - strong [ref=f39e137]: v1.2.2 (2017-11-09)
+              - text: (1 connections) —
+              - code [ref=f39e138]: CHANGELOG.md
+            - listitem [ref=f39e139]:
+              - strong [ref=f39e140]: v1.2.3 (2017-11-13)
+              - text: (1 connections) —
+              - code [ref=f39e141]: CHANGELOG.md
+            - listitem [ref=f39e142]:
+              - strong [ref=f39e143]: v1.2.6 (2017-11-24)
+              - text: (1 connections) —
+              - code [ref=f39e144]: CHANGELOG.md
+            - listitem [ref=f39e145]:
+              - strong [ref=f39e146]: v1.2.7 (2017-12-17)
+              - text: (1 connections) —
+              - code [ref=f39e147]: CHANGELOG.md
+            - listitem [ref=f39e148]:
+              - strong [ref=f39e149]: v1.2.8 (2017-12-23)
+              - text: (1 connections) —
+              - code [ref=f39e150]: CHANGELOG.md
+            - listitem [ref=f39e151]:
+              - strong [ref=f39e152]: v1.2.9 (2017-12-30)
+              - text: (1 connections) —
+              - code [ref=f39e153]: CHANGELOG.md
+            - listitem [ref=f39e154]:
+              - strong [ref=f39e155]: v1.3.0 (2018-05-13)
+              - text: (1 connections) —
+              - code [ref=f39e156]: CHANGELOG.md
+            - listitem [ref=f39e157]:
+              - strong [ref=f39e158]: v1.3.1 (2018-08-05)
+              - text: (1 connections) —
+              - code [ref=f39e159]: CHANGELOG.md
+            - listitem [ref=f39e160]:
+              - strong [ref=f39e161]: v1.3.4 (2018-12-06)
+              - text: (1 connections) —
+              - code [ref=f39e162]: CHANGELOG.md
+            - listitem [ref=f39e163]:
+              - strong [ref=f39e164]: v1.3.5 (2019-09-08)
+              - text: (1 connections) —
+              - code [ref=f39e165]: CHANGELOG.md
+            - listitem [ref=f39e166]:
+              - strong [ref=f39e167]: v1.3.6 (2019-11-03)
+              - text: (1 connections) —
+              - code [ref=f39e168]: CHANGELOG.md
+            - listitem [ref=f39e169]:
+              - strong [ref=f39e170]: v1.4.2 (2020-06-23)
+              - text: (1 connections) —
+              - code [ref=f39e171]: CHANGELOG.md
+            - listitem [ref=f39e172]:
+              - strong [ref=f39e173]: v1.4.5 (2020-07-26)
+              - text: (1 connections) —
+              - code [ref=f39e174]: CHANGELOG.md
+            - listitem [ref=f39e175]:
+              - strong [ref=f39e176]: v1.4.7 (2021-02-21)
+              - text: (1 connections) —
+              - code [ref=f39e177]: CHANGELOG.md
+            - listitem [ref=f39e178]:
+              - strong [ref=f39e179]: v1.5.1 (2021-05-02)
+              - text: (1 connections) —
+              - code [ref=f39e180]: CHANGELOG.md
+            - listitem [ref=f39e181]:
+              - strong [ref=f39e182]: v1.5.2 (2021-05-08)
+              - text: (1 connections) —
+              - code [ref=f39e183]: CHANGELOG.md
+            - listitem [ref=f39e184]:
+              - strong [ref=f39e185]: v1.5.3 (2021-05-11)
+              - text: (1 connections) —
+              - code [ref=f39e186]: CHANGELOG.md
+            - listitem [ref=f39e187]:
+              - strong [ref=f39e188]: v1.6.0 (2021-07-15)
+              - text: (1 connections) —
+              - code [ref=f39e189]: CHANGELOG.md
+            - listitem [ref=f39e190]:
+              - strong [ref=f39e191]: v1.6.1 (2021-10-04)
+              - text: (1 connections) —
+              - code [ref=f39e192]: CHANGELOG.md
+            - listitem [ref=f39e193]:
+              - strong [ref=f39e194]: v1.6.2 (2021-11-07)
+              - text: (1 connections) —
+              - code [ref=f39e195]: CHANGELOG.md
+            - listitem [ref=f39e196]:
+              - strong [ref=f39e197]: v1.6.3 (2021-11-22)
+              - text: (1 connections) —
+              - code [ref=f39e198]: CHANGELOG.md
+            - listitem [ref=f39e199]: "*... and 5 more nodes in this community*"
+          - generic [ref=f39e200]: Relações
+          - list [ref=f39e201]:
+            - listitem [ref=f39e202]: No strong cross-community connections detected
+          - generic [ref=f39e203]: Arquivos-fonte
+          - list [ref=f39e204]:
+            - listitem [ref=f39e205]:
+              - code [ref=f39e206]: CHANGELOG.md
+          - generic [ref=f39e207]: Trilha de auditoria
+          - list [ref=f39e208]:
+            - listitem [ref=f39e209]: "EXTRACTED: 29 (100%)"
+            - listitem [ref=f39e210]: "INFERRED: 0 (0%)"
+            - listitem [ref=f39e211]: "AMBIGUOUS: 0 (0%)"
+          - separator [ref=f39e212]
+          - paragraph [ref=f39e213]:
+            - text: "*Part of the graphify knowledge wiki. See"
+            - link "index" [ref=f39e214] [cursor=pointer]:
+              - /url: "#"
+            - text: to navigate.*

@@ -1,0 +1,19 @@
+- generic [ref=f5e4]:
+  - complementary "Áreas do explorador" [ref=f5e5]:
+    - button "Voltar ao quadro" [ref=f5e6] [cursor=pointer]:
+      - generic [ref=f5e7]: ←
+    - navigation "Áreas" [ref=f5e9]:
+      - button "Projetos" [ref=f5e10] [cursor=pointer]:
+        - generic [ref=f5e11]: 🗄️
+      - button "O que a AI sabe" [disabled] [ref=f5e13]:
+        - generic [ref=f5e14]: 🐝
+      - button "Grafo" [disabled] [ref=f5e16]:
+        - generic [ref=f5e17]: 🕸️
+      - button "Wiki" [disabled] [ref=f5e19]:
+        - generic [ref=f5e20]: 📖
+  - generic [ref=f5e22]:
+    - banner [ref=f5e23]:
+      - heading "Projetos" [level=1] [ref=f5e24]: 🗄️ Projetos
+      - generic [ref=f5e25]: repositórios git clonados e gerenciados
+    - main [ref=f5e26]:
+      - generic [ref=f5e27]: Carregando projetos…
